@@ -4,20 +4,17 @@
 
 //! Support for reading and writing zip archives.
 
+use std::fmt;
+use std::io::{BufReader, BufWriter, Cursor, Read, Seek};
+
 use anyhow::{anyhow, bail, Context, Result};
 use buf_list::BufList;
 use bytes::Bytes;
 use camino::{Utf8Component, Utf8Path, Utf8PathBuf};
 use debug_ignore::DebugIgnore;
 use fs_err::File;
-use std::{
-    fmt,
-    io::{BufReader, BufWriter, Cursor, Read, Seek},
-};
-use zip::{
-    write::{FileOptions, SimpleFileOptions},
-    CompressionMethod, ZipArchive, ZipWriter,
-};
+use zip::write::{FileOptions, SimpleFileOptions};
+use zip::{CompressionMethod, ZipArchive, ZipWriter};
 
 /// A builder for TUF repo archives.
 #[derive(Debug)]

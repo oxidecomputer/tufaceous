@@ -2,19 +2,17 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use std::{
-    io::{self, BufReader, Write},
-    path::Path,
-};
+use std::io::{self, BufReader, Write};
+use std::path::Path;
 
 use anyhow::{bail, Context, Result};
 use buf_list::BufList;
 use bytes::Bytes;
 use camino::Utf8PathBuf;
 use fs_err::File;
-use omicron_brand_metadata::Metadata;
-use omicron_common::update::ArtifactKind;
 use semver::Version;
+use tufaceous_artifact::ArtifactKind;
+use tufaceous_brand_metadata::Metadata;
 
 mod composite;
 

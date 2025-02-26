@@ -6,12 +6,10 @@ use anyhow::{bail, Context, Result};
 use camino::Utf8PathBuf;
 use chrono::{DateTime, Utc};
 use clap::{CommandFactory, Parser};
-use omicron_common::update::ArtifactKind;
 use semver::Version;
-use tufaceous_lib::{
-    assemble::{ArtifactManifest, OmicronRepoAssembler},
-    AddArtifact, ArchiveExtractor, Key, OmicronRepo,
-};
+use tufaceous_artifact::ArtifactKind;
+use tufaceous_lib::assemble::{ArtifactManifest, OmicronRepoAssembler};
+use tufaceous_lib::{AddArtifact, ArchiveExtractor, Key, OmicronRepo};
 
 #[derive(Debug, Parser)]
 pub struct Args {
@@ -48,7 +46,7 @@ impl Args {
                 let keys = maybe_generate_keys(self.keys, no_generate_key)?;
 
                 let repo = OmicronRepo::initialize(
-                    &log,
+                    log,
                     &repo_path,
                     system_version,
                     keys,
@@ -88,7 +86,7 @@ impl Args {
                 }
 
                 let repo = OmicronRepo::load_untrusted_ignore_expiration(
-                    &log, &repo_path,
+                    log, &repo_path,
                 )
                 .await?;
                 let mut editor = repo.into_editor().await?;
@@ -115,7 +113,7 @@ impl Args {
                 }
 
                 let repo = OmicronRepo::load_untrusted_ignore_expiration(
-                    &log, &repo_path,
+                    log, &repo_path,
                 )
                 .await?;
                 repo.archive(&output_path)?;
@@ -127,7 +125,7 @@ impl Args {
                 extractor.extract(&dest)?;
 
                 // Now load the repository and ensure it's valid.
-                let repo = OmicronRepo::load_untrusted(&log, &dest)
+                let repo = OmicronRepo::load_untrusted(log, &dest)
                     .await
                     .with_context(|| {
                         format!(
@@ -164,7 +162,7 @@ impl Args {
 
                 let keys = maybe_generate_keys(self.keys, no_generate_key)?;
                 let mut assembler = OmicronRepoAssembler::new(
-                    &log,
+                    log,
                     manifest,
                     keys,
                     self.expiry,

@@ -7,16 +7,20 @@ use std::path::Path;
 use anyhow::Result;
 use assert_cmd::Command;
 use camino::Utf8PathBuf;
-use omicron_common::{
-    api::internal::nexus::KnownArtifactKind, update::ArtifactKind,
-};
-use omicron_test_utils::dev::test_setup_log;
+use dropshot::test_util::LogContext;
+use dropshot::{ConfigLogging, ConfigLoggingIfExists, ConfigLoggingLevel};
 use predicates::prelude::*;
+use tufaceous_artifact::{ArtifactKind, KnownArtifactKind};
 use tufaceous_lib::{Key, OmicronRepo};
 
 #[tokio::test]
 async fn test_init_and_add() -> Result<()> {
-    let logctx = test_setup_log("test_init_and_add");
+    let log_config = ConfigLogging::File {
+        level: ConfigLoggingLevel::Trace,
+        path: "UNUSED".into(),
+        if_exists: ConfigLoggingIfExists::Fail,
+    };
+    let logctx = LogContext::new("test_init_and_add", &log_config);
     let tempdir = tempfile::tempdir().unwrap();
     let key = Key::generate_ed25519()?;
 
@@ -112,7 +116,12 @@ async fn test_init_and_add() -> Result<()> {
 
 #[test]
 fn test_assemble_fake() -> Result<()> {
-    let logctx = test_setup_log("test_assemble_fake");
+    let log_config = ConfigLogging::File {
+        level: ConfigLoggingLevel::Trace,
+        path: "UNUSED".into(),
+        if_exists: ConfigLoggingIfExists::Fail,
+    };
+    let logctx = LogContext::new("test_assemble_fake", &log_config);
     let tempdir = tempfile::tempdir().unwrap();
     let key = Key::generate_ed25519()?;
 

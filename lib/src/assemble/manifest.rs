@@ -3,13 +3,14 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use std::collections::{BTreeMap, BTreeSet};
+use std::str::FromStr;
 
 use anyhow::{bail, ensure, Context, Result};
 use camino::{Utf8Path, Utf8PathBuf};
-use omicron_common::api::internal::nexus::KnownArtifactKind;
 use parse_size::parse_size;
 use semver::Version;
 use serde::{Deserialize, Serialize};
+use tufaceous_artifact::KnownArtifactKind;
 
 use crate::{
     make_filler_text, ArtifactSource, CompositeControlPlaneArchiveBuilder,
@@ -18,7 +19,7 @@ use crate::{
 };
 
 static FAKE_MANIFEST_TOML: &str =
-    include_str!("../../../tufaceous/manifests/fake.toml");
+    include_str!("../../../bin/manifests/fake.toml");
 
 /// A list of components in a TUF repo representing a single update.
 #[derive(Clone, Debug)]
@@ -323,12 +324,6 @@ impl DeserializedManifest {
         })
     }
 
-    pub fn from_str(input: &str) -> Result<Self> {
-        let de = toml::Deserializer::new(input);
-        serde_path_to_error::deserialize(de)
-            .context("error deserializing manifest")
-    }
-
     pub fn to_toml(&self) -> Result<String> {
         toml::to_string(self).context("error serializing manifest to TOML")
     }
@@ -388,6 +383,16 @@ impl DeserializedManifest {
             .expect("builtin fake manifest should accept all tweaks");
 
         manifest
+    }
+}
+
+impl FromStr for DeserializedManifest {
+    type Err = anyhow::Error;
+
+    fn from_str(input: &str) -> Result<Self> {
+        let de = toml::Deserializer::new(input);
+        serde_path_to_error::deserialize(de)
+            .context("error deserializing manifest")
     }
 }
 
@@ -545,7 +550,7 @@ impl DeserializedControlPlaneZoneSource {
             }
             DeserializedControlPlaneZoneSource::Fake { name, size } => {
                 use flate2::{write::GzEncoder, Compression};
-                use omicron_brand_metadata::{
+                use tufaceous_brand_metadata::{
                     ArchiveType, LayerInfo, Metadata,
                 };
 

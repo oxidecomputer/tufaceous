@@ -1,9 +1,14 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
+use std::fmt::{self, Display};
+use std::str::FromStr;
+
 use anyhow::{bail, Result};
 use aws_lc_rs::rand::SystemRandom;
 use aws_lc_rs::signature::Ed25519KeyPair;
 use base64::{engine::general_purpose::URL_SAFE, Engine};
-use std::fmt::Display;
-use std::str::FromStr;
 use tough::async_trait;
 use tough::key_source::KeySource;
 use tough::sign::{Sign, SignKeyPair};
@@ -69,7 +74,7 @@ impl FromStr for Key {
 }
 
 impl Display for Key {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Key::Ed25519 { pkcs8 } => {
                 write!(f, "ed25519:{}", URL_SAFE.encode(pkcs8))

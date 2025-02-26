@@ -1,9 +1,14 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
+use std::collections::HashMap;
+use std::io::Write;
+
 use anyhow::Result;
 use camino::Utf8PathBuf;
 use camino_tempfile::NamedUtf8TempFile;
 use sha2::{Digest, Sha256};
-use std::collections::HashMap;
-use std::io::Write;
 use tough::editor::RepositoryEditor;
 use tough::schema::{Hashes, Target};
 

@@ -2,24 +2,20 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use super::CONTROL_PLANE_ARCHIVE_ZONE_DIRECTORY;
-use super::HOST_PHASE_1_FILE_NAME;
-use super::HOST_PHASE_2_FILE_NAME;
-use super::ROT_ARCHIVE_A_FILE_NAME;
-use super::ROT_ARCHIVE_B_FILE_NAME;
-use anyhow::anyhow;
-use anyhow::bail;
-use anyhow::Context;
-use anyhow::Result;
+use std::collections::HashMap;
+use std::io::{BufWriter, Write};
+
+use anyhow::{anyhow, bail, Context, Result};
 use camino::Utf8Path;
 use flate2::write::GzEncoder;
 use flate2::Compression;
-use omicron_brand_metadata::{ArchiveType, Metadata};
-use sha2::Digest;
-use sha2::Sha256;
-use std::collections::HashMap;
-use std::io::BufWriter;
-use std::io::Write;
+use sha2::{Digest, Sha256};
+use tufaceous_brand_metadata::{ArchiveType, Metadata};
+
+use super::{
+    CONTROL_PLANE_ARCHIVE_ZONE_DIRECTORY, HOST_PHASE_1_FILE_NAME,
+    HOST_PHASE_2_FILE_NAME, ROT_ARCHIVE_A_FILE_NAME, ROT_ARCHIVE_B_FILE_NAME,
+};
 
 /// Represents a single entry in a composite artifact.
 ///
@@ -56,7 +52,7 @@ impl<W: Write> CompositeControlPlaneArchiveBuilder<W> {
             bail!("control plane zone filenames should not contain paths");
         }
         if let Some(duplicate) =
-            self.hashes.insert(Sha256::digest(&entry.data).into(), name.into())
+            self.hashes.insert(Sha256::digest(entry.data).into(), name.into())
         {
             bail!(
                 "duplicate zones are not allowed \

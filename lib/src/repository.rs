@@ -2,22 +2,26 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use crate::{key::Key, target::TargetWriter, AddArtifact, ArchiveBuilder};
+use std::collections::BTreeSet;
+use std::num::NonZeroU64;
+
 use anyhow::{anyhow, bail, Context, Result};
 use buf_list::BufList;
 use camino::{Utf8Path, Utf8PathBuf};
 use chrono::{DateTime, Utc};
-use fs_err::{self as fs};
+use fs_err as fs;
 use futures::TryStreamExt;
-use omicron_common::update::{Artifact, ArtifactsDocument};
 use semver::Version;
-use std::{collections::BTreeSet, num::NonZeroU64};
-use tough::{
-    editor::{signed::SignedRole, RepositoryEditor},
-    schema::{Root, Target},
-    ExpirationEnforcement, Repository, RepositoryLoader, TargetName,
-};
+use tough::editor::signed::SignedRole;
+use tough::editor::RepositoryEditor;
+use tough::schema::{Root, Target};
+use tough::{ExpirationEnforcement, Repository, RepositoryLoader, TargetName};
+use tufaceous_artifact::{Artifact, ArtifactsDocument};
 use url::Url;
+
+use crate::key::Key;
+use crate::target::TargetWriter;
+use crate::{AddArtifact, ArchiveBuilder};
 
 /// A TUF repository describing Omicron.
 pub struct OmicronRepo {
@@ -356,16 +360,27 @@ fn update_versions(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::ArtifactSource;
     use buf_list::BufList;
     use camino_tempfile::Utf8TempDir;
     use chrono::Days;
-    use omicron_test_utils::dev::test_setup_log;
+    use dropshot::test_util::LogContext;
+    use dropshot::{ConfigLogging, ConfigLoggingIfExists, ConfigLoggingLevel};
+
+    use crate::ArtifactSource;
+
+    use super::*;
 
     #[tokio::test]
     async fn reject_artifacts_with_the_same_filename() {
-        let logctx = test_setup_log("reject_artifacts_with_the_same_filename");
+        let log_config = ConfigLogging::File {
+            level: ConfigLoggingLevel::Trace,
+            path: "UNUSED".into(),
+            if_exists: ConfigLoggingIfExists::Fail,
+        };
+        let logctx = LogContext::new(
+            "reject_artifacts_with_the_same_filename",
+            &log_config,
+        );
         let tempdir = Utf8TempDir::new().unwrap();
         let mut repo = OmicronRepo::initialize(
             &logctx.log,

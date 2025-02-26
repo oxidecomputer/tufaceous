@@ -1,11 +1,11 @@
 [package]
-name = "omicron-brand-metadata"
-version = "0.1.0"
-edition = "2021"
-license = "MPL-2.0"
+name = "tufaceous-brand-metadata"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
 
 [dependencies]
-omicron-workspace-hack.workspace = true
 semver.workspace = true
 serde.workspace = true
 serde_json.workspace = true
