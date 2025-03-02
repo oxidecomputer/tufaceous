@@ -1,0 +1,26 @@
+[package]
+name = "tufaceous-artifact"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[features]
+proptest = ["dep:proptest", "dep:test-strategy"]
+schemars = ["dep:schemars"]
+
+[dependencies]
+parse-display.workspace = true
+proptest = { workspace = true, optional = true }
+schemars = { workspace = true, optional = true }
+semver.workspace = true
+serde.workspace = true
+serde_human_bytes.workspace = true
+strum.workspace = true
+test-strategy = { workspace = true, optional = true }
+
+[dev-dependencies]
+serde_json.workspace = true
+
+[lints]
+workspace = true
