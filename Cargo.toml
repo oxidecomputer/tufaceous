@@ -26,6 +26,7 @@ camino-tempfile = "1.1.1"
 chrono = { version = "0.4.40", default-features = false, features = ["std"] }
 clap = { version = "4.5.31", features = ["cargo", "derive", "env", "wrap_help"] }
 console = { version = "0.15.10", default-features = false }
+daft = { version = "0.1.1", features = ["derive"] }
 datatest-stable = "0.2.9"
 debug-ignore = "1.0.5"
 dropshot = "0.15.1"

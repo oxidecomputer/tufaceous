@@ -10,6 +10,7 @@ proptest = ["dep:proptest", "dep:test-strategy"]
 schemars = ["dep:schemars"]
 
 [dependencies]
+daft.workspace = true
 parse-display.workspace = true
 proptest = { workspace = true, optional = true }
 schemars = { workspace = true, optional = true }
