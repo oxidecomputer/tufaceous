@@ -59,7 +59,16 @@ pub struct Artifact {
 /// around a string. The set of known artifact kinds is described in
 /// [`KnownArtifactKind`], and this type has conversions to and from it.
 #[derive(
-    Debug, Diffable, Clone, PartialEq, Eq, Hash, Ord, PartialOrd, Deserialize, Serialize,
+    Debug,
+    Diffable,
+    Clone,
+    PartialEq,
+    Eq,
+    Hash,
+    Ord,
+    PartialOrd,
+    Deserialize,
+    Serialize,
 )]
 #[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
 #[serde(transparent)]
