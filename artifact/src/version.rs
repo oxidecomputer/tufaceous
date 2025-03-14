@@ -196,6 +196,11 @@ mod tests {
     #[proptest]
     fn proptest_version_serde_roundtrip(version: ArtifactVersion) {
         let json = serde_json::to_string(&version).unwrap();
+
+        // Try deserializing as a string -- this should always work (and ensures that version looks like a string in JSON).
+        serde_json::from_str::<String>(&json)
+            .expect("deserialized version as a string");
+
         let deserialized = serde_json::from_str(&json).unwrap();
         assert_eq!(version, deserialized);
     }
