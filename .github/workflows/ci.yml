@@ -1,0 +1,48 @@
+on:
+    push:
+        branches:
+            - main
+    pull_request:
+
+name: CI
+
+jobs:
+    lint:
+        name: Lint
+        runs-on: ubuntu-latest
+        env:
+            RUSTFLAGS: -D warnings
+        steps:
+            - uses: actions/checkout@v4
+            - uses: dtolnay/rust-toolchain@stable
+              with:
+                  components: rustfmt, clippy
+            - uses: Swatinem/rust-cache@23bce251a8cd2ffc3c1075eaa2367cf899916d84 # v2.7.3
+            - name: Lint (clippy)
+              run: cargo clippy --all-targets
+            - name: Lint (rustfmt)
+              run: cargo fmt --check
+            - name: Check for differences
+              run: git diff --exit-code
+
+    build-and-test:
+        name: Build and test
+        runs-on: ubuntu-latest
+        env:
+            RUSTFLAGS: -D warnings
+            CARGO_TERM_COLOR: always
+        steps:
+            - uses: actions/checkout@v4
+            - uses: dtolnay/rust-toolchain@stable
+              with:
+                  components: rustfmt, clippy
+            - uses: Swatinem/rust-cache@23bce251a8cd2ffc3c1075eaa2367cf899916d84 # v2.7.3
+            - uses: taiki-e/install-action@nextest
+            - name: Build
+              run: cargo build
+            - name: Build with all features
+              run: cargo build --all-features
+            - name: Run tests
+              run: cargo nextest run
+            - name: Doctests
+              run: cargo test --doc
