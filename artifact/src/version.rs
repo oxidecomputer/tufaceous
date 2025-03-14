@@ -22,7 +22,7 @@ use thiserror::Error;
 /// `ArtifactVersion`s are not intended to be sorted, just compared for
 /// equality. `ArtifactVersion` implements `Ord` only for storage within sorted
 /// collections.
-#[derive(Clone, Debug, PartialEq, Eq, Hash, Diffable)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Diffable)]
 #[cfg_attr(any(test, feature = "proptest"), derive(test_strategy::Arbitrary))]
 #[cfg_attr(any(test, feature = "schemars"), derive(schemars::JsonSchema))]
 #[cfg_attr(any(test, feature = "schemars"), schemars(regex = Self::REGEX))]
