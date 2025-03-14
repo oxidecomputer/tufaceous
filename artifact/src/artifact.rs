@@ -24,22 +24,22 @@ impl ArtifactsDocument {
 }
 
 /// Describes an artifact available in the repository.
-///
-/// See also [`crate::api::internal::nexus::UpdateArtifactId`], which is used
-/// internally in Nexus and Sled Agent.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 pub struct Artifact {
     /// Used to differentiate between different series of artifacts of the same
     /// kind. This is used by the control plane to select the correct artifact.
     ///
-    /// For SP and ROT images ([`KnownArtifactKind::GimletSp`],
-    /// [`KnownArtifactKind::GimletRot`], [`KnownArtifactKind::PscSp`],
-    /// [`KnownArtifactKind::PscRot`], [`KnownArtifactKind::SwitchSp`],
-    /// [`KnownArtifactKind::SwitchRot`]), `name` is the value of the board
-    /// (`BORD`) tag in the image caboose.
+    /// For SP and ROT images ([`GimletSp`](crate::KnownArtifactKind::GimletSp),
+    /// [`GimletRot`](crate::KnownArtifactKind::GimletRot),
+    /// [`PscSp`](crate::KnownArtifactKind::PscSp),
+    /// [`PscRot`](crate::KnownArtifactKind::PscRot),
+    /// [`SwitchSp`](crate::KnownArtifactKind::SwitchSp),
+    /// [`SwitchRot`](crate::KnownArtifactKind::SwitchRot)), `name` is the value
+    /// of the board (`BORD`) tag in the image caboose.
     ///
-    /// In the future when [`KnownArtifactKind::ControlPlane`] is split up into
-    /// separate zones, `name` will be the zone name.
+    /// In the future when
+    /// [`ControlPlane`](crate::KnownArtifactKind::ControlPlane) is split up
+    /// into separate zones, `name` will be the zone name.
     pub name: String,
     pub version: Version,
     pub kind: ArtifactKind,
