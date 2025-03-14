@@ -5,10 +5,10 @@
 use std::collections::HashMap;
 use std::io::{BufWriter, Write};
 
-use anyhow::{anyhow, bail, Context, Result};
+use anyhow::{Context, Result, anyhow, bail};
 use camino::Utf8Path;
-use flate2::write::GzEncoder;
 use flate2::Compression;
+use flate2::write::GzEncoder;
 use sha2::{Digest, Sha256};
 use tufaceous_brand_metadata::{ArchiveType, Metadata};
 
