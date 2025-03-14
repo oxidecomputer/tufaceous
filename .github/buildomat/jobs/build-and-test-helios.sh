@@ -27,4 +27,4 @@ banner test
 ptime -m cargo nextest run --all-features --all-targets
 
 banner doctest
-ptime -m cargo test --doc --all-features --all-targets
+ptime -m cargo test --doc --all-features
