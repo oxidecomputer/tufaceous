@@ -5,9 +5,9 @@
 use std::{borrow::Cow, convert::Infallible, fmt, str::FromStr};
 
 use daft::Diffable;
-use parse_display::FromStr;
+use parse_display::{Display, FromStr};
 use serde::{Deserialize, Serialize};
-use strum::{Display, EnumIter, IntoEnumIterator};
+use strum::{EnumIter, IntoEnumIterator};
 
 /// The kind of artifact we are dealing with.
 ///
