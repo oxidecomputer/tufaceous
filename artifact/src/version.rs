@@ -19,17 +19,21 @@ use thiserror::Error;
 ///
 /// # Ord implementation
 ///
-/// `ArtifactVersion` does not implement `Ord` because artifact versions are not
-/// meant to be sorted. This does mean that these versions can't be put in a
-/// `BTreeMap`. If that becomes necessary, we'll need to add an `Ord`
-/// implementation.
-#[derive(Clone, Debug, PartialEq, Eq, Hash, Diffable, Serialize)]
+/// `ArtifactVersion`s are not intended to be sorted, just compared for
+/// equality. `ArtifactVersion` implements `Ord` only for storage within sorted
+/// collections.
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Diffable)]
 #[cfg_attr(any(test, feature = "proptest"), derive(test_strategy::Arbitrary))]
+#[cfg_attr(any(test, feature = "schemars"), derive(schemars::JsonSchema))]
+#[cfg_attr(any(test, feature = "schemars"), schemars(regex = Self::REGEX))]
 #[daft(leaf)]
-#[serde(transparent)]
 pub struct ArtifactVersion(
     #[cfg_attr(any(test, feature = "proptest"), strategy(PROPTEST_REGEX))]
     #[cfg_attr(any(test, feature = "proptest"), map(Cow::Owned))]
+    #[cfg_attr(
+        any(test, feature = "schemars"),
+        schemars(regex = "Self::REGEX")
+    )]
     Cow<'static, str>,
 );
 
@@ -106,6 +110,15 @@ impl<'de> Deserialize<'de> for ArtifactVersion {
     }
 }
 
+impl Serialize for ArtifactVersion {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.serialize_str(self.as_str())
+    }
+}
+
 const fn validate_version(version: &str) -> Result<(), ArtifactVersionError> {
     let len = version.len();
 
@@ -163,7 +176,17 @@ mod tests {
 
     use super::*;
     use regex::Regex;
+    use schemars::schema_for;
     use test_strategy::proptest;
+
+    #[test]
+    fn schema() {
+        let schema = schema_for!(ArtifactVersion);
+        expectorate::assert_contents(
+            "output/artifact_version_schema.json",
+            &serde_json::to_string_pretty(&schema).unwrap(),
+        );
+    }
 
     #[proptest]
     fn proptest_valid_version(#[strategy(PROPTEST_REGEX)] version: String) {
