@@ -29,10 +29,7 @@ impl ArtifactsDocument {
     }
 }
 
-/// Describes an artifact available in the repository.
-///
-/// See also [`crate::api::internal::nexus::UpdateArtifactId`], which is used
-/// internally in Nexus and Sled Agent.
+/// Describes an artifact available within an [`ArtifactsDocument`].
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 pub struct Artifact {
     /// Used to differentiate between different series of artifacts of the same
