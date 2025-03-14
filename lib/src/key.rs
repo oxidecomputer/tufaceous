@@ -5,10 +5,10 @@
 use std::fmt::{self, Display};
 use std::str::FromStr;
 
-use anyhow::{bail, Result};
+use anyhow::{Result, bail};
 use aws_lc_rs::rand::SystemRandom;
 use aws_lc_rs::signature::Ed25519KeyPair;
-use base64::{engine::general_purpose::URL_SAFE, Engine};
+use base64::{Engine, engine::general_purpose::URL_SAFE};
 use tough::async_trait;
 use tough::key_source::KeySource;
 use tough::sign::{Sign, SignKeyPair};
