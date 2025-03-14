@@ -210,7 +210,8 @@ mod tests {
         validate_version(&version).unwrap_err();
     }
 
-    fn is_invalid_regex(version: &String) -> bool {
+    // expect(clippy::ptr_arg) is because `filter` doesn't accept &str, just &String.
+    fn is_invalid_regex(#[expect(clippy::ptr_arg)] version: &String) -> bool {
         static REGEX: LazyLock<Regex> =
             LazyLock::new(|| Regex::new(ArtifactVersion::REGEX).unwrap());
         !REGEX.is_match(version)
