@@ -12,7 +12,8 @@ export RUSTFLAGS="-D warnings"
 export CARGO_INCREMENTAL=0
 
 # aws-lc crypto requires libclang to be available.
-if [[ $target_os == "illumos" ]]; then
+HOST_OS=$(uname -s)
+if [[ $HOST_OS == "SunOS" ]]; then
     CLANGVER=15
     pfexec pkg install -v build-essential pkg-config "pkg:/ooce/developer/clang-$CLANGVER" || rc=$?
     # 4 means we're already up-to-date.
