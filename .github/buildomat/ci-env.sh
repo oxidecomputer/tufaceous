@@ -11,10 +11,15 @@ export RUSTFLAGS="-D warnings"
 # We only build once, so there's no need to incur the overhead of incremental compilation.
 export CARGO_INCREMENTAL=0
 
-# When running on illumos we need to pass an additional runpath that is
-# usually configured via ".cargo/config" but the `RUSTFLAGS` env variable
-# takes precedence. This path contains oxide specific libraries such as
-# libipcc.
+# aws-lc crypto requires libclang to be available.
 if [[ $target_os == "illumos" ]]; then
-    RUSTFLAGS="$RUSTFLAGS -C link-arg=-R/usr/platform/oxide/lib/amd64"
+    CLANGVER=15
+    pfexec pkg install -v "pkg:/ooce/developer/clang-$CLANGVER" || rc=$?
+    # 4 means we're already up-to-date.
+    if ((rc != 4 && rc != 0 )); then
+        echo "Failed to install libclang: exit code $rc"
+        exit 1
+    fi
+
+    pfexec pkg set-mediator -V $CLANGVER clang llvm
 fi
