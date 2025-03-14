@@ -5,18 +5,18 @@
 use std::collections::BTreeSet;
 use std::num::NonZeroU64;
 
-use anyhow::{anyhow, bail, Context, Result};
+use anyhow::{Context, Result, anyhow, bail};
 use buf_list::BufList;
 use camino::{Utf8Path, Utf8PathBuf};
 use chrono::{DateTime, Utc};
 use fs_err as fs;
 use futures::TryStreamExt;
 use semver::Version;
-use tough::editor::signed::SignedRole;
 use tough::editor::RepositoryEditor;
+use tough::editor::signed::SignedRole;
 use tough::schema::{Root, Target};
 use tough::{ExpirationEnforcement, Repository, RepositoryLoader, TargetName};
-use tufaceous_artifact::{Artifact, ArtifactsDocument};
+use tufaceous_artifact::{Artifact, ArtifactVersion, ArtifactsDocument};
 use url::Url;
 
 use crate::key::Key;
@@ -297,9 +297,12 @@ impl OmicronRepoEditor {
             );
         }
 
+        let version = ArtifactVersion::new(new_artifact.version().to_string())
+            .context("invalid artifact version")?;
+
         self.artifacts.artifacts.push(Artifact {
             name: new_artifact.name().to_owned(),
-            version: new_artifact.version().to_owned(),
+            version,
             kind: new_artifact.kind().clone(),
             target: target_name.clone(),
         });

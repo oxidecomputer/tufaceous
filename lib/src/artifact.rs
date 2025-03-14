@@ -5,7 +5,7 @@
 use std::io::{self, BufReader, Write};
 use std::path::Path;
 
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result, bail};
 use buf_list::BufList;
 use bytes::Bytes;
 use camino::Utf8PathBuf;
@@ -34,6 +34,9 @@ pub enum ArtifactSource {
 pub struct AddArtifact {
     kind: ArtifactKind,
     name: String,
+    // Note: for now we accept a `semver::Version`, because we're in a
+    // transitional period where the currently-installed version of Oxide system
+    // software requires that the artifacts are semver.
     version: Version,
     source: ArtifactSource,
 }
