@@ -50,8 +50,19 @@ impl ArtifactVersion {
     /// characters as well.
     pub const REGEX: &str = r"^[a-zA-Z0-9._+-]{1,63}$";
 
-    /// Constructs a new `ArtifactVersion` from a static string.
-    pub const fn new_static(
+    /// Creates a new `ArtifactVersion` from a string.
+    pub fn new<S: Into<String>>(
+        version: S,
+    ) -> Result<Self, ArtifactVersionError> {
+        let version = version.into();
+
+        validate_version(&version)?;
+
+        Ok(Self(Cow::Owned(version)))
+    }
+
+    /// Creates a new `ArtifactVersion` from a static string.
+    pub fn new_static(
         version: &'static str,
     ) -> Result<Self, ArtifactVersionError> {
         // Can't use `?` in const functions.
@@ -61,15 +72,13 @@ impl ArtifactVersion {
         }
     }
 
-    /// Constructs a new `ArtifactVersion` from a string.
-    pub fn new<S: Into<String>>(
-        version: S,
-    ) -> Result<Self, ArtifactVersionError> {
-        let version = version.into();
-
-        validate_version(&version)?;
-
-        Ok(Self(Cow::Owned(version)))
+    /// Creates a new `ArtifactVersion` at compile time, panicking if it is
+    /// invalid.
+    pub const fn new_const(s: &'static str) -> Self {
+        match validate_version(s) {
+            Ok(()) => Self(Cow::Borrowed(s)),
+            Err(err) => panic!("{}", err.as_static_str()),
+        }
     }
 
     /// Returns the version as a string.
@@ -168,6 +177,21 @@ pub enum ArtifactVersionError {
         ArtifactVersion::REGEX
     )]
     InvalidCharacter,
+}
+
+impl ArtifactVersionError {
+    /// Returns the error as a static string.
+    pub const fn as_static_str(&self) -> &'static str {
+        match self {
+            ArtifactVersionError::Empty => "version is empty",
+            ArtifactVersionError::TooLong { .. } => {
+                "version is too long (max 63 bytes)"
+            }
+            ArtifactVersionError::InvalidCharacter => {
+                "version contains invalid character (allowed: [a-zA-Z0-9_.+-])"
+            }
+        }
+    }
 }
 
 #[cfg(test)]
