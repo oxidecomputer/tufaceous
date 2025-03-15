@@ -5,7 +5,7 @@
 use semver::Version;
 use serde::{Deserialize, Serialize};
 
-use crate::ArtifactKind;
+use crate::{ArtifactKind, ArtifactVersion};
 
 /// Description of the `artifacts.json` target found in rack update
 /// repositories.
@@ -41,7 +41,7 @@ pub struct Artifact {
     /// [`ControlPlane`](crate::KnownArtifactKind::ControlPlane) is split up
     /// into separate zones, `name` will be the zone name.
     pub name: String,
-    pub version: Version,
+    pub version: ArtifactVersion,
     pub kind: ArtifactKind,
     pub target: String,
 }
