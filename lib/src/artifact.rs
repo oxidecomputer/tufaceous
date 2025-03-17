@@ -10,8 +10,7 @@ use buf_list::BufList;
 use bytes::Bytes;
 use camino::Utf8PathBuf;
 use fs_err::File;
-use semver::Version;
-use tufaceous_artifact::ArtifactKind;
+use tufaceous_artifact::{ArtifactKind, ArtifactVersion};
 use tufaceous_brand_metadata::Metadata;
 
 mod composite;
@@ -34,11 +33,7 @@ pub enum ArtifactSource {
 pub struct AddArtifact {
     kind: ArtifactKind,
     name: String,
-    // Note: for now we accept a `semver::Version`, because we're in a
-    // transitional period where the currently-installed version of Oxide system
-    // software (v13) requires that artifact versions are semver. We can relax
-    // this and accept `ArtifactVersion` after v14 is released.
-    version: Version,
+    version: ArtifactVersion,
     source: ArtifactSource,
 }
 
@@ -47,7 +42,7 @@ impl AddArtifact {
     pub fn new(
         kind: ArtifactKind,
         name: String,
-        version: Version,
+        version: ArtifactVersion,
         source: ArtifactSource,
     ) -> Self {
         Self { kind, name, version, source }
@@ -60,7 +55,7 @@ impl AddArtifact {
     pub fn from_path(
         kind: ArtifactKind,
         name: Option<String>,
-        version: Version,
+        version: ArtifactVersion,
         path: Utf8PathBuf,
     ) -> Result<Self> {
         let name = match name {
@@ -88,7 +83,7 @@ impl AddArtifact {
     }
 
     /// Returns the version of the new artifact.
-    pub fn version(&self) -> &Version {
+    pub fn version(&self) -> &ArtifactVersion {
         &self.version
     }
 

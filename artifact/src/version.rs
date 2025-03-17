@@ -12,10 +12,9 @@ use thiserror::Error;
 ///
 /// This is a freeform identifier with some basic validation. It may be the
 /// serialized form of a semver version, or a custom identifier that uses the
-/// same character set as a semver.
+/// same character set as a semver, plus `_`.
 ///
-/// For the exact regex pattern accepted by [`ArtifactVersion::new`], see
-/// [`ArtifactVersion::REGEX`].
+/// The exact pattern accepted is `^[a-zA-Z0-9._+-]{1,63}$`.
 ///
 /// # Ord implementation
 ///
@@ -48,6 +47,10 @@ impl ArtifactVersion {
     /// This is the set of characters allowed in a semver plus `_`, though
     /// without any additional structure. We expect non-semver identifiers to
     /// only use these characters as well.
+    //
+    // NOTE: if you update this, also update the documentation at the top of
+    // `ArtifactVersion`! The regex is inlined there so it shows up correctly in
+    // the JSON schema.
     pub const REGEX: &str = r"^[a-zA-Z0-9._+-]{1,63}$";
 
     /// Creates a new `ArtifactVersion` from a string.
