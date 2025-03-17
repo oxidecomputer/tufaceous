@@ -45,9 +45,9 @@ impl ArtifactVersion {
 
     /// A regular expression that matches a valid version string.
     ///
-    /// This is the set of characters allowed in a semver, though without any
-    /// additional structure. We expect non-semver identifiers to only use these
-    /// characters as well.
+    /// This is the set of characters allowed in a semver plus `_`, though
+    /// without any additional structure. We expect non-semver identifiers to
+    /// only use these characters as well.
     pub const REGEX: &str = r"^[a-zA-Z0-9._+-]{1,63}$";
 
     /// Creates a new `ArtifactVersion` from a string.
@@ -143,7 +143,7 @@ const fn validate_version(version: &str) -> Result<(), ArtifactVersionError> {
         if !first.is_ascii_alphanumeric()
             && !matches!(first, b'.' | b'_' | b'+' | b'-')
         {
-            return Err(ArtifactVersionError::InvalidCharacter);
+            return Err(ArtifactVersionError::InvalidByte { b: *first });
         }
         b = rest;
     }
@@ -173,10 +173,11 @@ pub enum ArtifactVersionError {
     )]
     TooLong { len: usize },
     #[error(
-        "version contains invalid character (allowed: {})",
+        "version contains invalid byte `{}` (allowed: {})",
+        b.escape_ascii(),
         ArtifactVersion::REGEX
     )]
-    InvalidCharacter,
+    InvalidByte { b: u8 },
 }
 
 impl ArtifactVersionError {
@@ -187,7 +188,7 @@ impl ArtifactVersionError {
             ArtifactVersionError::TooLong { .. } => {
                 "version is too long (max 63 bytes)"
             }
-            ArtifactVersionError::InvalidCharacter => {
+            ArtifactVersionError::InvalidByte { .. } => {
                 "version contains invalid character (allowed: [a-zA-Z0-9_.+-])"
             }
         }
@@ -221,7 +222,8 @@ mod tests {
     fn proptest_version_serde_roundtrip(version: ArtifactVersion) {
         let json = serde_json::to_string(&version).unwrap();
 
-        // Try deserializing as a string -- this should always work (and ensures that version looks like a string in JSON).
+        // Try deserializing as a string -- this should always work (and ensures
+        // that version looks like a string in JSON).
         serde_json::from_str::<String>(&json)
             .expect("deserialized version as a string");
 

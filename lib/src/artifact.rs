@@ -36,8 +36,8 @@ pub struct AddArtifact {
     name: String,
     // Note: for now we accept a `semver::Version`, because we're in a
     // transitional period where the currently-installed version of Oxide system
-    // software (r13) requires that artifact versions are semver. We can relax
-    // this and accept `ArtifactVersion`after r14 is released.
+    // software (v13) requires that artifact versions are semver. We can relax
+    // this and accept `ArtifactVersion` after v14 is released.
     version: Version,
     source: ArtifactSource,
 }
