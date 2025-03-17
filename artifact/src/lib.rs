@@ -4,6 +4,8 @@
 
 mod artifact;
 mod kind;
+mod version;
 
 pub use artifact::*;
 pub use kind::*;
+pub use version::*;
