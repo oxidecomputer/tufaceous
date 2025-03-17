@@ -335,7 +335,7 @@ pub struct ArtifactDataDisplay<'a> {
     data: &'a ArtifactData,
 }
 
-impl<'a> fmt::Display for ArtifactDataDisplay<'a> {
+impl fmt::Display for ArtifactDataDisplay<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{} ({})", self.data.name, self.data.version)
     }
