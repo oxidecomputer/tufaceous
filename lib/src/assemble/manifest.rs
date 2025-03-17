@@ -3,14 +3,16 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use std::collections::{BTreeMap, BTreeSet};
+use std::fmt;
 use std::str::FromStr;
 
 use anyhow::{Context, Result, bail, ensure};
 use camino::{Utf8Path, Utf8PathBuf};
+use itertools::Itertools;
 use parse_size::parse_size;
 use semver::Version;
 use serde::{Deserialize, Serialize};
-use tufaceous_artifact::KnownArtifactKind;
+use tufaceous_artifact::{ArtifactVersion, KnownArtifactKind};
 
 use crate::{
     ArtifactSource, CompositeControlPlaneArchiveBuilder, CompositeEntry,
@@ -221,6 +223,26 @@ impl ArtifactManifest {
             .expect("the fake manifest is a valid manifest")
     }
 
+    /// Checks that all versions are valid semver.
+    pub fn verify_all_semver(&self) -> Result<()> {
+        let mut non_semver = Vec::new();
+        for artifacts in self.artifacts.values() {
+            for artifact in artifacts {
+                if artifact.version.as_str().parse::<Version>().is_err() {
+                    non_semver.push(artifact);
+                }
+            }
+        }
+
+        if !non_semver.is_empty() {
+            bail!(
+                "non-semver versions found: {}",
+                non_semver.iter().map(|d| d.display()).join(", "),
+            );
+        }
+        Ok(())
+    }
+
     /// Checks that all expected artifacts are present, returning an error with
     /// details if any artifacts are missing.
     pub fn verify_all_present(&self) -> Result<()> {
@@ -245,11 +267,11 @@ impl ArtifactManifest {
 #[derive(Debug)]
 struct FakeDataAttributes<'a> {
     kind: KnownArtifactKind,
-    version: &'a Version,
+    version: &'a ArtifactVersion,
 }
 
 impl<'a> FakeDataAttributes<'a> {
-    fn new(kind: KnownArtifactKind, version: &'a Version) -> Self {
+    fn new(kind: KnownArtifactKind, version: &'a ArtifactVersion) -> Self {
         Self { kind, version }
     }
 
@@ -298,8 +320,25 @@ impl<'a> FakeDataAttributes<'a> {
 #[derive(Clone, Debug)]
 pub struct ArtifactData {
     pub name: String,
-    pub version: Version,
+    pub version: ArtifactVersion,
     pub source: ArtifactSource,
+}
+
+impl ArtifactData {
+    /// Returns a displayer for the name and version of the artifact.
+    pub fn display(&self) -> ArtifactDataDisplay<'_> {
+        ArtifactDataDisplay { data: self }
+    }
+}
+
+pub struct ArtifactDataDisplay<'a> {
+    data: &'a ArtifactData,
+}
+
+impl<'a> fmt::Display for ArtifactDataDisplay<'a> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{} ({})", self.data.name, self.data.version)
+    }
 }
 
 /// Deserializable version of [`ArtifactManifest`].
@@ -400,7 +439,7 @@ impl FromStr for DeserializedManifest {
 #[serde(rename_all = "snake_case")]
 pub struct DeserializedArtifactData {
     pub name: String,
-    pub version: Version,
+    pub version: ArtifactVersion,
     pub source: DeserializedArtifactSource,
 }
 
@@ -601,7 +640,7 @@ pub enum ManifestTweak {
     SystemVersion(Version),
 
     /// Update the versions for this artifact.
-    ArtifactVersion { kind: KnownArtifactKind, version: Version },
+    ArtifactVersion { kind: KnownArtifactKind, version: ArtifactVersion },
 
     /// Update the contents of this artifact (only support changing the size).
     ArtifactContents { kind: KnownArtifactKind, size_delta: i64 },
