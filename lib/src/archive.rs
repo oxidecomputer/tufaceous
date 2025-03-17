@@ -7,7 +7,7 @@
 use std::fmt;
 use std::io::{BufReader, BufWriter, Cursor, Read, Seek};
 
-use anyhow::{anyhow, bail, Context, Result};
+use anyhow::{Context, Result, anyhow, bail};
 use buf_list::BufList;
 use bytes::Bytes;
 use camino::{Utf8Component, Utf8Path, Utf8PathBuf};
@@ -220,7 +220,10 @@ impl fmt::Display for InvalidPath<'_> {
                 write!(f, "path is absolute -- expected relative paths")
             }
             InvalidPath::ExactlyBaseDir => {
-                write!(f, "path is exactly `{ZIP_BASE_DIR}` -- expected `{ZIP_BASE_DIR}/<foo>`")
+                write!(
+                    f,
+                    "path is exactly `{ZIP_BASE_DIR}` -- expected `{ZIP_BASE_DIR}/<foo>`"
+                )
             }
             InvalidPath::IncorrectBaseDir => {
                 write!(f, "invalid base directory -- must be `{ZIP_BASE_DIR}`")
