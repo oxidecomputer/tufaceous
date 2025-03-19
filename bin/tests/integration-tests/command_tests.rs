@@ -33,6 +33,8 @@ async fn test_init_and_add() -> Result<()> {
     fs_err::write(&nexus_path, "test")?;
     let unknown_path = tempdir.path().join("my-unknown-kind.tar.gz");
     fs_err::write(&unknown_path, "unknown test")?;
+    let switch_sp = tempdir.path().join("switch-sp.tar.gz");
+    fs_err::write(&switch_sp, "switch_sp test")?;
 
     let mut cmd = make_cmd_with_repo(tempdir.path(), &key);
     cmd.args(["add", "gimlet_sp"]);
@@ -56,6 +58,22 @@ async fn test_init_and_add() -> Result<()> {
     cmd.arg("0.1.0");
     cmd.assert().success();
 
+    // Try adding an artifact with a version that doesn't parse as valid semver.
+    let mut cmd = make_cmd_with_repo(tempdir.path(), &key);
+    cmd.args(["add", "switch_sp"]);
+    cmd.arg(&switch_sp);
+    cmd.arg("non-semver");
+    cmd.assert().failure().stderr(predicate::str::contains(
+        "version `non-semver` is not valid semver (pass in --allow-non-semver to override)",
+    ));
+
+    // Try adding one with --allow-non-semver.
+    let mut cmd = make_cmd_with_repo(tempdir.path(), &key);
+    cmd.args(["add", "switch_sp", "--allow-non-semver"]);
+    cmd.arg(&switch_sp);
+    cmd.arg("non-semver");
+    cmd.assert().success();
+
     // Now read the repository and ensure the list of expected artifacts.
     let repo_path: Utf8PathBuf = tempdir.path().join("repo").try_into()?;
     let repo = OmicronRepo::load_untrusted(&logctx.log, &repo_path).await?;
@@ -63,8 +81,8 @@ async fn test_init_and_add() -> Result<()> {
     let artifacts = repo.read_artifacts().await?;
     assert_eq!(
         artifacts.artifacts.len(),
-        2,
-        "repo should contain exactly 2 artifacts: {artifacts:?}"
+        3,
+        "repo should contain exactly 3 artifacts: {artifacts:?}"
     );
 
     let mut artifacts_iter = artifacts.artifacts.into_iter();
@@ -91,6 +109,23 @@ async fn test_init_and_add() -> Result<()> {
     );
     assert_eq!(
         artifact.target, "my_unknown_kind-my-unknown-kind-0.1.0.tar.gz",
+        "artifact target"
+    );
+
+    let artifact = artifacts_iter.next().unwrap();
+    assert_eq!(artifact.name, "switch-sp", "artifact name");
+    assert_eq!(
+        artifact.version,
+        "non-semver".parse().unwrap(),
+        "artifact version"
+    );
+    assert_eq!(
+        artifact.kind,
+        ArtifactKind::from_known(KnownArtifactKind::SwitchSp),
+        "artifact kind"
+    );
+    assert_eq!(
+        artifact.target, "switch_sp-switch-sp-non-semver.tar.gz",
         "artifact target"
     );
 
@@ -129,6 +164,49 @@ fn test_assemble_fake() -> Result<()> {
 
     let mut cmd = make_cmd(&key);
     cmd.args(["assemble", "manifests/fake.toml"]);
+    cmd.arg(&archive_path);
+    cmd.assert().success();
+
+    // Extract the archive to a new directory.
+    let dest_path = tempdir.path().join("dest");
+    let mut cmd = make_cmd(&key);
+    cmd.arg("extract");
+    cmd.arg(&archive_path);
+    cmd.arg(&dest_path);
+
+    cmd.assert().success();
+
+    logctx.cleanup_successful();
+    Ok(())
+}
+
+#[test]
+fn test_assemble_fake_non_semver() -> Result<()> {
+    let log_config = ConfigLogging::File {
+        level: ConfigLoggingLevel::Trace,
+        path: "UNUSED".into(),
+        if_exists: ConfigLoggingIfExists::Fail,
+    };
+    let logctx = LogContext::new("test_assemble_fake_non_semver", &log_config);
+    let tempdir = tempfile::tempdir().unwrap();
+    let key = Key::generate_ed25519()?;
+
+    let archive_path = tempdir.path().join("archive.zip");
+
+    let mut cmd = make_cmd(&key);
+    cmd.args(["assemble", "manifests/fake-non-semver.toml"]);
+    cmd.arg(&archive_path);
+    cmd.assert().failure().stderr(predicate::str::contains(
+        "non-semver versions found: fake-trampoline (non-semver), \
+         fake-switch-rot-bootloader (non-semver-2)",
+    ));
+
+    let mut cmd = make_cmd(&key);
+    cmd.args([
+        "assemble",
+        "manifests/fake-non-semver.toml",
+        "--allow-non-semver",
+    ]);
     cmd.arg(&archive_path);
     cmd.assert().success();
 

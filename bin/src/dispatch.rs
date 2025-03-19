@@ -7,7 +7,7 @@ use camino::Utf8PathBuf;
 use chrono::{DateTime, Utc};
 use clap::{CommandFactory, Parser};
 use semver::Version;
-use tufaceous_artifact::ArtifactKind;
+use tufaceous_artifact::{ArtifactKind, ArtifactVersion};
 use tufaceous_lib::assemble::{ArtifactManifest, OmicronRepoAssembler};
 use tufaceous_lib::{AddArtifact, ArchiveExtractor, Key, OmicronRepo};
 
@@ -60,7 +60,14 @@ impl Args {
                 );
                 Ok(())
             }
-            Command::Add { kind, allow_unknown_kinds, path, name, version } => {
+            Command::Add {
+                kind,
+                allow_unknown_kinds,
+                path,
+                name,
+                version,
+                allow_non_semver,
+            } => {
                 if !allow_unknown_kinds {
                     // Try converting kind to a known kind.
                     if kind.to_known().is_none() {
@@ -80,6 +87,19 @@ impl Args {
                         error.insert(
                             clap::error::ContextKind::InvalidValue,
                             clap::error::ContextValue::String(kind.to_string()),
+                        );
+                        error.exit();
+                    }
+                }
+
+                if !allow_non_semver {
+                    if let Err(error) = version.as_str().parse::<Version>() {
+                        let error = Args::command().error(
+                            clap::error::ErrorKind::ValueValidation,
+                            format!(
+                                "version `{version}` is not valid semver \
+                                 (pass in --allow-non-semver to override): {error}"
+                            ),
                         );
                         error.exit();
                     }
@@ -148,6 +168,7 @@ impl Args {
                 build_dir,
                 no_generate_key,
                 skip_all_present,
+                allow_non_semver,
             } => {
                 // The filename must end with "zip".
                 if output_path.extension() != Some("zip") {
@@ -156,6 +177,9 @@ impl Args {
 
                 let manifest = ArtifactManifest::from_path(&manifest_path)
                     .context("error reading manifest")?;
+                if !allow_non_semver {
+                    manifest.verify_all_semver()?;
+                }
                 if !skip_all_present {
                     manifest.verify_all_present()?;
                 }
@@ -207,7 +231,17 @@ enum Command {
         name: Option<String>,
 
         /// Artifact version.
-        version: Version,
+        ///
+        /// This is required to be semver by default, but can be overridden with
+        /// --allow-non-semver.
+        version: ArtifactVersion,
+
+        /// Allow versions to be non-semver.
+        ///
+        /// Transitional option for v13 -> v14. After v14, versions will be
+        /// allowed to be non-semver by default.
+        #[clap(long)]
+        allow_non_semver: bool,
     },
     /// Archives this repository to a zip file.
     Archive {
@@ -241,6 +275,13 @@ enum Command {
         /// Skip checking to ensure all expected artifacts are present.
         #[clap(long)]
         skip_all_present: bool,
+
+        /// Allow versions to be non-semver.
+        ///
+        /// Transitional option for v13 -> v14. After v14, versions will be
+        /// allowed to be non-semver by default.
+        #[clap(long)]
+        allow_non_semver: bool,
     },
 }
 
