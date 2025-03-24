@@ -12,6 +12,7 @@
 use std::io::{Error, ErrorKind, Read, Result, Write};
 
 use serde::{Deserialize, Serialize};
+use tufaceous_artifact::ArtifactVersion;
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct Metadata {
@@ -42,7 +43,7 @@ pub enum ArchiveType {
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct LayerInfo {
     pub pkg: String,
-    pub version: semver::Version,
+    pub version: ArtifactVersion,
 }
 
 impl Metadata {
