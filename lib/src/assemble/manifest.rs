@@ -12,13 +12,16 @@ use itertools::Itertools;
 use parse_size::parse_size;
 use semver::Version;
 use serde::{Deserialize, Serialize};
-use tufaceous_artifact::{ArtifactVersion, KnownArtifactKind};
+use tufaceous_artifact::{ArtifactKind, ArtifactVersion, KnownArtifactKind};
 
 use crate::{
     ArtifactSource, CompositeControlPlaneArchiveBuilder, CompositeEntry,
-    CompositeHostArchiveBuilder, CompositeRotArchiveBuilder, MtimeSource,
-    make_filler_text,
+    CompositeHostArchiveBuilder, CompositeRotArchiveBuilder,
+    HOST_PHASE_1_FILE_NAME, HOST_PHASE_2_FILE_NAME, MtimeSource,
+    ROT_ARCHIVE_A_FILE_NAME, ROT_ARCHIVE_B_FILE_NAME, make_filler_text,
 };
+
+use super::{ArtifactDeploymentUnits, DeploymentUnitDataBuilder};
 
 static FAKE_MANIFEST_TOML: &str =
     include_str!("../../../bin/manifests/fake.toml");
@@ -89,16 +92,22 @@ impl ArtifactManifest {
     ) -> Result<(KnownArtifactKind, Vec<ArtifactData>)> {
         let entries = entries
             .into_iter()
-            .map(|data| {
-                let source = match data.source {
-                    DeserializedArtifactSource::File { path } => {
-                        ArtifactSource::File(base_dir.join(path))
-                    }
+            .map(|artifact_data| {
+                let (source, deployment_units) = match artifact_data.source {
+                    DeserializedArtifactSource::File { path } => (
+                        ArtifactSource::File(base_dir.join(path)),
+                        ArtifactDeploymentUnits::SingleUnit,
+                    ),
                     DeserializedArtifactSource::Fake { size } => {
-                        let fake_data =
-                            FakeDataAttributes::new(kind, &data.version)
-                                .make_data(size as usize);
-                        ArtifactSource::Memory(fake_data.into())
+                        let fake_data = FakeDataAttributes::new(
+                            kind,
+                            &artifact_data.version,
+                        )
+                        .make_data(size as usize);
+                        (
+                            ArtifactSource::Memory(fake_data.into()),
+                            ArtifactDeploymentUnits::SingleUnit,
+                        )
                     }
                     DeserializedArtifactSource::CompositeHost {
                         phase_1,
@@ -126,30 +135,50 @@ impl ArtifactManifest {
                             Vec::new(),
                             mtime_source,
                         )?;
-                        phase_1.with_entry(
-                            FakeDataAttributes::new(kind, &data.version),
+                        let phase_1_hash = phase_1.with_entry(
+                            FakeDataAttributes::new(
+                                kind,
+                                &artifact_data.version,
+                            ),
                             |entry| builder.append_phase_1(entry),
                         )?;
-                        phase_2.with_entry(
-                            FakeDataAttributes::new(kind, &data.version),
+                        let phase_2_hash = phase_2.with_entry(
+                            FakeDataAttributes::new(
+                                kind,
+                                &artifact_data.version,
+                            ),
                             |entry| builder.append_phase_2(entry),
                         )?;
-                        ArtifactSource::Memory(builder.finish()?.into())
+                        let source =
+                            ArtifactSource::Memory(builder.finish()?.into());
+
+                        let mut data_builder = DeploymentUnitDataBuilder::new();
+                        data_builder
+                            .add_deployment_unit(
+                                ArtifactKind::HOST_PHASE_1,
+                                phase_1_hash,
+                                HOST_PHASE_1_FILE_NAME.to_owned(),
+                            )
+                            .expect("unique kind");
+                        data_builder
+                            .add_deployment_unit(
+                                ArtifactKind::HOST_PHASE_2,
+                                phase_2_hash,
+                                HOST_PHASE_2_FILE_NAME.to_owned(),
+                            )
+                            .expect("unique kind");
+
+                        (source, data_builder.finish_units())
                     }
                     DeserializedArtifactSource::CompositeRot {
                         archive_a,
                         archive_b,
                     } => {
-                        ensure!(
-                            matches!(
-                                kind,
-                                KnownArtifactKind::GimletRot
-                                    | KnownArtifactKind::SwitchRot
-                                    | KnownArtifactKind::PscRot
-                            ),
-                            "`composite_rot` source cannot be used with \
-                             artifact kind {kind:?}"
-                        );
+                        let (a_kind, b_kind) =
+                            kind.rot_a_and_b_kinds().context(
+                                "`composite_rot` source cannot be used with \
+                                 non-RoT artifact kind",
+                            )?;
 
                         let mtime_source =
                             if archive_a.is_fake() && archive_b.is_fake() {
@@ -163,15 +192,41 @@ impl ArtifactManifest {
                             Vec::new(),
                             mtime_source,
                         )?;
-                        archive_a.with_entry(
-                            FakeDataAttributes::new(kind, &data.version),
+                        let archive_a_hash = archive_a.with_entry(
+                            FakeDataAttributes::new(
+                                kind,
+                                &artifact_data.version,
+                            ),
                             |entry| builder.append_archive_a(entry),
                         )?;
-                        archive_b.with_entry(
-                            FakeDataAttributes::new(kind, &data.version),
+                        let archive_b_hash = archive_b.with_entry(
+                            FakeDataAttributes::new(
+                                kind,
+                                &artifact_data.version,
+                            ),
                             |entry| builder.append_archive_b(entry),
                         )?;
-                        ArtifactSource::Memory(builder.finish()?.into())
+
+                        let mut data_builder = DeploymentUnitDataBuilder::new();
+                        data_builder
+                            .add_deployment_unit(
+                                a_kind,
+                                archive_a_hash,
+                                ROT_ARCHIVE_A_FILE_NAME.to_string(),
+                            )
+                            .expect("unique kind/hash");
+                        data_builder
+                            .add_deployment_unit(
+                                b_kind,
+                                archive_b_hash,
+                                ROT_ARCHIVE_B_FILE_NAME.to_string(),
+                            )
+                            .expect("unique kind/hash");
+
+                        (
+                            ArtifactSource::Memory(builder.finish()?.into()),
+                            data_builder.finish_units(),
+                        )
                     }
                     DeserializedArtifactSource::CompositeControlPlane {
                         zones,
@@ -197,18 +252,32 @@ impl ArtifactManifest {
                                 mtime_source,
                             )?;
 
+                        let zone_kind =
+                            ArtifactKind::from(KnownArtifactKind::Zone);
+                        let mut data_builder = DeploymentUnitDataBuilder::new();
+
                         for zone in zones {
-                            zone.with_name_and_entry(|name, entry| {
-                                builder.append_zone(name, entry)
-                            })?;
+                            let (hash, name) = zone.with_name_and_entry(
+                                &artifact_data.version,
+                                |name, entry| builder.append_zone(name, entry),
+                            )?;
+                            data_builder.add_deployment_unit(
+                                zone_kind.clone(),
+                                hash,
+                                name.to_owned(),
+                            )?;
                         }
-                        ArtifactSource::Memory(builder.finish()?.into())
+                        (
+                            ArtifactSource::Memory(builder.finish()?.into()),
+                            data_builder.finish_units(),
+                        )
                     }
                 };
                 let data = ArtifactData {
-                    name: data.name,
-                    version: data.version,
+                    name: artifact_data.name,
+                    version: artifact_data.version,
                     source,
+                    deployment_units,
                 };
                 Ok(data)
             })
@@ -286,7 +355,13 @@ impl<'a> FakeDataAttributes<'a> {
             KnownArtifactKind::Host
             | KnownArtifactKind::Trampoline
             | KnownArtifactKind::ControlPlane
-            | KnownArtifactKind::Zone => return make_filler_text(size),
+            | KnownArtifactKind::Zone => {
+                return make_filler_text(
+                    &self.kind.to_string(),
+                    self.version,
+                    size,
+                );
+            }
 
             // hubris artifacts: build a fake archive (SimGimletSp and
             // SimGimletRot are used by sp-sim)
@@ -322,6 +397,7 @@ pub struct ArtifactData {
     pub name: String,
     pub version: ArtifactVersion,
     pub source: ArtifactSource,
+    pub deployment_units: ArtifactDeploymentUnits,
 }
 
 impl ArtifactData {
@@ -569,7 +645,11 @@ impl DeserializedControlPlaneZoneSource {
         matches!(self, DeserializedControlPlaneZoneSource::Fake { .. })
     }
 
-    fn with_name_and_entry<F, T>(&self, f: F) -> Result<T>
+    fn with_name_and_entry<F, T>(
+        &self,
+        version: &ArtifactVersion,
+        f: F,
+    ) -> Result<T>
     where
         F: FnOnce(&str, CompositeEntry<'_>) -> Result<T>,
     {
@@ -611,7 +691,10 @@ impl DeserializedControlPlaneZoneSource {
                 h.set_size(*size);
                 h.set_mtime(0);
                 h.set_cksum();
-                tar.append(&h, make_filler_text(*size as usize).as_slice())?;
+                tar.append(
+                    &h,
+                    make_filler_text(name, version, *size as usize).as_slice(),
+                )?;
 
                 let data = tar.into_inner()?.finish()?;
                 (format!("{name}.tar.gz"), data, MtimeSource::Zero)

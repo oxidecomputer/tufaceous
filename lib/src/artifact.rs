@@ -21,6 +21,8 @@ pub use composite::CompositeHostArchiveBuilder;
 pub use composite::CompositeRotArchiveBuilder;
 pub use composite::MtimeSource;
 
+use crate::assemble::ArtifactDeploymentUnits;
+
 /// The location a artifact will be obtained from.
 #[derive(Clone, Debug)]
 pub enum ArtifactSource {
@@ -35,6 +37,7 @@ pub struct AddArtifact {
     name: String,
     version: ArtifactVersion,
     source: ArtifactSource,
+    deployment_units: ArtifactDeploymentUnits,
 }
 
 impl AddArtifact {
@@ -44,8 +47,9 @@ impl AddArtifact {
         name: String,
         version: ArtifactVersion,
         source: ArtifactSource,
+        deployment_units: ArtifactDeploymentUnits,
     ) -> Self {
-        Self { kind, name, version, source }
+        Self { kind, name, version, source, deployment_units }
     }
 
     /// Creates an [`AddArtifact`] from the path, name and version.
@@ -69,7 +73,16 @@ impl AddArtifact {
                 .to_owned(),
         };
 
-        Ok(Self { kind, name, version, source: ArtifactSource::File(path) })
+        // TODO: In the future, it would be nice to extract the deployment units
+        // from the file. But that would require parsing the file, and the code
+        // for that lives in Omicron under update-common.
+        Ok(Self {
+            kind,
+            name,
+            version,
+            source: ArtifactSource::File(path),
+            deployment_units: ArtifactDeploymentUnits::Unknown,
+        })
     }
 
     /// Returns the kind of artifact this is.
@@ -92,6 +105,11 @@ impl AddArtifact {
         &self.source
     }
 
+    /// Returns information about deployment units for this artifact.
+    pub fn deployment_units(&self) -> &ArtifactDeploymentUnits {
+        &self.deployment_units
+    }
+
     /// Writes this artifact to the specified writer.
     pub(crate) fn write_to<W: Write>(&self, writer: &mut W) -> Result<()> {
         match &self.source {
@@ -110,8 +128,27 @@ impl AddArtifact {
     }
 }
 
-pub(crate) fn make_filler_text(length: usize) -> Vec<u8> {
-    std::iter::repeat(FILLER_TEXT).flatten().copied().take(length).collect()
+pub(crate) fn make_filler_text(
+    // This can be either the artifact kind, or the deployment unit kind for a
+    // composite artifact.
+    kind: &str,
+    version: &ArtifactVersion,
+    length: usize,
+) -> Vec<u8> {
+    // Add the kind and version to the filler text first. This ensures that
+    // hashes are unique by kind and version.
+    let mut out = Vec::with_capacity(length);
+    out.extend_from_slice(kind.as_bytes());
+    out.extend_from_slice(b":");
+    out.extend_from_slice(version.as_str().as_bytes());
+    out.extend_from_slice(b":");
+
+    let remaining = length.saturating_sub(out.len());
+    out.extend(
+        std::iter::repeat(FILLER_TEXT).flatten().copied().take(remaining),
+    );
+
+    out
 }
 
 /// Represents host phase images.
@@ -421,8 +458,8 @@ impl ControlPlaneZoneImages {
 
 static FILLER_TEXT: &[u8; 16] = b"tufaceousfaketxt";
 static OXIDE_JSON_FILE_NAME: &str = "oxide.json";
-static HOST_PHASE_1_FILE_NAME: &str = "image/rom";
-static HOST_PHASE_2_FILE_NAME: &str = "image/zfs.img";
-static ROT_ARCHIVE_A_FILE_NAME: &str = "archive-a.zip";
-static ROT_ARCHIVE_B_FILE_NAME: &str = "archive-b.zip";
+pub(crate) static HOST_PHASE_1_FILE_NAME: &str = "image/rom";
+pub(crate) static HOST_PHASE_2_FILE_NAME: &str = "image/zfs.img";
+pub(crate) static ROT_ARCHIVE_A_FILE_NAME: &str = "archive-a.zip";
+pub(crate) static ROT_ARCHIVE_B_FILE_NAME: &str = "archive-b.zip";
 static CONTROL_PLANE_ARCHIVE_ZONE_DIRECTORY: &str = "zones";

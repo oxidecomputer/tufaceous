@@ -3,7 +3,9 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 mod build;
+mod deployment_unit;
 mod manifest;
 
 pub use build::*;
+pub use deployment_unit::*;
 pub use manifest::*;

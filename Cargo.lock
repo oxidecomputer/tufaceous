@@ -1491,6 +1491,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "indent_write"
+version = "2.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0cfe9645a18782869361d9c8732246be7b410ad4e919d3609ebabdac00ba12c3"
+
+[[package]]
 name = "indexmap"
 version = "1.9.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3439,6 +3445,7 @@ version = "0.1.0"
 dependencies = [
  "daft",
  "expectorate",
+ "hex",
  "parse-display",
  "proptest",
  "regex",
@@ -3482,6 +3489,7 @@ dependencies = [
  "futures",
  "hex",
  "hubtools",
+ "indent_write",
  "itertools 0.13.0",
  "parse-size",
  "rand",
@@ -3492,6 +3500,7 @@ dependencies = [
  "sha2",
  "slog",
  "tar",
+ "thiserror 2.0.12",
  "tokio",
  "toml 0.8.20",
  "tough",

@@ -112,6 +112,7 @@ impl OmicronRepoAssembler {
                     data.name.clone(),
                     data.version.clone(),
                     data.source.clone(),
+                    data.deployment_units.clone(),
                 );
                 repository.add_artifact(&new_artifact).with_context(|| {
                     format!("error adding artifact with kind `{kind}`")
