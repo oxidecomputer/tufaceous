@@ -625,7 +625,7 @@ impl DeserializedControlPlaneZoneSource {
 
                 let metadata = Metadata::new(ArchiveType::Layer(LayerInfo {
                     pkg: name.clone(),
-                    version: semver::Version::new(0, 0, 0),
+                    version: version.clone(),
                 }));
                 metadata.append_to_tar(&mut tar, 0)?;
 
