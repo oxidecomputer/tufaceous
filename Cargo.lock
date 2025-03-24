@@ -3467,6 +3467,7 @@ dependencies = [
  "serde",
  "serde_json",
  "tar",
+ "tufaceous-artifact",
 ]
 
 [[package]]
