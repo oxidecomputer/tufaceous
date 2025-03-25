@@ -273,8 +273,7 @@ fn test_assemble_duplicate_artifact() -> Result<()> {
         "invalid-manifests/duplicate-artifact.toml",
     ]);
     cmd.arg(&archive_path);
-    // TODO: this should be failure, not success!
-    cmd.assert().success().stderr(predicate::str::contains(
+    cmd.assert().failure().stderr(predicate::str::contains(
         "a target named gimlet_sp-fake-gimlet-sp-1.0.0.tar.gz \
          already exists in the repository",
     ));
