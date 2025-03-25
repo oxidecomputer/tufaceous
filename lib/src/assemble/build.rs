@@ -79,17 +79,16 @@ impl OmicronRepoAssembler {
                     "artifacts assembled and archived to `{}`",
                     self.output_path
                 );
+                Ok(())
             }
             Err(error) => {
-                slog::error!(self.log, "assembly failed: {error:?}");
-                slog::info!(
+                slog::error!(
                     self.log,
-                    "failing build directory preserved: `{build_dir}`"
+                    "assembly failed, failing build directory preserved: `{build_dir}`"
                 );
+                Err(error)
             }
         }
-
-        Ok(())
     }
 
     async fn build_impl(&self, build_dir: &Utf8Path) -> Result<()> {
