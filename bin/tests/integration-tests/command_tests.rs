@@ -223,6 +223,35 @@ fn test_assemble_fake_non_semver() -> Result<()> {
     Ok(())
 }
 
+#[test]
+fn test_assemble_duplicate_zone() -> Result<()> {
+    let log_config = ConfigLogging::File {
+        level: ConfigLoggingLevel::Trace,
+        path: "UNUSED".into(),
+        if_exists: ConfigLoggingIfExists::Fail,
+    };
+    let logctx = LogContext::new("test_assemble_fake_non_semver", &log_config);
+    let tempdir = tempfile::tempdir().unwrap();
+    let key = Key::generate_ed25519()?;
+
+    let archive_path = tempdir.path().join("archive.zip");
+
+    let mut cmd = make_cmd(&key);
+    cmd.args([
+        "assemble",
+        "--skip-all-present",
+        "invalid-manifests/duplicate-zone.toml",
+    ]);
+    cmd.arg(&archive_path);
+    cmd.assert().failure().stderr(predicate::str::contains(
+        "duplicate zones are not allowed \
+         (zone1.tar.gz and zone1.tar.gz have the same checksum)",
+    ));
+
+    logctx.cleanup_successful();
+    Ok(())
+}
+
 fn make_cmd(key: &Key) -> Command {
     let mut cmd = Command::cargo_bin("tufaceous").unwrap();
     cmd.env("TUFACEOUS_KEY", key.to_string());
