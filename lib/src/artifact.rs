@@ -110,8 +110,27 @@ impl AddArtifact {
     }
 }
 
-pub(crate) fn make_filler_text(length: usize) -> Vec<u8> {
-    std::iter::repeat(FILLER_TEXT).flatten().copied().take(length).collect()
+pub(crate) fn make_filler_text(
+    // This can be either the artifact kind, or the deployment unit kind for a
+    // composite artifact.
+    kind: &str,
+    version: &ArtifactVersion,
+    length: usize,
+) -> Vec<u8> {
+    // Add the kind and version to the filler text first. This ensures that
+    // hashes are unique by kind and version.
+    let mut out = Vec::with_capacity(length);
+    out.extend_from_slice(kind.as_bytes());
+    out.extend_from_slice(b":");
+    out.extend_from_slice(version.as_str().as_bytes());
+    out.extend_from_slice(b":");
+
+    let remaining = length.saturating_sub(out.len());
+    out.extend(
+        std::iter::repeat(FILLER_TEXT).flatten().copied().take(remaining),
+    );
+
+    out
 }
 
 /// Represents host phase images.
