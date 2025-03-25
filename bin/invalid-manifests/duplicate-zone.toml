@@ -1,0 +1,14 @@
+# This manifest has two control plane zones that hash to the same contents. This
+# is not allowed.
+
+system_version = "1.0.0"
+
+[[artifact.control_plane]]
+name = "fake-control-plane"
+version = "1.0.0"
+[artifact.control_plane.source]
+kind = "composite-control-plane"
+zones = [
+    { kind = "fake", name = "zone1", size = "1MiB" },
+    { kind = "fake", name = "zone1", size = "1MiB" },
+]

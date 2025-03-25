@@ -89,15 +89,17 @@ impl ArtifactManifest {
     ) -> Result<(KnownArtifactKind, Vec<ArtifactData>)> {
         let entries = entries
             .into_iter()
-            .map(|data| {
-                let source = match data.source {
+            .map(|artifact_data| {
+                let source = match artifact_data.source {
                     DeserializedArtifactSource::File { path } => {
                         ArtifactSource::File(base_dir.join(path))
                     }
                     DeserializedArtifactSource::Fake { size } => {
-                        let fake_data =
-                            FakeDataAttributes::new(kind, &data.version)
-                                .make_data(size as usize);
+                        let fake_data = FakeDataAttributes::new(
+                            kind,
+                            &artifact_data.version,
+                        )
+                        .make_data(size as usize);
                         ArtifactSource::Memory(fake_data.into())
                     }
                     DeserializedArtifactSource::CompositeHost {
@@ -127,11 +129,17 @@ impl ArtifactManifest {
                             mtime_source,
                         )?;
                         phase_1.with_entry(
-                            FakeDataAttributes::new(kind, &data.version),
+                            FakeDataAttributes::new(
+                                kind,
+                                &artifact_data.version,
+                            ),
                             |entry| builder.append_phase_1(entry),
                         )?;
                         phase_2.with_entry(
-                            FakeDataAttributes::new(kind, &data.version),
+                            FakeDataAttributes::new(
+                                kind,
+                                &artifact_data.version,
+                            ),
                             |entry| builder.append_phase_2(entry),
                         )?;
                         ArtifactSource::Memory(builder.finish()?.into())
@@ -164,11 +172,17 @@ impl ArtifactManifest {
                             mtime_source,
                         )?;
                         archive_a.with_entry(
-                            FakeDataAttributes::new(kind, &data.version),
+                            FakeDataAttributes::new(
+                                kind,
+                                &artifact_data.version,
+                            ),
                             |entry| builder.append_archive_a(entry),
                         )?;
                         archive_b.with_entry(
-                            FakeDataAttributes::new(kind, &data.version),
+                            FakeDataAttributes::new(
+                                kind,
+                                &artifact_data.version,
+                            ),
                             |entry| builder.append_archive_b(entry),
                         )?;
                         ArtifactSource::Memory(builder.finish()?.into())
@@ -198,16 +212,17 @@ impl ArtifactManifest {
                             )?;
 
                         for zone in zones {
-                            zone.with_name_and_entry(|name, entry| {
-                                builder.append_zone(name, entry)
-                            })?;
+                            zone.with_name_and_entry(
+                                &artifact_data.version,
+                                |name, entry| builder.append_zone(name, entry),
+                            )?;
                         }
                         ArtifactSource::Memory(builder.finish()?.into())
                     }
                 };
                 let data = ArtifactData {
-                    name: data.name,
-                    version: data.version,
+                    name: artifact_data.name,
+                    version: artifact_data.version,
                     source,
                 };
                 Ok(data)
@@ -286,7 +301,13 @@ impl<'a> FakeDataAttributes<'a> {
             KnownArtifactKind::Host
             | KnownArtifactKind::Trampoline
             | KnownArtifactKind::ControlPlane
-            | KnownArtifactKind::Zone => return make_filler_text(size),
+            | KnownArtifactKind::Zone => {
+                return make_filler_text(
+                    &self.kind.to_string(),
+                    self.version,
+                    size,
+                );
+            }
 
             // hubris artifacts: build a fake archive (SimGimletSp and
             // SimGimletRot are used by sp-sim)
@@ -569,7 +590,11 @@ impl DeserializedControlPlaneZoneSource {
         matches!(self, DeserializedControlPlaneZoneSource::Fake { .. })
     }
 
-    fn with_name_and_entry<F, T>(&self, f: F) -> Result<T>
+    fn with_name_and_entry<F, T>(
+        &self,
+        version: &ArtifactVersion,
+        f: F,
+    ) -> Result<T>
     where
         F: FnOnce(&str, CompositeEntry<'_>) -> Result<T>,
     {
@@ -600,8 +625,7 @@ impl DeserializedControlPlaneZoneSource {
 
                 let metadata = Metadata::new(ArchiveType::Layer(LayerInfo {
                     pkg: name.clone(),
-                    // TODO: replace with `ArtifactVersion` once it's passed in
-                    version: ArtifactVersion::new_const("0.0.0"),
+                    version: version.clone(),
                 }));
                 metadata.append_to_tar(&mut tar, 0)?;
 
@@ -612,7 +636,10 @@ impl DeserializedControlPlaneZoneSource {
                 h.set_size(*size);
                 h.set_mtime(0);
                 h.set_cksum();
-                tar.append(&h, make_filler_text(*size as usize).as_slice())?;
+                tar.append(
+                    &h,
+                    make_filler_text(name, version, *size as usize).as_slice(),
+                )?;
 
                 let data = tar.into_inner()?.finish()?;
                 (format!("{name}.tar.gz"), data, MtimeSource::Zero)
