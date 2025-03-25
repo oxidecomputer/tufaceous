@@ -10,6 +10,7 @@ semver.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 tar.workspace = true
+tufaceous-artifact.workspace = true
 
 [lints]
 workspace = true
