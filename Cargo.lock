@@ -3483,6 +3483,7 @@ dependencies = [
  "camino",
  "camino-tempfile",
  "chrono",
+ "daft",
  "debug-ignore",
  "dropshot",
  "flate2",

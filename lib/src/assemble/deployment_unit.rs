@@ -4,6 +4,7 @@
 
 use std::{collections::BTreeMap, fmt};
 
+use daft::{Diffable, Leaf};
 use thiserror::Error;
 use tufaceous_artifact::{ArtifactHash, ArtifactKind};
 
@@ -87,15 +88,19 @@ impl DeploymentUnitDataBuilder {
         &mut self,
         units: DeploymentUnitMap,
     ) -> Result<NewDeploymentUnits<'_>, DuplicateDeploymentUnitError> {
-        // Check that there are no duplicates.
-        let duplicates = map_intersection(
-            &self.deployment_units,
-            &units,
-            |existing, new| DuplicateDeploymentUnitData { existing, new },
-        );
+        // Check that there are no duplicates. We don't expect to see any
+        // duplicated artifacts at all within a single artifact or repository,
+        // so we don't check whether the hashes are the same.
+        let diff = self.deployment_units.diff(&units);
 
-        if !duplicates.is_empty() {
-            return Err(DuplicateDeploymentUnitError { duplicates });
+        if !diff.common.is_empty() {
+            return Err(DuplicateDeploymentUnitError {
+                duplicates: diff
+                    .common
+                    .into_iter()
+                    .map(|(k, v)| (k.clone(), v.cloned()))
+                    .collect(),
+            });
         }
 
         Ok(NewDeploymentUnits { base: &mut self.deployment_units, units })
@@ -151,48 +156,14 @@ impl<'a> NewDeploymentUnits<'a> {
     }
 }
 
-fn map_intersection<K: Clone + Ord, V: Clone, T>(
-    map1: &BTreeMap<K, V>,
-    map2: &BTreeMap<K, V>,
-    constructor: impl Fn(V, V) -> T,
-) -> BTreeMap<K, T> {
-    let mut intersection = BTreeMap::new();
-
-    let mut iter1 = map1.iter();
-    let mut iter2 = map2.iter();
-
-    let mut curr1 = iter1.next();
-    let mut curr2 = iter2.next();
-
-    while let (Some((key1, val1)), Some((key2, val2))) = (curr1, curr2) {
-        match key1.cmp(key2) {
-            std::cmp::Ordering::Equal => {
-                intersection.insert(
-                    key1.clone(),
-                    constructor(val1.clone(), val2.clone()),
-                );
-                curr1 = iter1.next();
-                curr2 = iter2.next();
-            }
-            std::cmp::Ordering::Less => {
-                curr1 = iter1.next();
-            }
-            std::cmp::Ordering::Greater => {
-                curr2 = iter2.next();
-            }
-        }
-    }
-
-    // No need to exhaust the iterators. We're computing intersections, not
-    // unions.
-
-    intersection
-}
-
 #[derive(Clone, Debug, Error)]
 pub struct DuplicateDeploymentUnitError {
+    /// Duplicates found while inserting deployment unit data.
+    ///
+    /// For `Leaf<DeploymentUnitData>`, `before` is the existing data and
+    /// `after` is the new data.
     pub duplicates:
-        BTreeMap<(ArtifactKind, ArtifactHash), DuplicateDeploymentUnitData>,
+        BTreeMap<(ArtifactKind, ArtifactHash), Leaf<DeploymentUnitData>>,
 }
 
 impl DuplicateDeploymentUnitError {
@@ -205,7 +176,7 @@ impl DuplicateDeploymentUnitError {
         let mut duplicates = BTreeMap::new();
         duplicates.insert(
             (artifact_kind, artifact_hash),
-            DuplicateDeploymentUnitData { existing, new },
+            Leaf { before: existing, after: new },
         );
         Self { duplicates }
     }
@@ -219,9 +190,9 @@ impl fmt::Display for DuplicateDeploymentUnitError {
                 self.duplicates.first_key_value().unwrap();
             write!(
                 f,
-                "duplicate deployment unit found for kind: {:?}, hash: {:?}\
+                "duplicate deployment unit found for kind: \"{}\", hash: {} \
                  (existing name: {:?}, new name: {:?})",
-                artifact_kind, artifact_hash, data.existing.name, data.new.name
+                artifact_kind, artifact_hash, data.before.name, data.after.name
             )
         } else {
             writeln!(
@@ -232,22 +203,16 @@ impl fmt::Display for DuplicateDeploymentUnitError {
             for ((artifact_kind, artifact_hash), data) in &self.duplicates {
                 writeln!(
                     f,
-                    "  - for kind: {:?}, hash: {:?}\
+                    "  - for kind: \"{}\", hash: {}\
                      (existing name: {:?}, new name: {:?})",
                     artifact_kind,
                     artifact_hash,
-                    data.existing.name,
-                    data.new.name
+                    data.before.name,
+                    data.after.name
                 )?;
             }
 
             Ok(())
         }
     }
-}
-
-#[derive(Clone, Debug)]
-pub struct DuplicateDeploymentUnitData {
-    pub existing: DeploymentUnitData,
-    pub new: DeploymentUnitData,
 }

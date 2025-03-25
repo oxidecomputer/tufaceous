@@ -2,7 +2,6 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use std::collections::HashMap;
 use std::io::{BufWriter, Write};
 
 use anyhow::{Context, Result, anyhow, bail};
@@ -32,7 +31,6 @@ pub struct CompositeEntry<'a> {
 
 pub struct CompositeControlPlaneArchiveBuilder<W: Write> {
     inner: CompositeTarballBuilder<W>,
-    hashes: HashMap<[u8; 32], String>,
 }
 
 impl<W: Write> CompositeControlPlaneArchiveBuilder<W> {
@@ -40,7 +38,7 @@ impl<W: Write> CompositeControlPlaneArchiveBuilder<W> {
         let metadata = Metadata::new(ArchiveType::ControlPlane);
         let inner =
             CompositeTarballBuilder::new(writer, metadata, mtime_source)?;
-        Ok(Self { inner, hashes: HashMap::new() })
+        Ok(Self { inner })
     }
 
     pub fn append_zone(
@@ -51,14 +49,6 @@ impl<W: Write> CompositeControlPlaneArchiveBuilder<W> {
         let name_path = Utf8Path::new(name);
         if name_path.file_name() != Some(name) {
             bail!("control plane zone filenames should not contain paths");
-        }
-        if let Some(duplicate) =
-            self.hashes.insert(Sha256::digest(entry.data).into(), name.into())
-        {
-            bail!(
-                "duplicate zones are not allowed \
-                ({name} and {duplicate} have the same checksum)"
-            );
         }
         let path =
             Utf8Path::new(CONTROL_PLANE_ARCHIVE_ZONE_DIRECTORY).join(name_path);
