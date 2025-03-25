@@ -21,7 +21,10 @@ use tufaceous_artifact::{
 };
 use url::Url;
 
-use crate::assemble::{ArtifactDeploymentUnits, DeploymentUnitDataBuilder};
+use crate::assemble::{
+    ArtifactDeploymentUnits, DeploymentUnitData, DeploymentUnitDataBuilder,
+    DeploymentUnitScope,
+};
 use crate::key::Key;
 use crate::target::TargetWriter;
 use crate::utils::merge_anyhow_list;
@@ -243,12 +246,7 @@ impl OmicronRepoEditor {
         let artifacts_by_target_name = artifacts
             .artifacts
             .iter()
-            .map(|artifact| {
-                (
-                    artifact.target.as_str(),
-                    (artifact.name.as_str(), &artifact.kind),
-                )
-            })
+            .map(|artifact| (artifact.target.as_str(), artifact))
             .collect::<BTreeMap<_, _>>();
 
         let mut errors = Vec::new();
@@ -258,7 +256,8 @@ impl OmicronRepoEditor {
         // and the code for that lives in Omicron under update-common.
         //
         // For now we settle for treating all artifacts as single-unit ones.
-        let mut data_builder = DeploymentUnitDataBuilder::new();
+        let mut data_builder =
+            DeploymentUnitDataBuilder::new(DeploymentUnitScope::Repository);
 
         let existing_target_names = repo
             .repo
@@ -278,7 +277,7 @@ impl OmicronRepoEditor {
                 .expect("SHA-256 hash should be exactly 32 bytes");
                 let hash = ArtifactHash(hash_bytes);
 
-                let Some(&(name, kind)) =
+                let Some(artifact) =
                     artifacts_by_target_name.get(target_name.as_str())
                 else {
                     errors.push(anyhow!(
@@ -290,9 +289,12 @@ impl OmicronRepoEditor {
                 };
 
                 let Ok(()) = data_builder.add_deployment_unit(
-                    kind.clone(),
+                    artifact.kind.clone(),
                     hash,
-                    name.to_owned(),
+                    DeploymentUnitData {
+                        name: artifact.name.to_owned(),
+                        version: artifact.version.clone(),
+                    },
                 ) else {
                     errors.push(anyhow!(
                         "failed to add deployment unit for artifact `{}`",
@@ -323,7 +325,9 @@ impl OmicronRepoEditor {
             repo_path: repo.repo_path,
             artifacts,
             existing_target_names,
-            existing_deployment_units: DeploymentUnitDataBuilder::new(),
+            existing_deployment_units: DeploymentUnitDataBuilder::new(
+                DeploymentUnitScope::Repository,
+            ),
         })
     }
 
@@ -348,7 +352,9 @@ impl OmicronRepoEditor {
             repo_path,
             artifacts: ArtifactsDocument::empty(system_version),
             existing_target_names: BTreeSet::new(),
-            existing_deployment_units: DeploymentUnitDataBuilder::new(),
+            existing_deployment_units: DeploymentUnitDataBuilder::new(
+                DeploymentUnitScope::Repository,
+            ),
         })
     }
 
@@ -387,7 +393,7 @@ impl OmicronRepoEditor {
 
         // Make sure we're not adding a new deployment unit with the same
         // kind/hash as an existing one.
-        let new_deployment_units = match new_artifact.deployment_units() {
+        let res = match new_artifact.deployment_units() {
             ArtifactDeploymentUnits::SingleUnit
             | ArtifactDeploymentUnits::Unknown => {
                 // For single-unit artifacts, the artifact itself is the
@@ -396,7 +402,10 @@ impl OmicronRepoEditor {
                 self.existing_deployment_units.start_add_deployment_unit(
                     new_artifact.kind().clone(),
                     finished_file.digest(),
-                    new_artifact.name().to_owned(),
+                    DeploymentUnitData {
+                        name: new_artifact.name().to_owned(),
+                        version: new_artifact.version().clone(),
+                    },
                 )
             }
             ArtifactDeploymentUnits::Composite { deployment_units } => {
@@ -405,10 +414,13 @@ impl OmicronRepoEditor {
                     .start_merge_deployment_units(deployment_units.clone())
             }
         };
-        if let Err(error) = new_deployment_units {
-            errors
-                .push(anyhow!(error).context("error merging deployment units"));
-        }
+        let new_units = match res {
+            Ok(units) => Some(units),
+            Err(error) => {
+                errors.push(anyhow!(error));
+                None
+            }
+        };
 
         let version =
             match ArtifactVersion::new(new_artifact.version().to_string()) {
@@ -425,12 +437,17 @@ impl OmicronRepoEditor {
             return Err(merge_anyhow_list(errors));
         }
 
+        // ---
+        // No errors past this point.
+        // ---
+
         self.artifacts.artifacts.push(Artifact {
             name: new_artifact.name().to_owned(),
             version: version.expect("version is None => errors handled above"),
             kind: new_artifact.kind().clone(),
             target: target_name.clone(),
         });
+        new_units.expect("new_units is None => errors handled above").insert();
 
         finished_file.finalize(&mut self.editor)
     }
@@ -527,7 +544,7 @@ mod tests {
             kind.parse().unwrap(),
             name.to_string(),
             version.parse().unwrap(),
-            ArtifactSource::Memory(BufList::new()),
+            ArtifactSource::Memory(BufList::from("first")),
             ArtifactDeploymentUnits::Unknown,
         ))
         .unwrap();
@@ -537,11 +554,13 @@ mod tests {
                 kind.parse().unwrap(),
                 name.to_string(),
                 version.parse().unwrap(),
-                ArtifactSource::Memory(BufList::new()),
+                ArtifactSource::Memory(BufList::from("second")),
                 ArtifactDeploymentUnits::Unknown,
             ))
-            .unwrap_err()
-            .to_string();
+            .unwrap_err();
+
+        println!("error: {:?}", err);
+        let err = err.to_string();
 
         assert!(err.contains("a target named"));
         assert!(err.contains(kind));

@@ -6,7 +6,9 @@ use std::{collections::BTreeMap, fmt};
 
 use daft::{Diffable, Leaf};
 use thiserror::Error;
-use tufaceous_artifact::{ArtifactHash, ArtifactKind};
+use tufaceous_artifact::{
+    ArtifactHash, ArtifactKind, ArtifactVersion, KnownArtifactKind,
+};
 
 /// Information about deployment units for an artifact.
 ///
@@ -29,29 +31,55 @@ pub enum ArtifactDeploymentUnits {
     Unknown,
 }
 
+/// Ths scope in which deployment unit data is being gathered.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DeploymentUnitScope {
+    /// Deployment units are being gathered for a single composite artifact.
+    Artifact {
+        /// The kind of the composite artifact.
+        composite_kind: KnownArtifactKind,
+    },
+
+    /// Deployment units are being gathered for a repository.
+    Repository,
+}
+
+impl fmt::Display for DeploymentUnitScope {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            DeploymentUnitScope::Artifact { composite_kind } => {
+                write!(f, "{composite_kind} artifact")
+            }
+            DeploymentUnitScope::Repository => "repository".fmt(f),
+        }
+    }
+}
+
 /// Data associated with a deployment unit for a composite artifact.
 #[derive(Clone, Debug)]
 pub struct DeploymentUnitData {
     /// The name of the deployment unit.
     pub name: String,
+    /// The version of the deployment unit.
+    pub version: ArtifactVersion,
+}
+
+impl fmt::Display for DeploymentUnitData {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "name: {}, version: {}", self.name, self.version)
+    }
 }
 
 /// Builder for a composite artifact with deployment units.
 #[derive(Clone, Debug)]
 pub struct DeploymentUnitDataBuilder {
+    scope: DeploymentUnitScope,
     deployment_units: DeploymentUnitMap,
 }
 
-impl Default for DeploymentUnitDataBuilder {
-    #[inline]
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 impl DeploymentUnitDataBuilder {
-    pub fn new() -> Self {
-        Self { deployment_units: BTreeMap::new() }
+    pub fn new(scope: DeploymentUnitScope) -> Self {
+        Self { scope, deployment_units: BTreeMap::new() }
     }
 
     /// Starts adding a new deployment unit to `self`.
@@ -59,12 +87,12 @@ impl DeploymentUnitDataBuilder {
         &mut self,
         kind: ArtifactKind,
         hash: ArtifactHash,
-        name: String,
+        data: DeploymentUnitData,
     ) -> Result<NewDeploymentUnits<'_>, DuplicateDeploymentUnitError> {
-        let data = DeploymentUnitData { name };
         if let Some(existing) = self.deployment_units.get(&(kind.clone(), hash))
         {
             return Err(DuplicateDeploymentUnitError::new_single(
+                self.scope,
                 kind,
                 hash,
                 existing.clone(),
@@ -95,6 +123,7 @@ impl DeploymentUnitDataBuilder {
 
         if !diff.common.is_empty() {
             return Err(DuplicateDeploymentUnitError {
+                scope: self.scope,
                 duplicates: diff
                     .common
                     .into_iter()
@@ -112,9 +141,10 @@ impl DeploymentUnitDataBuilder {
         &mut self,
         kind: ArtifactKind,
         hash: ArtifactHash,
-        name: String,
+        data: DeploymentUnitData,
     ) -> Result<(), DuplicateDeploymentUnitError> {
-        self.start_add_deployment_unit(kind, hash, name)?.insert()
+        self.start_add_deployment_unit(kind, hash, data)?.insert();
+        Ok(())
     }
 
     pub fn finish_map(self) -> DeploymentUnitMap {
@@ -132,6 +162,7 @@ impl DeploymentUnitDataBuilder {
 ///
 /// This serves as a way to make new deployment units ready to be inserted into
 /// the builder.
+#[must_use = "NewDeploymentUnits must be inserted into the builder"]
 pub struct NewDeploymentUnits<'a> {
     base: &'a mut DeploymentUnitMap,
     units: DeploymentUnitMap,
@@ -150,14 +181,16 @@ impl<'a> NewDeploymentUnits<'a> {
     }
 
     /// Inserts the deployment unit data into the builder.
-    pub fn insert(self) -> Result<(), DuplicateDeploymentUnitError> {
+    pub fn insert(self) {
         self.base.extend(self.units);
-        Ok(())
     }
 }
 
 #[derive(Clone, Debug, Error)]
 pub struct DuplicateDeploymentUnitError {
+    /// The scope within which duplicates were found.
+    pub scope: DeploymentUnitScope,
+
     /// Duplicates found while inserting deployment unit data.
     ///
     /// For `Leaf<DeploymentUnitData>`, `before` is the existing data and
@@ -168,6 +201,7 @@ pub struct DuplicateDeploymentUnitError {
 
 impl DuplicateDeploymentUnitError {
     fn new_single(
+        scope: DeploymentUnitScope,
         artifact_kind: ArtifactKind,
         artifact_hash: ArtifactHash,
         existing: DeploymentUnitData,
@@ -178,7 +212,7 @@ impl DuplicateDeploymentUnitError {
             (artifact_kind, artifact_hash),
             Leaf { before: existing, after: new },
         );
-        Self { duplicates }
+        Self { scope, duplicates }
     }
 }
 
@@ -190,25 +224,27 @@ impl fmt::Display for DuplicateDeploymentUnitError {
                 self.duplicates.first_key_value().unwrap();
             write!(
                 f,
-                "duplicate deployment unit found for kind: \"{}\", hash: {} \
-                 (existing name: {:?}, new name: {:?})",
-                artifact_kind, artifact_hash, data.before.name, data.after.name
+                "a deployment unit with the same kind and hash already exists in this {}:\n\
+                 kind: {}, hash: {} (existing {}; new {})",
+                self.scope,
+                artifact_kind,
+                artifact_hash,
+                data.before,
+                data.after,
             )
         } else {
             writeln!(
                 f,
-                "{} duplicate deployment units found:",
+                "{} deployment units with the same kind and hash already exist in this {}:",
                 self.duplicates.len(),
+                self.scope,
             )?;
             for ((artifact_kind, artifact_hash), data) in &self.duplicates {
                 writeln!(
                     f,
-                    "  - for kind: \"{}\", hash: {}\
-                     (existing name: {:?}, new name: {:?})",
-                    artifact_kind,
-                    artifact_hash,
-                    data.before.name,
-                    data.after.name
+                    "  - for kind: {}, hash: {}\
+                     (existing: {}; new: {})",
+                    artifact_kind, artifact_hash, data.before, data.after,
                 )?;
             }
 

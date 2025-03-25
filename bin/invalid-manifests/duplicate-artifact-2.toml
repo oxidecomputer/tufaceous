@@ -1,0 +1,26 @@
+# This manifest contains two artifacts with the same kind. This manifest would
+# succeed by itself, but we use a test-only environment variable within
+# tufaceous to simulate two artifacts with different name/version/kind but the
+# same hash.
+
+system_version = "1.0.0"
+
+[[artifact.gimlet_sp]]
+name = "fake-gimlet-sp"
+version = "1.0.0"
+source = { kind = "fake", size = "1MiB" }
+
+[[artifact.switch_sp]]
+name = "fake-switch-sp"
+version = "1.0.0"
+source = { kind = "fake", size = "1MiB" }
+
+[[artifact.gimlet_sp]]
+name = "fake-gimlet-sp"
+version = "2.0.0"
+source = { kind = "fake", size = "1MiB" }
+
+[[artifact.switch_sp]]
+name = "fake-switch-sp"
+version = "2.0.0"
+source = { kind = "fake", size = "1MiB" }

@@ -14,6 +14,7 @@ use semver::Version;
 use serde::{Deserialize, Serialize};
 use tufaceous_artifact::{ArtifactKind, ArtifactVersion, KnownArtifactKind};
 
+use crate::assemble::{DeploymentUnitData, DeploymentUnitScope};
 use crate::{
     ArtifactSource, CompositeControlPlaneArchiveBuilder, CompositeEntry,
     CompositeHostArchiveBuilder, CompositeRotArchiveBuilder,
@@ -99,11 +100,19 @@ impl ArtifactManifest {
                         ArtifactDeploymentUnits::SingleUnit,
                     ),
                     DeserializedArtifactSource::Fake { size } => {
-                        let fake_data = FakeDataAttributes::new(
-                            kind,
-                            &artifact_data.version,
-                        )
-                        .make_data(size as usize);
+                        // This test-only environment variable is used to
+                        // simulate two artifacts with different
+                        // name/version/kind but the same hash.
+                        let version = match std::env::var(
+                            "__TUFACEOUS_FAKE_ARTIFACT_VERSION",
+                        ) {
+                            Ok(v) => ArtifactVersion::new(v).expect(
+                                "__TUFACEOUS_FAKE_ARTIFACT_VERSION is valid",
+                            ),
+                            Err(_) => artifact_data.version.clone(),
+                        };
+                        let fake_data = FakeDataAttributes::new(kind, &version)
+                            .make_data(size as usize);
                         (
                             ArtifactSource::Memory(fake_data.into()),
                             ArtifactDeploymentUnits::SingleUnit,
@@ -152,19 +161,29 @@ impl ArtifactManifest {
                         let source =
                             ArtifactSource::Memory(builder.finish()?.into());
 
-                        let mut data_builder = DeploymentUnitDataBuilder::new();
+                        let mut data_builder = DeploymentUnitDataBuilder::new(
+                            DeploymentUnitScope::Artifact {
+                                composite_kind: kind,
+                            },
+                        );
                         data_builder
                             .add_deployment_unit(
                                 ArtifactKind::HOST_PHASE_1,
                                 phase_1_hash,
-                                HOST_PHASE_1_FILE_NAME.to_owned(),
+                                DeploymentUnitData {
+                                    name: HOST_PHASE_1_FILE_NAME.to_owned(),
+                                    version: artifact_data.version.clone(),
+                                },
                             )
                             .expect("unique kind");
                         data_builder
                             .add_deployment_unit(
                                 ArtifactKind::HOST_PHASE_2,
                                 phase_2_hash,
-                                HOST_PHASE_2_FILE_NAME.to_owned(),
+                                DeploymentUnitData {
+                                    name: HOST_PHASE_2_FILE_NAME.to_owned(),
+                                    version: artifact_data.version.clone(),
+                                },
                             )
                             .expect("unique kind");
 
@@ -207,19 +226,29 @@ impl ArtifactManifest {
                             |entry| builder.append_archive_b(entry),
                         )?;
 
-                        let mut data_builder = DeploymentUnitDataBuilder::new();
+                        let mut data_builder = DeploymentUnitDataBuilder::new(
+                            DeploymentUnitScope::Artifact {
+                                composite_kind: kind,
+                            },
+                        );
                         data_builder
                             .add_deployment_unit(
                                 a_kind,
                                 archive_a_hash,
-                                ROT_ARCHIVE_A_FILE_NAME.to_string(),
+                                DeploymentUnitData {
+                                    name: ROT_ARCHIVE_A_FILE_NAME.to_owned(),
+                                    version: artifact_data.version.clone(),
+                                },
                             )
                             .expect("unique kind/hash");
                         data_builder
                             .add_deployment_unit(
                                 b_kind,
                                 archive_b_hash,
-                                ROT_ARCHIVE_B_FILE_NAME.to_string(),
+                                DeploymentUnitData {
+                                    name: ROT_ARCHIVE_B_FILE_NAME.to_owned(),
+                                    version: artifact_data.version.clone(),
+                                },
                             )
                             .expect("unique kind/hash");
 
@@ -254,7 +283,11 @@ impl ArtifactManifest {
 
                         let zone_kind =
                             ArtifactKind::from(KnownArtifactKind::Zone);
-                        let mut data_builder = DeploymentUnitDataBuilder::new();
+                        let mut data_builder = DeploymentUnitDataBuilder::new(
+                            DeploymentUnitScope::Artifact {
+                                composite_kind: kind,
+                            },
+                        );
 
                         for zone in zones {
                             let (hash, name) = zone.with_name_and_entry(
@@ -264,7 +297,10 @@ impl ArtifactManifest {
                             data_builder.add_deployment_unit(
                                 zone_kind.clone(),
                                 hash,
-                                name.to_owned(),
+                                DeploymentUnitData {
+                                    name: name.to_owned(),
+                                    version: artifact_data.version.clone(),
+                                },
                             )?;
                         }
                         (

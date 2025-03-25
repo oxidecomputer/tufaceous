@@ -1,0 +1,14 @@
+# This manifest contains two artifacts with the same name and version, which
+# will hash to the same value.
+
+system_version = "1.0.0"
+
+[[artifact.gimlet_sp]]
+name = "fake-gimlet-sp"
+version = "1.0.0"
+source = { kind = "fake", size = "1MiB" }
+
+[[artifact.gimlet_sp]]
+name = "fake-gimlet-sp"
+version = "1.0.0"
+source = { kind = "fake", size = "1MiB" }
