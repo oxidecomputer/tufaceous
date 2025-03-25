@@ -230,7 +230,7 @@ fn test_assemble_duplicate_zone() -> Result<()> {
         path: "UNUSED".into(),
         if_exists: ConfigLoggingIfExists::Fail,
     };
-    let logctx = LogContext::new("test_assemble_fake_non_semver", &log_config);
+    let logctx = LogContext::new("test_assemble_duplicate_zone", &log_config);
     let tempdir = tempfile::tempdir().unwrap();
     let key = Key::generate_ed25519()?;
 
