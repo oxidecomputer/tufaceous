@@ -22,7 +22,7 @@ use tufaceous_artifact::{
 use url::Url;
 
 use crate::assemble::{
-    ArtifactDeploymentUnits, DeploymentUnitData, DeploymentUnitDataBuilder,
+    ArtifactDeploymentUnits, DeploymentUnitData, DeploymentUnitMapBuilder,
     DeploymentUnitScope,
 };
 use crate::key::Key;
@@ -237,7 +237,7 @@ pub struct OmicronRepoEditor {
     existing_target_names: BTreeSet<String>,
     // Set of (kind, hash) pairs for every artifact and deployment unit known to
     // the repo. Used to ensure (kind, hash) pairs are unique within this repo.
-    existing_deployment_units: DeploymentUnitDataBuilder,
+    existing_deployment_units: DeploymentUnitMapBuilder,
 }
 
 impl OmicronRepoEditor {
@@ -257,7 +257,7 @@ impl OmicronRepoEditor {
         //
         // For now we settle for treating all artifacts as single-unit ones.
         let mut data_builder =
-            DeploymentUnitDataBuilder::new(DeploymentUnitScope::Repository);
+            DeploymentUnitMapBuilder::new(DeploymentUnitScope::Repository);
 
         let existing_target_names = repo
             .repo
@@ -288,14 +288,14 @@ impl OmicronRepoEditor {
                     return None;
                 };
 
-                let Ok(()) = data_builder.add_deployment_unit(
-                    artifact.kind.clone(),
-                    hash,
-                    DeploymentUnitData {
+                let Ok(()) =
+                    data_builder.add_deployment_unit(DeploymentUnitData {
                         name: artifact.name.to_owned(),
                         version: artifact.version.clone(),
-                    },
-                ) else {
+                        kind: artifact.kind.clone(),
+                        hash,
+                    })
+                else {
                     errors.push(anyhow!(
                         "failed to add deployment unit for artifact `{}`",
                         target_name
@@ -325,7 +325,7 @@ impl OmicronRepoEditor {
             repo_path: repo.repo_path,
             artifacts,
             existing_target_names,
-            existing_deployment_units: DeploymentUnitDataBuilder::new(
+            existing_deployment_units: DeploymentUnitMapBuilder::new(
                 DeploymentUnitScope::Repository,
             ),
         })
@@ -352,7 +352,7 @@ impl OmicronRepoEditor {
             repo_path,
             artifacts: ArtifactsDocument::empty(system_version),
             existing_target_names: BTreeSet::new(),
-            existing_deployment_units: DeploymentUnitDataBuilder::new(
+            existing_deployment_units: DeploymentUnitMapBuilder::new(
                 DeploymentUnitScope::Repository,
             ),
         })
@@ -400,11 +400,11 @@ impl OmicronRepoEditor {
                 // deployment unit. For unknown artifacts, we don't know, but
                 // treat them as single-unit.
                 self.existing_deployment_units.start_add_deployment_unit(
-                    new_artifact.kind().clone(),
-                    finished_file.digest(),
                     DeploymentUnitData {
                         name: new_artifact.name().to_owned(),
                         version: new_artifact.version().clone(),
+                        kind: new_artifact.kind().clone(),
+                        hash: finished_file.digest(),
                     },
                 )
             }

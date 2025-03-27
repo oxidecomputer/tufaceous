@@ -7,15 +7,15 @@ use std::{collections::BTreeMap, fmt};
 use daft::{Diffable, Leaf};
 use thiserror::Error;
 use tufaceous_artifact::{
-    ArtifactHash, ArtifactKind, ArtifactVersion, KnownArtifactKind,
+    ArtifactHash, ArtifactHashId, ArtifactKind, ArtifactVersion,
+    KnownArtifactKind,
 };
 
-/// Information about deployment units for an artifact.
+/// Information about deployment units keyed by hash ID.
 ///
 /// This information is used to ensure uniqueness of deployment units within a
 /// particular scope.
-pub type DeploymentUnitMap =
-    BTreeMap<(ArtifactKind, ArtifactHash), DeploymentUnitData>;
+pub type DeploymentUnitMap = BTreeMap<ArtifactHashId, DeploymentUnitData>;
 
 /// Information about deployment units for an artifact.
 #[derive(Clone, Debug)]
@@ -55,13 +55,28 @@ impl fmt::Display for DeploymentUnitScope {
     }
 }
 
-/// Data associated with a deployment unit for a composite artifact.
+/// Data associated with a deployment unit.
 #[derive(Clone, Debug)]
 pub struct DeploymentUnitData {
     /// The name of the deployment unit.
     pub name: String,
+
     /// The version of the deployment unit.
     pub version: ArtifactVersion,
+
+    /// The kind of the deployment unit.
+    pub kind: ArtifactKind,
+
+    /// The hash of the deployment unit.
+    pub hash: ArtifactHash,
+}
+
+impl DeploymentUnitData {
+    /// Returns the [`ArtifactHashId`] of the deployment unit.
+    #[inline]
+    pub fn hash_id(&self) -> ArtifactHashId {
+        ArtifactHashId { kind: self.kind.clone(), hash: self.hash }
+    }
 }
 
 impl fmt::Display for DeploymentUnitData {
@@ -70,14 +85,19 @@ impl fmt::Display for DeploymentUnitData {
     }
 }
 
-/// Builder for a composite artifact with deployment units.
+/// Builder for a [`DeploymentUnitMap`].
+///
+/// This builder ensures uniqueness of deployment units within a particular
+/// [`DeploymentUnitScope`].
 #[derive(Clone, Debug)]
-pub struct DeploymentUnitDataBuilder {
+pub struct DeploymentUnitMapBuilder {
     scope: DeploymentUnitScope,
+    // TODO: This should also check for duplicate name/version/kind. Will
+    // probably want to use a data structure more tailored for this.
     deployment_units: DeploymentUnitMap,
 }
 
-impl DeploymentUnitDataBuilder {
+impl DeploymentUnitMapBuilder {
     pub fn new(scope: DeploymentUnitScope) -> Self {
         Self { scope, deployment_units: BTreeMap::new() }
     }
@@ -85,27 +105,18 @@ impl DeploymentUnitDataBuilder {
     /// Starts adding a new deployment unit to `self`.
     pub fn start_add_deployment_unit(
         &mut self,
-        kind: ArtifactKind,
-        hash: ArtifactHash,
         data: DeploymentUnitData,
     ) -> Result<NewDeploymentUnits<'_>, DuplicateDeploymentUnitError> {
-        if let Some(existing) = self.deployment_units.get(&(kind.clone(), hash))
-        {
+        let hash_id = data.hash_id();
+        if let Some(existing) = self.deployment_units.get(&hash_id) {
             return Err(DuplicateDeploymentUnitError::new_single(
                 self.scope,
-                kind,
-                hash,
                 existing.clone(),
                 data,
             ));
         };
 
-        Ok(NewDeploymentUnits::new_single(
-            &mut self.deployment_units,
-            kind,
-            hash,
-            data,
-        ))
+        Ok(NewDeploymentUnits::new_single(&mut self.deployment_units, data))
     }
 
     /// Starts a merge of another deployment unit map into `self`. The merge is
@@ -139,11 +150,9 @@ impl DeploymentUnitDataBuilder {
     /// single deployment unit.
     pub fn add_deployment_unit(
         &mut self,
-        kind: ArtifactKind,
-        hash: ArtifactHash,
         data: DeploymentUnitData,
     ) -> Result<(), DuplicateDeploymentUnitError> {
-        self.start_add_deployment_unit(kind, hash, data)?.insert();
+        self.start_add_deployment_unit(data)?.insert();
         Ok(())
     }
 
@@ -171,12 +180,10 @@ pub struct NewDeploymentUnits<'a> {
 impl<'a> NewDeploymentUnits<'a> {
     fn new_single(
         base: &'a mut DeploymentUnitMap,
-        kind: ArtifactKind,
-        hash: ArtifactHash,
         data: DeploymentUnitData,
     ) -> Self {
         let mut units = DeploymentUnitMap::new();
-        units.insert((kind, hash), data);
+        units.insert(data.hash_id(), data);
         Self { base, units }
     }
 
@@ -195,23 +202,19 @@ pub struct DuplicateDeploymentUnitError {
     ///
     /// For `Leaf<DeploymentUnitData>`, `before` is the existing data and
     /// `after` is the new data.
-    pub duplicates:
-        BTreeMap<(ArtifactKind, ArtifactHash), Leaf<DeploymentUnitData>>,
+    pub duplicates: BTreeMap<ArtifactHashId, Leaf<DeploymentUnitData>>,
 }
 
 impl DuplicateDeploymentUnitError {
+    // Note: existing and new should have the same hash_id.
     fn new_single(
         scope: DeploymentUnitScope,
-        artifact_kind: ArtifactKind,
-        artifact_hash: ArtifactHash,
         existing: DeploymentUnitData,
         new: DeploymentUnitData,
     ) -> Self {
         let mut duplicates = BTreeMap::new();
-        duplicates.insert(
-            (artifact_kind, artifact_hash),
-            Leaf { before: existing, after: new },
-        );
+        let hash_id = existing.hash_id();
+        duplicates.insert(hash_id, Leaf { before: existing, after: new });
         Self { scope, duplicates }
     }
 }
@@ -220,17 +223,13 @@ impl fmt::Display for DuplicateDeploymentUnitError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         // For a single deployment unit, we can simply display the artifact kind and hash.
         if self.duplicates.len() == 1 {
-            let ((artifact_kind, artifact_hash), data) =
-                self.duplicates.first_key_value().unwrap();
+            let (hash_id, data) = self.duplicates.first_key_value().unwrap();
+            // XXX: should hash_id.kind/hash be a `Display` impl?
             write!(
                 f,
                 "a deployment unit with the same kind and hash already exists in this {}:\n\
                  kind: {}, hash: {} (existing {}; new {})",
-                self.scope,
-                artifact_kind,
-                artifact_hash,
-                data.before,
-                data.after,
+                self.scope, hash_id.kind, hash_id.hash, data.before, data.after,
             )
         } else {
             writeln!(
@@ -239,12 +238,12 @@ impl fmt::Display for DuplicateDeploymentUnitError {
                 self.duplicates.len(),
                 self.scope,
             )?;
-            for ((artifact_kind, artifact_hash), data) in &self.duplicates {
+            for (hash_id, data) in &self.duplicates {
                 writeln!(
                     f,
                     "  - for kind: {}, hash: {}\
                      (existing: {}; new: {})",
-                    artifact_kind, artifact_hash, data.before, data.after,
+                    hash_id.kind, hash_id.hash, data.before, data.after,
                 )?;
             }
 

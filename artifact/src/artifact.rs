@@ -96,6 +96,20 @@ impl FromStr for ArtifactHash {
     }
 }
 
+/// A hash-based identifier for an artifact or deployment unit: the kind and
+/// hash.
+#[derive(
+    Debug, Clone, PartialEq, Eq, Hash, Ord, PartialOrd, Deserialize, Serialize,
+)]
+#[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
+pub struct ArtifactHashId {
+    /// The kind of artifact this is.
+    pub kind: ArtifactKind,
+
+    /// The hash of the artifact.
+    pub hash: ArtifactHash,
+}
+
 /// Produce an OpenAPI schema describing a hex array of a specific length (e.g.,
 /// a hash digest).
 #[cfg(feature = "schemars")]

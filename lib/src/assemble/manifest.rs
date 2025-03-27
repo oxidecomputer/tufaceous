@@ -22,7 +22,7 @@ use crate::{
     ROT_ARCHIVE_A_FILE_NAME, ROT_ARCHIVE_B_FILE_NAME, make_filler_text,
 };
 
-use super::{ArtifactDeploymentUnits, DeploymentUnitDataBuilder};
+use super::{ArtifactDeploymentUnits, DeploymentUnitMapBuilder};
 
 static FAKE_MANIFEST_TOML: &str =
     include_str!("../../../bin/manifests/fake.toml");
@@ -161,30 +161,26 @@ impl ArtifactManifest {
                         let source =
                             ArtifactSource::Memory(builder.finish()?.into());
 
-                        let mut data_builder = DeploymentUnitDataBuilder::new(
+                        let mut data_builder = DeploymentUnitMapBuilder::new(
                             DeploymentUnitScope::Artifact {
                                 composite_kind: kind,
                             },
                         );
                         data_builder
-                            .add_deployment_unit(
-                                ArtifactKind::HOST_PHASE_1,
-                                phase_1_hash,
-                                DeploymentUnitData {
-                                    name: HOST_PHASE_1_FILE_NAME.to_owned(),
-                                    version: artifact_data.version.clone(),
-                                },
-                            )
+                            .add_deployment_unit(DeploymentUnitData {
+                                name: HOST_PHASE_1_FILE_NAME.to_owned(),
+                                version: artifact_data.version.clone(),
+                                kind: ArtifactKind::HOST_PHASE_1,
+                                hash: phase_1_hash,
+                            })
                             .expect("unique kind");
                         data_builder
-                            .add_deployment_unit(
-                                ArtifactKind::HOST_PHASE_2,
-                                phase_2_hash,
-                                DeploymentUnitData {
-                                    name: HOST_PHASE_2_FILE_NAME.to_owned(),
-                                    version: artifact_data.version.clone(),
-                                },
-                            )
+                            .add_deployment_unit(DeploymentUnitData {
+                                name: HOST_PHASE_2_FILE_NAME.to_owned(),
+                                version: artifact_data.version.clone(),
+                                kind: ArtifactKind::HOST_PHASE_2,
+                                hash: phase_2_hash,
+                            })
                             .expect("unique kind");
 
                         (source, data_builder.finish_units())
@@ -226,31 +222,27 @@ impl ArtifactManifest {
                             |entry| builder.append_archive_b(entry),
                         )?;
 
-                        let mut data_builder = DeploymentUnitDataBuilder::new(
+                        let mut data_builder = DeploymentUnitMapBuilder::new(
                             DeploymentUnitScope::Artifact {
                                 composite_kind: kind,
                             },
                         );
                         data_builder
-                            .add_deployment_unit(
-                                a_kind,
-                                archive_a_hash,
-                                DeploymentUnitData {
-                                    name: ROT_ARCHIVE_A_FILE_NAME.to_owned(),
-                                    version: artifact_data.version.clone(),
-                                },
-                            )
-                            .expect("unique kind/hash");
+                            .add_deployment_unit(DeploymentUnitData {
+                                name: ROT_ARCHIVE_A_FILE_NAME.to_owned(),
+                                version: artifact_data.version.clone(),
+                                kind: a_kind,
+                                hash: archive_a_hash,
+                            })
+                            .expect("unique kind in empty map");
                         data_builder
-                            .add_deployment_unit(
-                                b_kind,
-                                archive_b_hash,
-                                DeploymentUnitData {
-                                    name: ROT_ARCHIVE_B_FILE_NAME.to_owned(),
-                                    version: artifact_data.version.clone(),
-                                },
-                            )
-                            .expect("unique kind/hash");
+                            .add_deployment_unit(DeploymentUnitData {
+                                name: ROT_ARCHIVE_B_FILE_NAME.to_owned(),
+                                version: artifact_data.version.clone(),
+                                kind: b_kind,
+                                hash: archive_b_hash,
+                            })
+                            .expect("unique kind in empty map");
 
                         (
                             ArtifactSource::Memory(builder.finish()?.into()),
@@ -283,7 +275,7 @@ impl ArtifactManifest {
 
                         let zone_kind =
                             ArtifactKind::from(KnownArtifactKind::Zone);
-                        let mut data_builder = DeploymentUnitDataBuilder::new(
+                        let mut data_builder = DeploymentUnitMapBuilder::new(
                             DeploymentUnitScope::Artifact {
                                 composite_kind: kind,
                             },
@@ -295,11 +287,11 @@ impl ArtifactManifest {
                                 |name, entry| builder.append_zone(name, entry),
                             )?;
                             data_builder.add_deployment_unit(
-                                zone_kind.clone(),
-                                hash,
                                 DeploymentUnitData {
                                     name: name.to_owned(),
                                     version: artifact_data.version.clone(),
+                                    kind: zone_kind.clone(),
+                                    hash,
                                 },
                             )?;
                         }
