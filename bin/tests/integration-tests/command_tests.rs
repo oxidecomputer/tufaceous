@@ -308,14 +308,6 @@ fn test_assemble_duplicate_artifact_2() -> Result<()> {
         "invalid-manifests/duplicate-artifact-2.toml",
     ]);
     cmd.arg(&archive_path);
-    // This should succeed because the artifacts are different.
-    cmd.assert().success();
-
-    // Remove the archive file to start over.
-    std::fs::remove_file(&archive_path).expect("archive path removed");
-
-    // But setting this environment variable should make it fail.
-    cmd.env("__TUFACEOUS_FAKE_ARTIFACT_VERSION", "0.0.0");
     cmd.assert()
         .failure()
         .stderr(predicate::str::contains("2 errors encountered"))

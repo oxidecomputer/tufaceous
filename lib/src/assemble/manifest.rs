@@ -99,20 +99,16 @@ impl ArtifactManifest {
                         ArtifactSource::File(base_dir.join(path)),
                         ArtifactDeploymentUnits::SingleUnit,
                     ),
-                    DeserializedArtifactSource::Fake { size } => {
+                    DeserializedArtifactSource::Fake { size, data_version } => {
                         // This test-only environment variable is used to
                         // simulate two artifacts with different
                         // name/version/kind but the same hash.
-                        let version = match std::env::var(
-                            "__TUFACEOUS_FAKE_ARTIFACT_VERSION",
-                        ) {
-                            Ok(v) => ArtifactVersion::new(v).expect(
-                                "__TUFACEOUS_FAKE_ARTIFACT_VERSION is valid",
-                            ),
-                            Err(_) => artifact_data.version.clone(),
-                        };
-                        let fake_data = FakeDataAttributes::new(kind, &version)
-                            .make_data(size as usize);
+                        let data_version = data_version
+                            .as_ref()
+                            .unwrap_or_else(|| &artifact_data.version);
+                        let fake_data =
+                            FakeDataAttributes::new(kind, data_version)
+                                .make_data(size as usize);
                         (
                             ArtifactSource::Memory(fake_data.into()),
                             ArtifactDeploymentUnits::SingleUnit,
@@ -492,7 +488,7 @@ impl DeserializedManifest {
                         entry.version = version.clone();
                     }
                 }
-                ManifestTweak::ArtifactContents { kind, size_delta } => {
+                ManifestTweak::ArtifactSize { kind, size_delta } => {
                     let entries =
                         self.artifacts.get_mut(kind).with_context(|| {
                             format!(
@@ -503,6 +499,21 @@ impl DeserializedManifest {
 
                     for entry in entries {
                         entry.source.apply_size_delta(*size_delta)?;
+                    }
+                }
+                ManifestTweak::ArtifactDataVersion { kind, data_version } => {
+                    let entries =
+                        self.artifacts.get_mut(kind).with_context(|| {
+                            format!(
+                                "manifest does not have artifact kind \
+                                 {kind}",
+                            )
+                        })?;
+
+                    for entry in entries {
+                        entry
+                            .source
+                            .apply_data_version(data_version.as_ref())?;
                     }
                 }
             }
@@ -556,6 +567,12 @@ pub enum DeserializedArtifactSource {
     Fake {
         #[serde(deserialize_with = "deserialize_byte_size")]
         size: u64,
+        /// The internal version to use while constructing the fake artifact
+        /// data.
+        ///
+        /// If not set, the artifact's version is used.
+        #[serde(default)]
+        data_version: Option<ArtifactVersion>,
     },
     CompositeHost {
         phase_1: DeserializedFileArtifactSource,
@@ -576,7 +593,7 @@ impl DeserializedArtifactSource {
             DeserializedArtifactSource::File { .. } => {
                 bail!("cannot apply size delta to `file` source")
             }
-            DeserializedArtifactSource::Fake { size } => {
+            DeserializedArtifactSource::Fake { size, data_version: _ } => {
                 *size = (*size).saturating_add_signed(size_delta);
                 Ok(())
             }
@@ -598,6 +615,34 @@ impl DeserializedArtifactSource {
                     zone.apply_size_delta(size_delta)?;
                 }
                 Ok(())
+            }
+        }
+    }
+
+    fn apply_data_version(
+        &mut self,
+        new_data_version: Option<&ArtifactVersion>,
+    ) -> Result<()> {
+        match self {
+            DeserializedArtifactSource::File { .. } => {
+                bail!("cannot apply data version to `file` source")
+            }
+            DeserializedArtifactSource::Fake { data_version, .. } => {
+                *data_version = new_data_version.cloned();
+                Ok(())
+            }
+            DeserializedArtifactSource::CompositeHost { .. } => {
+                bail!(
+                    "cannot yet apply data version to `composite_host` source"
+                )
+            }
+            DeserializedArtifactSource::CompositeRot { .. } => {
+                bail!("cannot yet apply data version to `composite_rot` source")
+            }
+            DeserializedArtifactSource::CompositeControlPlane { .. } => {
+                bail!(
+                    "cannot yet apply data version to `composite_control_plane` source"
+                )
             }
         }
     }
@@ -753,8 +798,19 @@ pub enum ManifestTweak {
     /// Update the versions for this artifact.
     ArtifactVersion { kind: KnownArtifactKind, version: ArtifactVersion },
 
-    /// Update the contents of this artifact (only support changing the size).
-    ArtifactContents { kind: KnownArtifactKind, size_delta: i64 },
+    /// Update the size of this fake artifact.
+    ArtifactSize { kind: KnownArtifactKind, size_delta: i64 },
+
+    /// Update the data version of this fake artifact.
+    ///
+    /// This version is typically the same as the artifact version, but it can
+    /// be changed for testing purposes.
+    ArtifactDataVersion {
+        kind: KnownArtifactKind,
+        /// Setting this to `None` resets the data version to the artifact
+        /// version.
+        data_version: Option<ArtifactVersion>,
+    },
 }
 
 fn deserialize_byte_size<'de, D>(deserializer: D) -> Result<u64, D::Error>
