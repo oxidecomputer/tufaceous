@@ -163,7 +163,7 @@ impl ArtifactManifest {
                             },
                         );
                         data_builder
-                            .add_deployment_unit(DeploymentUnitData {
+                            .insert(DeploymentUnitData {
                                 name: HOST_PHASE_1_FILE_NAME.to_owned(),
                                 version: artifact_data.version.clone(),
                                 kind: ArtifactKind::HOST_PHASE_1,
@@ -171,7 +171,7 @@ impl ArtifactManifest {
                             })
                             .expect("unique kind");
                         data_builder
-                            .add_deployment_unit(DeploymentUnitData {
+                            .insert(DeploymentUnitData {
                                 name: HOST_PHASE_2_FILE_NAME.to_owned(),
                                 version: artifact_data.version.clone(),
                                 kind: ArtifactKind::HOST_PHASE_2,
@@ -224,7 +224,7 @@ impl ArtifactManifest {
                             },
                         );
                         data_builder
-                            .add_deployment_unit(DeploymentUnitData {
+                            .insert(DeploymentUnitData {
                                 name: ROT_ARCHIVE_A_FILE_NAME.to_owned(),
                                 version: artifact_data.version.clone(),
                                 kind: a_kind,
@@ -232,7 +232,7 @@ impl ArtifactManifest {
                             })
                             .expect("unique kind in empty map");
                         data_builder
-                            .add_deployment_unit(DeploymentUnitData {
+                            .insert(DeploymentUnitData {
                                 name: ROT_ARCHIVE_B_FILE_NAME.to_owned(),
                                 version: artifact_data.version.clone(),
                                 kind: b_kind,
@@ -282,14 +282,12 @@ impl ArtifactManifest {
                                 &artifact_data.version,
                                 |name, entry| builder.append_zone(name, entry),
                             )?;
-                            data_builder.add_deployment_unit(
-                                DeploymentUnitData {
-                                    name: name.to_owned(),
-                                    version: artifact_data.version.clone(),
-                                    kind: zone_kind.clone(),
-                                    hash,
-                                },
-                            )?;
+                            data_builder.insert(DeploymentUnitData {
+                                name: name.to_owned(),
+                                version: artifact_data.version.clone(),
+                                kind: zone_kind.clone(),
+                                hash,
+                            })?;
                         }
                         (
                             ArtifactSource::Memory(builder.finish()?.into()),

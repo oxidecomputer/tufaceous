@@ -103,7 +103,7 @@ impl DeploymentUnitMapBuilder {
     }
 
     /// Starts adding a new deployment unit to `self`.
-    pub fn start_add_deployment_unit(
+    pub fn start_insert(
         &mut self,
         data: DeploymentUnitData,
     ) -> Result<NewDeploymentUnits<'_>, DuplicateDeploymentUnitError> {
@@ -119,11 +119,11 @@ impl DeploymentUnitMapBuilder {
         Ok(NewDeploymentUnits::new_single(&mut self.deployment_units, data))
     }
 
-    /// Starts a merge of another deployment unit map into `self`. The merge is
-    /// not committed until `NewDeploymentUnits::commit` is called.
+    /// Starts a bulk insert of another deployment unit map into `self`. The
+    /// merge is not committed until `NewDeploymentUnits::commit` is called.
     ///
     /// Returns an error if any duplicates are found.
-    pub fn start_merge_deployment_units(
+    pub fn start_bulk_insert(
         &mut self,
         units: DeploymentUnitMap,
     ) -> Result<NewDeploymentUnits<'_>, DuplicateDeploymentUnitError> {
@@ -148,11 +148,11 @@ impl DeploymentUnitMapBuilder {
 
     /// Convenience method for `self.start_add_deployment_unit(..).insert()` for a
     /// single deployment unit.
-    pub fn add_deployment_unit(
+    pub fn insert(
         &mut self,
         data: DeploymentUnitData,
     ) -> Result<(), DuplicateDeploymentUnitError> {
-        self.start_add_deployment_unit(data)?.insert();
+        self.start_insert(data)?.commit();
         Ok(())
     }
 
@@ -167,11 +167,11 @@ impl DeploymentUnitMapBuilder {
     }
 }
 
-/// Information about new deployment units for a [`DeploymentUnitDataBuilder`].
+/// Information about new deployment units for a [`DeploymentUnitMapBuilder`].
 ///
-/// This serves as a way to make new deployment units ready to be inserted into
-/// the builder.
-#[must_use = "NewDeploymentUnits must be inserted into the builder"]
+/// This serves as a way to make new deployment units ready to be bulk-inserted
+/// into the builder.
+#[must_use = "NewDeploymentUnits must be committed into the builder"]
 pub struct NewDeploymentUnits<'a> {
     base: &'a mut DeploymentUnitMap,
     units: DeploymentUnitMap,
@@ -188,7 +188,7 @@ impl<'a> NewDeploymentUnits<'a> {
     }
 
     /// Inserts the deployment unit data into the builder.
-    pub fn insert(self) {
+    pub fn commit(self) {
         self.base.extend(self.units);
     }
 }

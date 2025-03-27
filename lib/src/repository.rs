@@ -288,14 +288,12 @@ impl OmicronRepoEditor {
                     return None;
                 };
 
-                let Ok(()) =
-                    data_builder.add_deployment_unit(DeploymentUnitData {
-                        name: artifact.name.to_owned(),
-                        version: artifact.version.clone(),
-                        kind: artifact.kind.clone(),
-                        hash,
-                    })
-                else {
+                let Ok(()) = data_builder.insert(DeploymentUnitData {
+                    name: artifact.name.to_owned(),
+                    version: artifact.version.clone(),
+                    kind: artifact.kind.clone(),
+                    hash,
+                }) else {
                     errors.push(anyhow!(
                         "failed to add deployment unit for artifact `{}`",
                         target_name
@@ -399,7 +397,7 @@ impl OmicronRepoEditor {
                 // For single-unit artifacts, the artifact itself is the
                 // deployment unit. For unknown artifacts, we don't know, but
                 // treat them as single-unit.
-                self.existing_deployment_units.start_add_deployment_unit(
+                self.existing_deployment_units.start_insert(
                     DeploymentUnitData {
                         name: new_artifact.name().to_owned(),
                         version: new_artifact.version().clone(),
@@ -411,7 +409,7 @@ impl OmicronRepoEditor {
             ArtifactDeploymentUnits::Composite { deployment_units } => {
                 // For composite artifacts, merge the deployment units.
                 self.existing_deployment_units
-                    .start_merge_deployment_units(deployment_units.clone())
+                    .start_bulk_insert(deployment_units.clone())
             }
         };
         let new_units = match res {
@@ -447,7 +445,7 @@ impl OmicronRepoEditor {
             kind: new_artifact.kind().clone(),
             target: target_name.clone(),
         });
-        new_units.expect("new_units is None => errors handled above").insert();
+        new_units.expect("new_units is None => errors handled above").commit();
 
         finished_file.finalize(&mut self.editor)
     }
