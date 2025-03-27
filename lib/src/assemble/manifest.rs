@@ -105,7 +105,7 @@ impl ArtifactManifest {
                         // name/version/kind but the same hash.
                         let data_version = data_version
                             .as_ref()
-                            .unwrap_or_else(|| &artifact_data.version);
+                            .unwrap_or(&artifact_data.version);
                         let fake_data =
                             FakeDataAttributes::new(kind, data_version)
                                 .make_data(size as usize);
