@@ -37,6 +37,7 @@ futures = "0.3.31"
 hex = "0.4.3"
 hubtools = { git = "https://github.com/oxidecomputer/hubtools.git", branch = "main" }
 humantime = "2.1.0"
+indent_write = "2.2.0"
 itertools = "0.13.0"
 parse-display = "0.10.0"
 parse-size = "1.1.0"

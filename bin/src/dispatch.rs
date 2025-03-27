@@ -7,7 +7,7 @@ use camino::Utf8PathBuf;
 use chrono::{DateTime, Utc};
 use clap::{CommandFactory, Parser};
 use semver::Version;
-use tufaceous_artifact::{ArtifactKind, ArtifactVersion};
+use tufaceous_artifact::{ArtifactKind, ArtifactVersion, ArtifactsDocument};
 use tufaceous_lib::assemble::{ArtifactManifest, OmicronRepoAssembler};
 use tufaceous_lib::{AddArtifact, ArchiveExtractor, Key, OmicronRepo};
 
@@ -155,8 +155,9 @@ impl Args {
                     })?;
                 repo.read_artifacts().await.with_context(|| {
                     format!(
-                        "error loading artifacts.json from extracted archive \
-                         at `{dest}`"
+                        "error loading {} from extracted archive \
+                         at `{dest}`",
+                        ArtifactsDocument::FILE_NAME
                     )
                 })?;
 

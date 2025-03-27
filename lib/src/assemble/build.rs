@@ -6,7 +6,7 @@ use anyhow::{Context, Result};
 use camino::{Utf8Path, Utf8PathBuf};
 use chrono::{DateTime, Utc};
 
-use crate::{AddArtifact, Key, OmicronRepo};
+use crate::{AddArtifact, Key, OmicronRepo, utils::merge_anyhow_list};
 
 use super::ArtifactManifest;
 
@@ -104,6 +104,8 @@ impl OmicronRepoAssembler {
         .await?;
 
         // Add all the artifacts.
+        let mut errors = Vec::new();
+
         for (kind, entries) in &self.manifest.artifacts {
             for data in entries {
                 let new_artifact = AddArtifact::new(
@@ -111,11 +113,20 @@ impl OmicronRepoAssembler {
                     data.name.clone(),
                     data.version.clone(),
                     data.source.clone(),
+                    data.deployment_units.clone(),
                 );
-                repository.add_artifact(&new_artifact).with_context(|| {
-                    format!("error adding artifact with kind `{kind}`")
-                })?;
+                let res =
+                    repository.add_artifact(&new_artifact).with_context(|| {
+                        format!("error adding artifact with kind `{kind}`")
+                    });
+                if let Err(err) = res {
+                    errors.push(err);
+                }
             }
+        }
+
+        if !errors.is_empty() {
+            return Err(merge_anyhow_list(errors));
         }
 
         // Write out the repository.

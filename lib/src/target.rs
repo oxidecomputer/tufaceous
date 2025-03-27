@@ -11,6 +11,7 @@ use camino_tempfile::NamedUtf8TempFile;
 use sha2::{Digest, Sha256};
 use tough::editor::RepositoryEditor;
 use tough::schema::{Hashes, Target};
+use tufaceous_artifact::ArtifactHash;
 
 pub(crate) struct TargetWriter {
     file: NamedUtf8TempFile,
@@ -35,11 +36,44 @@ impl TargetWriter {
         })
     }
 
-    pub(crate) fn finish(self, editor: &mut RepositoryEditor) -> Result<()> {
+    /// Marks that writing has been completed, though the file is still
+    /// temporary and not persisted yet.
+    ///
+    /// The main goal is to provide a way to obtain the hash of the file without
+    /// persisting it.
+    pub(crate) fn finish_write(self) -> TargetFinishWrite {
         let digest = self.hasher.finalize();
+        TargetFinishWrite {
+            file: self.file,
+            targets_dir: self.targets_dir,
+            name: self.name,
+            length: self.length,
+            digest: ArtifactHash(digest.into()),
+        }
+    }
+}
+
+#[must_use = "the file is still temporary and must be finalized"]
+pub(crate) struct TargetFinishWrite {
+    file: NamedUtf8TempFile,
+    targets_dir: Utf8PathBuf,
+    name: String,
+    length: u64,
+    digest: ArtifactHash,
+}
+
+impl TargetFinishWrite {
+    pub(crate) fn digest(&self) -> ArtifactHash {
+        self.digest
+    }
+
+    pub(crate) fn finalize(
+        self,
+        editor: &mut RepositoryEditor,
+    ) -> Result<ArtifactHash> {
         self.file.persist(self.targets_dir.join(format!(
             "{}.{}",
-            hex::encode(digest),
+            hex::encode(self.digest.0),
             self.name
         )))?;
         editor.add_target(
@@ -47,14 +81,14 @@ impl TargetWriter {
             Target {
                 length: self.length,
                 hashes: Hashes {
-                    sha256: digest.to_vec().into(),
+                    sha256: Vec::from(self.digest.0).into(),
                     _extra: HashMap::new(),
                 },
                 custom: HashMap::new(),
                 _extra: HashMap::new(),
             },
         )?;
-        Ok(())
+        Ok(self.digest)
     }
 }
 

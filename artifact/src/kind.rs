@@ -8,6 +8,7 @@ use daft::Diffable;
 use parse_display::{Display, FromStr};
 use serde::{Deserialize, Serialize};
 use strum::{EnumIter, IntoEnumIterator};
+use thiserror::Error;
 
 /// The kind of artifact we are dealing with.
 ///
@@ -199,6 +200,38 @@ pub enum KnownArtifactKind {
 }
 
 impl KnownArtifactKind {
+    /// For an RoT variant, returns A and B deployment unit kinds.
+    pub fn rot_a_and_b_kinds(
+        self,
+    ) -> Result<(ArtifactKind, ArtifactKind), NotRotVariantError> {
+        match self {
+            KnownArtifactKind::GimletRot => Ok((
+                ArtifactKind::GIMLET_ROT_IMAGE_A,
+                ArtifactKind::GIMLET_ROT_IMAGE_B,
+            )),
+            KnownArtifactKind::PscRot => Ok((
+                ArtifactKind::PSC_ROT_IMAGE_A,
+                ArtifactKind::PSC_ROT_IMAGE_B,
+            )),
+            KnownArtifactKind::SwitchRot => Ok((
+                ArtifactKind::SWITCH_ROT_IMAGE_A,
+                ArtifactKind::SWITCH_ROT_IMAGE_B,
+            )),
+            KnownArtifactKind::GimletSp
+            | KnownArtifactKind::GimletRotBootloader
+            | KnownArtifactKind::Host
+            | KnownArtifactKind::Trampoline
+            | KnownArtifactKind::ControlPlane
+            | KnownArtifactKind::Zone
+            | KnownArtifactKind::PscSp
+            | KnownArtifactKind::PscRotBootloader
+            | KnownArtifactKind::SwitchSp
+            | KnownArtifactKind::SwitchRotBootloader => {
+                Err(NotRotVariantError(self))
+            }
+        }
+    }
+
     /// Returns an iterator over all the variants in this struct.
     ///
     /// This is provided as a helper so dependent packages don't have to pull in
@@ -207,6 +240,10 @@ impl KnownArtifactKind {
         <Self as IntoEnumIterator>::iter()
     }
 }
+
+#[derive(Debug, Error)]
+#[error("expected an RoT variant, found {0:?}")]
+pub struct NotRotVariantError(KnownArtifactKind);
 
 #[cfg(test)]
 mod tests {

@@ -1,0 +1,24 @@
+# This manifest contains artifacts with the same kind and hash, but different
+# artifact versions.
+
+system_version = "1.0.0"
+
+[[artifact.gimlet_sp]]
+name = "fake-gimlet-sp"
+version = "1.0.0"
+source = { kind = "fake", size = "1MiB", data_version = "0.0.0" }
+
+[[artifact.switch_sp]]
+name = "fake-switch-sp"
+version = "1.0.0"
+source = { kind = "fake", size = "1MiB", data_version = "0.0.0" }
+
+[[artifact.gimlet_sp]]
+name = "fake-gimlet-sp"
+version = "2.0.0"
+source = { kind = "fake", size = "1MiB", data_version = "0.0.0" }
+
+[[artifact.switch_sp]]
+name = "fake-switch-sp"
+version = "2.0.0"
+source = { kind = "fake", size = "1MiB", data_version = "0.0.0" }

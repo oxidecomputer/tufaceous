@@ -9,6 +9,7 @@ mod key;
 mod repository;
 mod root;
 mod target;
+mod utils;
 
 pub use archive::*;
 pub use artifact::*;
