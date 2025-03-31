@@ -62,7 +62,7 @@ test-strategy = "0.4.0"
 thiserror = "2.0.12"
 tokio = "1.43.0"
 toml = "0.8.20"
-tough = { version = "0.19.0", features = [ "http" ] }
+tough = { version = "0.20.0", features = [ "http" ] }
 tufaceous-artifact = { path = "artifact", default-features = false }
 tufaceous-brand-metadata = { path = "brand-metadata" }
 tufaceous-lib = { path = "lib" }
