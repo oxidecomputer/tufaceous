@@ -1,4 +1,4 @@
-# This manifest has two control plane zones that hash to the same contents. This
+# This manifest has two measurement corpora that hash to the same contents. This
 # is not allowed.
 
 system_version = "1.0.0"
@@ -10,9 +10,9 @@ version = "1.0.0"
 kind = "composite-control-plane"
 zones = [
     { kind = "fake", name = "zone1", size = "1MiB" },
-    { kind = "fake", name = "zone1", size = "1MiB" },
+    { kind = "fake", name = "zone2", size = "1MiB" },
 ]
 measurement_corpus = [
     { kind = "fake", name = "measurement1", size = "1MiB" },
-    { kind = "fake", name = "measurement2", size = "1MiB" },
+    { kind = "fake", name = "measurement1", size = "1MiB" },
 ]
