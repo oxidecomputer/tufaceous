@@ -133,6 +133,10 @@ impl ArtifactKind {
     /// Derived from [`KnownArtifactKind::Trampoline`].
     pub const TRAMPOLINE_PHASE_2: Self =
         Self::from_static("trampoline_phase_2");
+
+    /// Manifest identifier
+    pub const MEASUREMENT_CORPUS: Self =
+        Self::from_static("measurement_corpus");
 }
 
 impl From<KnownArtifactKind> for ArtifactKind {
@@ -196,6 +200,9 @@ pub enum KnownArtifactKind {
     SwitchSp,
     SwitchRot,
     SwitchRotBootloader,
+
+    // Reference Measurements
+    MeasurementCorpus,
 }
 
 impl KnownArtifactKind {
