@@ -259,6 +259,41 @@ fn test_assemble_duplicate_zone() -> Result<()> {
 }
 
 #[test]
+fn test_assemble_duplicate_measurement() -> Result<()> {
+    let log_config = ConfigLogging::File {
+        level: ConfigLoggingLevel::Trace,
+        path: "UNUSED".into(),
+        if_exists: ConfigLoggingIfExists::Fail,
+    };
+    let logctx =
+        LogContext::new("test_assemble_duplicate_measurement", &log_config);
+    let tempdir = tempfile::tempdir().unwrap();
+    let key = Key::generate_ed25519()?;
+
+    let archive_path = tempdir.path().join("archive.zip");
+
+    let mut cmd = make_cmd(&key);
+    cmd.args([
+        "assemble",
+        "--skip-all-present",
+        "invalid-manifests/duplicate-measurement.toml",
+    ]);
+    cmd.arg(&archive_path);
+    cmd.assert()
+        .failure()
+        .stderr(predicate::str::contains(
+            r#"a deployment unit with the same kind and hash already exists in this control_plane artifact:"#,
+        ))
+        .stderr(predicate::str::contains("zone/"))
+        .stderr(predicate::str::contains(
+            r#"(existing name: measurement1.cbor, version: 1.0.0; new name: measurement1-dup.cbor, version: 1.0.0)"#,
+        ));
+
+    logctx.cleanup_successful();
+    Ok(())
+}
+
+#[test]
 fn test_assemble_duplicate_artifact() -> Result<()> {
     let log_config = ConfigLogging::File {
         level: ConfigLoggingLevel::Trace,

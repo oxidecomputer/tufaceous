@@ -369,6 +369,12 @@ impl RotArchives {
     }
 }
 
+/// Represents an entry type in a control plane, used with `ControlPlaneImages::extract_into`
+pub enum ControlPlaneEntry {
+    Zone,
+    MeasurementCorpus,
+}
+
 /// Represents control plane zone images.
 ///
 /// The control plane artifact is actually a tarball that contains a set of zone
@@ -376,24 +382,31 @@ impl RotArchives {
 #[derive(Clone, Debug)]
 pub struct ControlPlaneZoneImages {
     pub zones: Vec<(String, Bytes)>,
+    pub measurement_corpus: Vec<(String, Bytes)>,
 }
 
 impl ControlPlaneZoneImages {
     pub fn extract<R: io::Read>(reader: R) -> Result<Self> {
         let mut zones = Vec::new();
-        Self::extract_into(reader, |name, reader| {
+        let mut measurement_corpus = Vec::new();
+        Self::extract_into(reader, |name, kind, reader| {
             let mut buf = Vec::new();
             io::copy(reader, &mut buf)?;
-            zones.push((name, buf.into()));
+            match kind {
+                ControlPlaneEntry::Zone => zones.push((name, buf.into())),
+                ControlPlaneEntry::MeasurementCorpus => {
+                    measurement_corpus.push((name, buf.into()))
+                }
+            }
             Ok(())
         })?;
-        Ok(Self { zones })
+        Ok(Self { zones, measurement_corpus })
     }
 
     pub fn extract_into<R, F>(reader: R, mut handler: F) -> Result<()>
     where
         R: io::Read,
-        F: FnMut(String, &mut dyn io::Read) -> Result<()>,
+        F: FnMut(String, ControlPlaneEntry, &mut dyn io::Read) -> Result<()>,
     {
         let uncompressed =
             flate2::bufread::GzDecoder::new(BufReader::new(reader));
@@ -432,9 +445,24 @@ impl ControlPlaneZoneImages {
                     .and_then(|s| s.to_str())
                     .map(|s| s.to_string())
                 {
-                    handler(name, &mut entry)?;
+                    handler(name, ControlPlaneEntry::Zone, &mut entry)?;
                 }
                 zone_found = true;
+            } else if path
+                .starts_with(CONTROL_PLANE_ARCHIVE_MEASUREMENT_DIRECTORY)
+            {
+                if let Some(name) = path
+                    .file_name()
+                    .and_then(|s| s.to_str())
+                    .map(|s| s.to_string())
+                {
+                    handler(
+                        name,
+                        ControlPlaneEntry::MeasurementCorpus,
+                        &mut entry,
+                    )?;
+                }
+                // We will eventually want to make this required
             }
         }
 
@@ -463,3 +491,4 @@ pub(crate) static HOST_PHASE_2_FILE_NAME: &str = "image/zfs.img";
 pub(crate) static ROT_ARCHIVE_A_FILE_NAME: &str = "archive-a.zip";
 pub(crate) static ROT_ARCHIVE_B_FILE_NAME: &str = "archive-b.zip";
 static CONTROL_PLANE_ARCHIVE_ZONE_DIRECTORY: &str = "zones";
+static CONTROL_PLANE_ARCHIVE_MEASUREMENT_DIRECTORY: &str = "measurements";
