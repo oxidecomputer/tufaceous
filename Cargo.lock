@@ -1265,7 +1265,7 @@ checksum = "df3b46402a9d5adb4c86a0cf463f42e19994e3ee891101b1841f30a545cb49a9"
 [[package]]
 name = "hubtools"
 version = "0.4.6"
-source = "git+https://github.com/oxidecomputer/hubtools.git?branch=main#f48e2da029ba6552cff5c07ff8a2fc21cc56aa32"
+source = "git+https://github.com/oxidecomputer/hubtools.git?branch=main#3b72a550f2b5ec7ad489b8822b26239b7176bfdd"
 dependencies = [
  "hex",
  "lpc55_areas",
@@ -1673,7 +1673,7 @@ checksum = "a7a70ba024b9dc04c27ea2f0c0548feb474ec5c54bba33a7f72f873a39d07b24"
 [[package]]
 name = "lpc55_areas"
 version = "0.2.5"
-source = "git+https://github.com/oxidecomputer/lpc55_support#131520fc913ecce9b80557e854751953f743a7d2"
+source = "git+https://github.com/oxidecomputer/lpc55_support#17d04af60b3a4fd82c77b1a33ca5370943cd25d9"
 dependencies = [
  "bitfield",
  "clap",
@@ -1684,7 +1684,7 @@ dependencies = [
 [[package]]
 name = "lpc55_sign"
 version = "0.3.4"
-source = "git+https://github.com/oxidecomputer/lpc55_support#131520fc913ecce9b80557e854751953f743a7d2"
+source = "git+https://github.com/oxidecomputer/lpc55_support#17d04af60b3a4fd82c77b1a33ca5370943cd25d9"
 dependencies = [
  "byteorder",
  "const-oid",
@@ -3328,9 +3328,9 @@ dependencies = [
 
 [[package]]
 name = "tough"
-version = "0.19.0"
+version = "0.20.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d4f60327896014cd6f78d6a15ef07de21d21b1046efc86e8046ecd48e688fc12"
+checksum = "6fe73519c5c485dc0b585088523ad861cda19836b2eb94896fac278db68bd5ab"
 dependencies = [
  "async-recursion",
  "async-trait",
