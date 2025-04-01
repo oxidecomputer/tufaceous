@@ -130,6 +130,15 @@ impl DeploymentUnitMapBuilder {
         // Check that there are no duplicates. We don't expect to see any
         // duplicated artifacts at all within a single artifact or repository,
         // so we don't check whether the hashes are the same.
+        //
+        // In order for this check to be done now rather than at commit time, we
+        // rely on two things:
+        //
+        // 1. `start_bulk_insert` accepts a `&mut self` parameter.
+        // 2. There is no interior mutability in `DeploymentUnitMapBuilder`.
+        //
+        // Together, these two checks ensure that nothing else can modify the
+        // map between now and either commit or discard.
         let diff = self.deployment_units.diff(&units);
 
         if !diff.common.is_empty() {
@@ -224,7 +233,8 @@ impl fmt::Display for DuplicateDeploymentUnitError {
         // For a single deployment unit, we can simply display the artifact kind and hash.
         if self.duplicates.len() == 1 {
             let (hash_id, data) = self.duplicates.first_key_value().unwrap();
-            // XXX: should hash_id.kind/hash be a `Display` impl?
+            // XXX: should `ArtifactHashId` have a `Display` impl, or maybe a
+            // `.display()` or `.display_human()` method?
             write!(
                 f,
                 "a deployment unit with the same kind and hash already exists in this {}:\n\

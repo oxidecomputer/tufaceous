@@ -373,7 +373,7 @@ impl OmicronRepoEditor {
         // Make sure we're not overwriting an existing target (either one that
         // existed when we opened the repo, or one that's been added via this
         // method)
-        if !self.existing_target_names.insert(target_name.clone()) {
+        if self.existing_target_names.contains(&target_name) {
             errors.push(anyhow!(
                 "a target named {target_name} already exists in the repository",
             ));
@@ -439,11 +439,12 @@ impl OmicronRepoEditor {
         // No errors past this point.
         // ---
 
+        self.existing_target_names.insert(target_name.clone());
         self.artifacts.artifacts.push(Artifact {
             name: new_artifact.name().to_owned(),
             version: version.expect("version is None => errors handled above"),
             kind: new_artifact.kind().clone(),
-            target: target_name.clone(),
+            target: target_name,
         });
         new_units.expect("new_units is None => errors handled above").commit();
 
