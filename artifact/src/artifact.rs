@@ -129,3 +129,17 @@ fn hex_schema<const N: usize>(
     schema.format = Some(format!("hex string ({N} bytes)"));
     schema.into()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn display_respects_padding() {
+        let h = ArtifactHash([0; 32]);
+        assert_eq!(
+            format!("{h:x>100}"),
+            "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx0000000000000000000000000000000000000000000000000000000000000000"
+        );
+    }
+}

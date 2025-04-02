@@ -12,7 +12,6 @@ schemars = ["dep:schemars"]
 [dependencies]
 daft.workspace = true
 hex.workspace = true
-parse-display.workspace = true
 proptest = { workspace = true, optional = true }
 schemars = { workspace = true, optional = true }
 semver.workspace = true

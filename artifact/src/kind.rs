@@ -5,9 +5,8 @@
 use std::{borrow::Cow, convert::Infallible, fmt, str::FromStr};
 
 use daft::Diffable;
-use parse_display::{Display, FromStr};
 use serde::{Deserialize, Serialize};
-use strum::{EnumIter, IntoEnumIterator};
+use strum::{Display, EnumIter, EnumString, IntoEnumIterator};
 use thiserror::Error;
 
 /// The kind of artifact we are dealing with.
@@ -168,13 +167,13 @@ impl FromStr for ArtifactKind {
     Ord,
     PartialOrd,
     Display,
-    FromStr,
+    EnumString,
     Deserialize,
     Serialize,
     EnumIter,
 )]
 #[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
-#[display(style = "snake_case")]
+#[strum(serialize_all = "snake_case")]
 #[serde(rename_all = "snake_case")]
 pub enum KnownArtifactKind {
     // Sled Artifacts
@@ -288,5 +287,14 @@ mod tests {
             );
             assert_eq!(kind, kind2);
         }
+    }
+
+    #[test]
+    fn display_respects_padding() {
+        let kind = ArtifactKind::from_static("foo");
+        assert_eq!(format!("{kind:x>10}"), "xxxxxxxfoo");
+
+        let kind = KnownArtifactKind::Host;
+        assert_eq!(format!("{kind:x>10}"), "xxxxxxhost");
     }
 }
