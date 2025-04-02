@@ -421,6 +421,20 @@ async fn show_artifacts(
             details,
         };
 
+        if artifact_metadata.target
+            != format!(
+                "{}-{}-{}.tar.gz",
+                artifact_metadata.kind,
+                artifact_metadata.name,
+                artifact_metadata.version
+            )
+        {
+            eprintln!(
+                "warning: expected artifact target name to be \
+                 KIND-NAME-VERSION.tar.gz"
+            );
+        }
+
         list.push(artifact_info);
     }
 
