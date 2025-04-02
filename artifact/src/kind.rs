@@ -144,7 +144,7 @@ impl From<KnownArtifactKind> for ArtifactKind {
 
 impl fmt::Display for ArtifactKind {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(&self.0)
+        self.0.fmt(f)
     }
 }
 

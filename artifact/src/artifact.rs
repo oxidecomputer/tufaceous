@@ -82,7 +82,7 @@ impl fmt::Debug for ArtifactHash {
 
 impl fmt::Display for ArtifactHash {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(&hex::encode(self.0))
+        hex::encode(self.0).fmt(f)
     }
 }
 
