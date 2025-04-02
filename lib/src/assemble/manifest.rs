@@ -271,7 +271,10 @@ impl ArtifactManifest {
     /// details if any artifacts are missing.
     pub fn verify_all_present(&self) -> Result<()> {
         let all_artifacts: BTreeSet<_> = KnownArtifactKind::iter()
-            .filter(|k| !matches!(k, KnownArtifactKind::Zone))
+            .filter(|k| {
+                !matches!(k, KnownArtifactKind::Zone)
+                    && !matches!(k, KnownArtifactKind::MeasurementCorpus)
+            })
             .collect();
         let present_artifacts: BTreeSet<_> =
             self.artifacts.keys().copied().collect();
