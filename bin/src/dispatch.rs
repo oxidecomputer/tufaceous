@@ -356,7 +356,7 @@ async fn show_artifacts(
     repo_path: &Utf8Path,
 ) -> Result<()> {
     let omicron_repo =
-        OmicronRepo::load_untrusted_ignore_expiration(log, &repo_path)
+        OmicronRepo::load_untrusted_ignore_expiration(log, repo_path)
             .await
             .context("loading repository")?;
     let tuf_repo = omicron_repo.repo();
@@ -446,9 +446,7 @@ async fn show_artifacts(
             artifact_info.artifact_version,
         );
 
-        if caboose_info.version.to_string()
-            != artifact_info.artifact_version.as_str()
-        {
+        if caboose_info.version != artifact_info.artifact_version.as_str() {
             eprintln!(
                 "warning: target {}: caboose version {} does not match \
                  artifact version {}",
@@ -535,7 +533,7 @@ async fn show_artifacts(
         };
 
         let key_name =
-            known_signature_names.get(rot_caboose.sign.as_str()).map(|s| *s);
+            known_signature_names.get(rot_caboose.sign.as_str()).copied();
 
         // Only print fields that we don't expect are duplicated or otherwise
         // uninteresting (like the Git commit).  If we're wrong about these
@@ -560,9 +558,7 @@ async fn show_artifacts(
             eprintln!("warning: unrecognized \"sign\"");
         }
 
-        if rot_caboose.version.to_string()
-            != artifact_info.artifact_version.as_str()
-        {
+        if rot_caboose.version != artifact_info.artifact_version.as_str() {
             eprintln!(
                 "warning: caboose version {} does not match \
                      artifact version {}",
@@ -615,7 +611,7 @@ async fn show_artifacts(
             panic!("internal type mismatch");
         };
 
-        let key_name = known_signature_names.get(a.sign.as_str()).map(|s| *s);
+        let key_name = known_signature_names.get(a.sign.as_str()).copied();
 
         // Only print fields that we don't expect are duplicated or otherwise
         // uninteresting (like the Git commit).  If we're wrong about these
@@ -654,9 +650,7 @@ async fn show_artifacts(
         }
 
         for caboose_info in [a, b] {
-            if caboose_info.version.to_string()
-                != artifact_info.artifact_version.as_str()
-            {
+            if caboose_info.version != artifact_info.artifact_version.as_str() {
                 eprintln!(
                     "warning: target {}: caboose version {} does not match \
                      artifact version {}",
