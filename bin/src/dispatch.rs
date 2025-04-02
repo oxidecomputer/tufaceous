@@ -364,7 +364,6 @@ async fn show_artifacts(
         .read_artifacts()
         .await
         .context("reading artifacts document")?;
-    println!("system version: {}", artifacts_document.system_version);
 
     let mut sp_artifacts = Vec::new();
     let mut rot_artifacts = Vec::new();
@@ -425,7 +424,9 @@ async fn show_artifacts(
         list.push(artifact_info);
     }
 
-    println!("SP Artifacts (Hubris archives)\n");
+    println!("System Version: {}", artifacts_document.system_version);
+
+    println!("\nSP Artifacts (Hubris archives)\n");
     println!("    {:37} {:9} {:13} {:7}", "TARGET", "KIND", "NAME", "VERSION");
     for artifact_info in &sp_artifacts {
         let ArtifactInfoDetails::SpHubrisArchive(caboose_info) =
@@ -601,7 +602,9 @@ async fn show_artifacts(
         // }
     }
 
-    println!("\nRoT Artifacts (composite artifacts with two Hubris images)\n");
+    println!(
+        "\nRoT Artifacts (composite artifacts with two Hubris archives)\n"
+    );
     println!(
         "    {:61} {:10} {:36} {:7} {:25}",
         "TARGET", "KIND", "NAME", "VERSION", "SIGNING KEY"
