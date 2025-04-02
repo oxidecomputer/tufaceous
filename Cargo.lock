@@ -3413,6 +3413,8 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "assert_cmd",
+ "buf-list",
+ "bytes",
  "camino",
  "chrono",
  "clap",
@@ -3420,6 +3422,8 @@ dependencies = [
  "datatest-stable",
  "dropshot",
  "fs-err",
+ "futures",
+ "hubtools",
  "humantime",
  "predicates",
  "semver",
@@ -3429,6 +3433,7 @@ dependencies = [
  "slog-term",
  "tempfile",
  "tokio",
+ "tough",
  "tufaceous-artifact",
  "tufaceous-lib",
 ]

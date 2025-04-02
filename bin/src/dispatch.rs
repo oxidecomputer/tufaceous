@@ -2,12 +2,17 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use anyhow::{Context, Result, bail};
-use camino::Utf8PathBuf;
+use anyhow::{Context, Result, anyhow, bail};
+use buf_list::BufList;
+use camino::{Utf8Path, Utf8PathBuf};
 use chrono::{DateTime, Utc};
 use clap::{CommandFactory, Parser};
+use futures::TryStreamExt;
+use hubtools::RawHubrisArchive;
 use semver::Version;
-use tufaceous_artifact::{ArtifactKind, ArtifactVersion};
+use std::collections::BTreeMap;
+use tough::Repository;
+use tufaceous_artifact::{ArtifactKind, ArtifactVersion, KnownArtifactKind};
 use tufaceous_lib::assemble::{ArtifactManifest, OmicronRepoAssembler};
 use tufaceous_lib::{AddArtifact, ArchiveExtractor, Key, OmicronRepo};
 
@@ -162,6 +167,9 @@ impl Args {
 
                 Ok(())
             }
+            Command::Show => show(log, &repo_path).await.with_context(|| {
+                format!("error showing repository at `{repo_path}`")
+            }),
             Command::Assemble {
                 manifest_path,
                 output_path,
@@ -256,6 +264,8 @@ enum Command {
         /// The destination to extract the file to.
         dest: Utf8PathBuf,
     },
+    /// Summarizes the contents of an Omicron TUF repository
+    Show,
     /// Assembles a repository from a provided manifest.
     Assemble {
         /// Path to artifact manifest.
@@ -296,4 +306,214 @@ fn maybe_generate_keys(
     } else {
         keys
     })
+}
+
+struct ArtifactInfo {
+    artifact_name: String,
+    artifact_version: ArtifactVersion,
+    artifact_kind: ArtifactKind,
+    artifact_target: String,
+    details: ArtifactInfoDetails,
+}
+
+enum ArtifactInfoDetails {
+    SpHubrisImage(CabooseInfo),
+    RotArtifact { a: CabooseInfo, b: CabooseInfo },
+    NoDetails,
+}
+
+#[derive(Ord, PartialOrd, Eq, PartialEq)]
+enum ArtifactFileKind {
+    SpHubrisImage,
+    RotArtifact,
+    Other,
+}
+
+struct CabooseInfo {
+    board: String,
+    git_commit: String,
+    version: String,
+    name: String,
+}
+
+async fn show(log: &slog::Logger, repo_path: &Utf8Path) -> Result<()> {
+    let omicron_repo =
+        OmicronRepo::load_untrusted_ignore_expiration(log, &repo_path)
+            .await
+            .context("loading repository")?;
+    let tuf_repo = omicron_repo.repo();
+    let artifacts_document = omicron_repo
+        .read_artifacts()
+        .await
+        .context("reading artifacts document")?;
+    println!("system version: {}", artifacts_document.system_version);
+
+    let mut all_artifacts = BTreeMap::new();
+    for artifact_metadata in &artifacts_document.artifacts {
+        eprintln!("loading artifact {}", artifact_metadata.target);
+        let known_artifact_kind =
+            artifact_metadata.kind.to_known().ok_or_else(|| {
+                anyhow!("unknown artifact kind: {}", &artifact_metadata.kind)
+            })?;
+        let (details, file_kind) = match known_artifact_kind {
+            KnownArtifactKind::GimletSp
+            | KnownArtifactKind::PscSp
+            | KnownArtifactKind::SwitchSp => (
+                ArtifactInfoDetails::SpHubrisImage(
+                    load_caboose(&artifact_metadata.target, tuf_repo).await?,
+                ),
+                ArtifactFileKind::SpHubrisImage,
+            ),
+            KnownArtifactKind::GimletRot
+            | KnownArtifactKind::PscRot
+            | KnownArtifactKind::SwitchRot => {
+                // XXX-dap
+                (ArtifactInfoDetails::NoDetails, ArtifactFileKind::Other)
+            }
+            KnownArtifactKind::GimletRotBootloader
+            | KnownArtifactKind::PscRotBootloader
+            | KnownArtifactKind::SwitchRotBootloader => {
+                // XXX-dap
+                (ArtifactInfoDetails::NoDetails, ArtifactFileKind::Other)
+            }
+            KnownArtifactKind::Host
+            | KnownArtifactKind::Trampoline
+            | KnownArtifactKind::ControlPlane
+            | KnownArtifactKind::Zone => {
+                (ArtifactInfoDetails::NoDetails, ArtifactFileKind::Other)
+            }
+        };
+
+        let artifact_info = ArtifactInfo {
+            artifact_name: artifact_metadata.name.clone(),
+            artifact_version: artifact_metadata.version.clone(),
+            artifact_kind: artifact_metadata.kind.clone(),
+            artifact_target: artifact_metadata.target.clone(),
+            details,
+        };
+
+        all_artifacts
+            .entry(file_kind)
+            .or_insert_with(Vec::new)
+            .push(artifact_info);
+    }
+
+    println!("SP Hubris Images\n");
+    println!("    {:37} {:9} {:13} {:7}", "TARGET", "KIND", "NAME", "VERSION");
+    for artifact_info in all_artifacts
+        .get(&ArtifactFileKind::SpHubrisImage)
+        .into_iter()
+        .flatten()
+    {
+        let ArtifactInfoDetails::SpHubrisImage(caboose_info) =
+            &artifact_info.details
+        else {
+            panic!("internal type mismatch");
+        };
+
+        // Only print fields that we don't expect are duplicated or otherwise
+        // uninteresting (like the Git commit).  If we're wrong about these
+        // being duplicated, we'll print a warning below.
+        println!(
+            "    {:37} {:>9} {:13} {:>7}",
+            artifact_info.artifact_target,
+            // XXX-dap Display for ArtifactKind does not honor width
+            artifact_info.artifact_kind.to_string(),
+            artifact_info.artifact_name,
+            artifact_info.artifact_version,
+        );
+
+        if caboose_info.version.to_string()
+            != artifact_info.artifact_version.as_str()
+        {
+            eprintln!(
+                "warning: target {}: caboose version {} does not match \
+                 artifact version {}",
+                artifact_info.artifact_target,
+                caboose_info.version,
+                artifact_info.artifact_version
+            );
+        }
+
+        // XXX-dap There is a comment on
+        // `tufaceous_artifact::artifact::Artifact` that says that the `name`
+        // should match the caboose *board*.  That's not true for stuff with
+        // "lab" in th ename.
+        if caboose_info.board != artifact_info.artifact_name
+            && format!("{}-lab", caboose_info.board)
+                != artifact_info.artifact_name
+        {
+            eprintln!(
+                "warning: target {}: caboose board {} does not match \
+                 artifact name {}",
+                artifact_info.artifact_target,
+                caboose_info.board,
+                artifact_info.artifact_name,
+            );
+        }
+
+        // See above comment.
+        if caboose_info.name != artifact_info.artifact_name {
+            eprintln!(
+                "warning: target {}: caboose name {} does not match \
+                 artifact name {}",
+                artifact_info.artifact_target,
+                caboose_info.name,
+                artifact_info.artifact_name,
+            );
+        }
+    }
+
+    // XXX-dap print out other file kinds
+
+    Ok(())
+}
+
+async fn load_caboose(
+    target_name: &str,
+    tuf_repo: &Repository,
+) -> Result<CabooseInfo> {
+    load_caboose_impl(target_name, tuf_repo).await.with_context(|| {
+        format!("loading caboose for target {:?}", target_name)
+    })
+}
+
+async fn load_caboose_impl(
+    target_name: &str,
+    tuf_repo: &Repository,
+) -> Result<CabooseInfo> {
+    let target_name: tough::TargetName =
+        target_name.parse().context("unsupported target name")?;
+    let reader = tuf_repo
+        .read_target(&target_name)
+        .await
+        .context("loading target")?
+        .ok_or_else(|| anyhow!("missing target"))?;
+    let buf_list =
+        reader.try_collect::<BufList>().await.context("reading target")?;
+    let v: Vec<u8> = buf_list.into_iter().flatten().collect();
+    let archive =
+        RawHubrisArchive::from_vec(v).context("loading Hubris archive")?;
+    let caboose = archive.read_caboose().context("loading caboose")?;
+    let name = String::from_utf8(
+        caboose.name().context("reading name from caboose")?.to_vec(),
+    )
+    .context("unexpected non-UTF8 name")?;
+    let board = String::from_utf8(
+        caboose.board().context("reading board from caboose")?.to_vec(),
+    )
+    .context("unexpected non-UTF8 board")?;
+    let git_commit = String::from_utf8(
+        caboose
+            .git_commit()
+            .context("reading git_commit from caboose")?
+            .to_vec(),
+    )
+    .context("unexpected non-UTF8 git_commit")?;
+    let version = String::from_utf8(
+        caboose.version().context("reading version from caboose")?.to_vec(),
+    )
+    .context("unexpected non-UTF8 version")?;
+    // XXX-dap do something with the signature
+    Ok(CabooseInfo { board, git_commit, version, name })
 }
