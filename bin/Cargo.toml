@@ -17,6 +17,7 @@ camino.workspace = true
 chrono.workspace = true
 clap.workspace = true
 console.workspace = true
+flate2.workspace = true
 futures.workspace = true
 hubtools.workspace = true
 humantime.workspace = true
@@ -25,6 +26,7 @@ slog.workspace = true
 slog-async.workspace = true
 slog-envlogger.workspace = true
 slog-term.workspace = true
+tar.workspace = true
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
 tough.workspace = true
 tufaceous-artifact.workspace = true
