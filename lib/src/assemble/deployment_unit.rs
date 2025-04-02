@@ -238,8 +238,8 @@ impl fmt::Display for DuplicateDeploymentUnitError {
             write!(
                 f,
                 "a deployment unit with the same kind and hash already exists in this {}:\n\
-                 kind: {}, hash: {} (existing {}; new {})",
-                self.scope, hash_id.kind, hash_id.hash, data.before, data.after,
+                 {hash_id} (existing {}; new {})",
+                self.scope, data.before, data.after,
             )
         } else {
             writeln!(
@@ -251,9 +251,8 @@ impl fmt::Display for DuplicateDeploymentUnitError {
             for (hash_id, data) in &self.duplicates {
                 writeln!(
                     f,
-                    "  - for kind: {}, hash: {}\
-                     (existing: {}; new: {})",
-                    hash_id.kind, hash_id.hash, data.before, data.after,
+                    "  - for {hash_id} (existing: {}; new: {})",
+                    data.before, data.after,
                 )?;
             }
 

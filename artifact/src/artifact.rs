@@ -110,6 +110,12 @@ pub struct ArtifactHashId {
     pub hash: ArtifactHash,
 }
 
+impl fmt::Display for ArtifactHashId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}/{}", self.kind, self.hash)
+    }
+}
+
 /// Produce an OpenAPI schema describing a hex array of a specific length (e.g.,
 /// a hash digest).
 #[cfg(feature = "schemars")]

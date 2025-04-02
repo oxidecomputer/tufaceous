@@ -248,7 +248,7 @@ fn test_assemble_duplicate_zone() -> Result<()> {
         .stderr(predicate::str::contains(
             r#"a deployment unit with the same kind and hash already exists in this control_plane artifact:"#,
         ))
-        .stderr(predicate::str::contains("kind: zone"))
+        .stderr(predicate::str::contains("zone/"))
         .stderr(predicate::str::contains(
             r#"(existing name: zone1.tar.gz, version: 1.0.0; new name: zone1.tar.gz, version: 1.0.0)"#,
         ));
@@ -315,12 +315,12 @@ fn test_assemble_duplicate_artifact_2() -> Result<()> {
             "a deployment unit with the same kind and hash already exists \
              in this repository:",
         ))
-        .stderr(predicate::str::contains("kind: gimlet_sp"))
+        .stderr(predicate::str::contains("gimlet_sp/"))
         .stderr(predicate::str::contains(
             "(existing name: fake-gimlet-sp, version: 1.0.0; \
              new name: fake-gimlet-sp, version: 2.0.0)",
         ))
-        .stderr(predicate::str::contains("kind: switch_sp"))
+        .stderr(predicate::str::contains("switch_sp/"))
         .stderr(predicate::str::contains(
             "(existing name: fake-switch-sp, version: 1.0.0; \
              new name: fake-switch-sp, version: 2.0.0)",
