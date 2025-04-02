@@ -12,13 +12,17 @@ use itertools::Itertools;
 use parse_size::parse_size;
 use semver::Version;
 use serde::{Deserialize, Serialize};
-use tufaceous_artifact::{ArtifactVersion, KnownArtifactKind};
+use tufaceous_artifact::{ArtifactKind, ArtifactVersion, KnownArtifactKind};
 
+use crate::assemble::{DeploymentUnitData, DeploymentUnitScope};
 use crate::{
     ArtifactSource, CompositeControlPlaneArchiveBuilder, CompositeEntry,
-    CompositeHostArchiveBuilder, CompositeRotArchiveBuilder, MtimeSource,
-    make_filler_text,
+    CompositeHostArchiveBuilder, CompositeRotArchiveBuilder,
+    HOST_PHASE_1_FILE_NAME, HOST_PHASE_2_FILE_NAME, MtimeSource,
+    ROT_ARCHIVE_A_FILE_NAME, ROT_ARCHIVE_B_FILE_NAME, make_filler_text,
 };
+
+use super::{ArtifactDeploymentUnits, DeploymentUnitMapBuilder};
 
 static FAKE_MANIFEST_TOML: &str =
     include_str!("../../../bin/manifests/fake.toml");
@@ -90,17 +94,25 @@ impl ArtifactManifest {
         let entries = entries
             .into_iter()
             .map(|artifact_data| {
-                let source = match artifact_data.source {
-                    DeserializedArtifactSource::File { path } => {
-                        ArtifactSource::File(base_dir.join(path))
-                    }
-                    DeserializedArtifactSource::Fake { size } => {
-                        let fake_data = FakeDataAttributes::new(
-                            kind,
-                            &artifact_data.version,
+                let (source, deployment_units) = match artifact_data.source {
+                    DeserializedArtifactSource::File { path } => (
+                        ArtifactSource::File(base_dir.join(path)),
+                        ArtifactDeploymentUnits::SingleUnit,
+                    ),
+                    DeserializedArtifactSource::Fake { size, data_version } => {
+                        // This test-only environment variable is used to
+                        // simulate two artifacts with different
+                        // name/version/kind but the same hash.
+                        let data_version = data_version
+                            .as_ref()
+                            .unwrap_or(&artifact_data.version);
+                        let fake_data =
+                            FakeDataAttributes::new(kind, data_version)
+                                .make_data(size as usize);
+                        (
+                            ArtifactSource::Memory(fake_data.into()),
+                            ArtifactDeploymentUnits::SingleUnit,
                         )
-                        .make_data(size as usize);
-                        ArtifactSource::Memory(fake_data.into())
                     }
                     DeserializedArtifactSource::CompositeHost {
                         phase_1,
@@ -128,36 +140,56 @@ impl ArtifactManifest {
                             Vec::new(),
                             mtime_source,
                         )?;
-                        phase_1.with_entry(
+                        let phase_1_hash = phase_1.with_entry(
                             FakeDataAttributes::new(
                                 kind,
                                 &artifact_data.version,
                             ),
                             |entry| builder.append_phase_1(entry),
                         )?;
-                        phase_2.with_entry(
+                        let phase_2_hash = phase_2.with_entry(
                             FakeDataAttributes::new(
                                 kind,
                                 &artifact_data.version,
                             ),
                             |entry| builder.append_phase_2(entry),
                         )?;
-                        ArtifactSource::Memory(builder.finish()?.into())
+                        let source =
+                            ArtifactSource::Memory(builder.finish()?.into());
+
+                        let mut data_builder = DeploymentUnitMapBuilder::new(
+                            DeploymentUnitScope::Artifact {
+                                composite_kind: kind,
+                            },
+                        );
+                        data_builder
+                            .insert(DeploymentUnitData {
+                                name: HOST_PHASE_1_FILE_NAME.to_owned(),
+                                version: artifact_data.version.clone(),
+                                kind: ArtifactKind::HOST_PHASE_1,
+                                hash: phase_1_hash,
+                            })
+                            .expect("unique kind");
+                        data_builder
+                            .insert(DeploymentUnitData {
+                                name: HOST_PHASE_2_FILE_NAME.to_owned(),
+                                version: artifact_data.version.clone(),
+                                kind: ArtifactKind::HOST_PHASE_2,
+                                hash: phase_2_hash,
+                            })
+                            .expect("unique kind");
+
+                        (source, data_builder.finish_units())
                     }
                     DeserializedArtifactSource::CompositeRot {
                         archive_a,
                         archive_b,
                     } => {
-                        ensure!(
-                            matches!(
-                                kind,
-                                KnownArtifactKind::GimletRot
-                                    | KnownArtifactKind::SwitchRot
-                                    | KnownArtifactKind::PscRot
-                            ),
-                            "`composite_rot` source cannot be used with \
-                             artifact kind {kind:?}"
-                        );
+                        let (a_kind, b_kind) =
+                            kind.rot_a_and_b_kinds().context(
+                                "`composite_rot` source cannot be used with \
+                                 non-RoT artifact kind",
+                            )?;
 
                         let mtime_source =
                             if archive_a.is_fake() && archive_b.is_fake() {
@@ -171,21 +203,47 @@ impl ArtifactManifest {
                             Vec::new(),
                             mtime_source,
                         )?;
-                        archive_a.with_entry(
+                        let archive_a_hash = archive_a.with_entry(
                             FakeDataAttributes::new(
                                 kind,
                                 &artifact_data.version,
                             ),
                             |entry| builder.append_archive_a(entry),
                         )?;
-                        archive_b.with_entry(
+                        let archive_b_hash = archive_b.with_entry(
                             FakeDataAttributes::new(
                                 kind,
                                 &artifact_data.version,
                             ),
                             |entry| builder.append_archive_b(entry),
                         )?;
-                        ArtifactSource::Memory(builder.finish()?.into())
+
+                        let mut data_builder = DeploymentUnitMapBuilder::new(
+                            DeploymentUnitScope::Artifact {
+                                composite_kind: kind,
+                            },
+                        );
+                        data_builder
+                            .insert(DeploymentUnitData {
+                                name: ROT_ARCHIVE_A_FILE_NAME.to_owned(),
+                                version: artifact_data.version.clone(),
+                                kind: a_kind,
+                                hash: archive_a_hash,
+                            })
+                            .expect("unique kind in empty map");
+                        data_builder
+                            .insert(DeploymentUnitData {
+                                name: ROT_ARCHIVE_B_FILE_NAME.to_owned(),
+                                version: artifact_data.version.clone(),
+                                kind: b_kind,
+                                hash: archive_b_hash,
+                            })
+                            .expect("unique kind in empty map");
+
+                        (
+                            ArtifactSource::Memory(builder.finish()?.into()),
+                            data_builder.finish_units(),
+                        )
                     }
                     DeserializedArtifactSource::CompositeControlPlane {
                         zones,
@@ -211,19 +269,37 @@ impl ArtifactManifest {
                                 mtime_source,
                             )?;
 
+                        let zone_kind =
+                            ArtifactKind::from(KnownArtifactKind::Zone);
+                        let mut data_builder = DeploymentUnitMapBuilder::new(
+                            DeploymentUnitScope::Artifact {
+                                composite_kind: kind,
+                            },
+                        );
+
                         for zone in zones {
-                            zone.with_name_and_entry(
+                            let (hash, name) = zone.with_name_and_entry(
                                 &artifact_data.version,
                                 |name, entry| builder.append_zone(name, entry),
                             )?;
+                            data_builder.insert(DeploymentUnitData {
+                                name: name.to_owned(),
+                                version: artifact_data.version.clone(),
+                                kind: zone_kind.clone(),
+                                hash,
+                            })?;
                         }
-                        ArtifactSource::Memory(builder.finish()?.into())
+                        (
+                            ArtifactSource::Memory(builder.finish()?.into()),
+                            data_builder.finish_units(),
+                        )
                     }
                 };
                 let data = ArtifactData {
                     name: artifact_data.name,
                     version: artifact_data.version,
                     source,
+                    deployment_units,
                 };
                 Ok(data)
             })
@@ -343,6 +419,7 @@ pub struct ArtifactData {
     pub name: String,
     pub version: ArtifactVersion,
     pub source: ArtifactSource,
+    pub deployment_units: ArtifactDeploymentUnits,
 }
 
 impl ArtifactData {
@@ -409,7 +486,7 @@ impl DeserializedManifest {
                         entry.version = version.clone();
                     }
                 }
-                ManifestTweak::ArtifactContents { kind, size_delta } => {
+                ManifestTweak::ArtifactSize { kind, size_delta } => {
                     let entries =
                         self.artifacts.get_mut(kind).with_context(|| {
                             format!(
@@ -420,6 +497,21 @@ impl DeserializedManifest {
 
                     for entry in entries {
                         entry.source.apply_size_delta(*size_delta)?;
+                    }
+                }
+                ManifestTweak::ArtifactDataVersion { kind, data_version } => {
+                    let entries =
+                        self.artifacts.get_mut(kind).with_context(|| {
+                            format!(
+                                "manifest does not have artifact kind \
+                                 {kind}",
+                            )
+                        })?;
+
+                    for entry in entries {
+                        entry
+                            .source
+                            .apply_data_version(data_version.as_ref())?;
                     }
                 }
             }
@@ -473,6 +565,12 @@ pub enum DeserializedArtifactSource {
     Fake {
         #[serde(deserialize_with = "deserialize_byte_size")]
         size: u64,
+        /// The internal version to use while constructing the fake artifact
+        /// data.
+        ///
+        /// If not set, the artifact's version is used.
+        #[serde(default)]
+        data_version: Option<ArtifactVersion>,
     },
     CompositeHost {
         phase_1: DeserializedFileArtifactSource,
@@ -493,7 +591,7 @@ impl DeserializedArtifactSource {
             DeserializedArtifactSource::File { .. } => {
                 bail!("cannot apply size delta to `file` source")
             }
-            DeserializedArtifactSource::Fake { size } => {
+            DeserializedArtifactSource::Fake { size, data_version: _ } => {
                 *size = (*size).saturating_add_signed(size_delta);
                 Ok(())
             }
@@ -515,6 +613,34 @@ impl DeserializedArtifactSource {
                     zone.apply_size_delta(size_delta)?;
                 }
                 Ok(())
+            }
+        }
+    }
+
+    fn apply_data_version(
+        &mut self,
+        new_data_version: Option<&ArtifactVersion>,
+    ) -> Result<()> {
+        match self {
+            DeserializedArtifactSource::File { .. } => {
+                bail!("cannot apply data version to `file` source")
+            }
+            DeserializedArtifactSource::Fake { data_version, .. } => {
+                *data_version = new_data_version.cloned();
+                Ok(())
+            }
+            DeserializedArtifactSource::CompositeHost { .. } => {
+                bail!(
+                    "cannot yet apply data version to `composite_host` source"
+                )
+            }
+            DeserializedArtifactSource::CompositeRot { .. } => {
+                bail!("cannot yet apply data version to `composite_rot` source")
+            }
+            DeserializedArtifactSource::CompositeControlPlane { .. } => {
+                bail!(
+                    "cannot yet apply data version to `composite_control_plane` source"
+                )
             }
         }
     }
@@ -670,8 +796,19 @@ pub enum ManifestTweak {
     /// Update the versions for this artifact.
     ArtifactVersion { kind: KnownArtifactKind, version: ArtifactVersion },
 
-    /// Update the contents of this artifact (only support changing the size).
-    ArtifactContents { kind: KnownArtifactKind, size_delta: i64 },
+    /// Update the size of this fake artifact.
+    ArtifactSize { kind: KnownArtifactKind, size_delta: i64 },
+
+    /// Update the data version of this fake artifact.
+    ///
+    /// This version is typically the same as the artifact version, but it can
+    /// be changed for testing purposes.
+    ArtifactDataVersion {
+        kind: KnownArtifactKind,
+        /// Setting this to `None` resets the data version to the artifact
+        /// version.
+        data_version: Option<ArtifactVersion>,
+    },
 }
 
 fn deserialize_byte_size<'de, D>(deserializer: D) -> Result<u64, D::Error>

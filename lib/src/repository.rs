@@ -2,10 +2,10 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::num::NonZeroU64;
 
-use anyhow::{Context, Result, anyhow, bail};
+use anyhow::{Context, Result, anyhow};
 use buf_list::BufList;
 use camino::{Utf8Path, Utf8PathBuf};
 use chrono::{DateTime, Utc};
@@ -16,11 +16,18 @@ use tough::editor::RepositoryEditor;
 use tough::editor::signed::SignedRole;
 use tough::schema::{Root, Target};
 use tough::{ExpirationEnforcement, Repository, RepositoryLoader, TargetName};
-use tufaceous_artifact::{Artifact, ArtifactVersion, ArtifactsDocument};
+use tufaceous_artifact::{
+    Artifact, ArtifactHash, ArtifactVersion, ArtifactsDocument,
+};
 use url::Url;
 
+use crate::assemble::{
+    ArtifactDeploymentUnits, DeploymentUnitData, DeploymentUnitMapBuilder,
+    DeploymentUnitScope,
+};
 use crate::key::Key;
 use crate::target::TargetWriter;
+use crate::utils::merge_anyhow_list;
 use crate::{AddArtifact, ArchiveBuilder};
 
 /// A TUF repository describing Omicron.
@@ -123,15 +130,18 @@ impl OmicronRepo {
     pub async fn read_artifacts(&self) -> Result<ArtifactsDocument> {
         let reader = self
             .repo
-            .read_target(&"artifacts.json".try_into()?)
+            .read_target(&ArtifactsDocument::FILE_NAME.try_into()?)
             .await?
-            .ok_or_else(|| anyhow!("artifacts.json should be present"))?;
-        let buf_list = reader
-            .try_collect::<BufList>()
-            .await
-            .context("error reading from artifacts.json")?;
-        serde_json::from_reader(buf_list::Cursor::new(&buf_list))
-            .context("error deserializing artifacts.json")
+            .ok_or_else(|| {
+                anyhow!("{} should be present", ArtifactsDocument::FILE_NAME)
+            })?;
+        let buf_list =
+            reader.try_collect::<BufList>().await.with_context(|| {
+                format!("error reading from {}", ArtifactsDocument::FILE_NAME)
+            })?;
+        serde_json::from_reader(buf_list::Cursor::new(&buf_list)).with_context(
+            || format!("error deserializing {}", ArtifactsDocument::FILE_NAME),
+        )
     }
 
     /// Archives the repository to the given path as a zip file.
@@ -225,19 +235,80 @@ pub struct OmicronRepoEditor {
     // the repo was opened. We use this to ensure we don't overwrite an existing
     // target when adding new artifacts.
     existing_target_names: BTreeSet<String>,
+    // Set of (kind, hash) pairs for every artifact and deployment unit known to
+    // the repo. Used to ensure (kind, hash) pairs are unique within this repo.
+    existing_deployment_units: DeploymentUnitMapBuilder,
 }
 
 impl OmicronRepoEditor {
     async fn new(repo: OmicronRepo) -> Result<Self> {
         let artifacts = repo.read_artifacts().await?;
+        let artifacts_by_target_name = artifacts
+            .artifacts
+            .iter()
+            .map(|artifact| (artifact.target.as_str(), artifact))
+            .collect::<BTreeMap<_, _>>();
+
+        let mut errors = Vec::new();
+
+        // TODO: In the future, it would be nice to extract deployment units
+        // from composite artifacts. But that would require parsing each file,
+        // and the code for that lives in Omicron under update-common.
+        //
+        // For now we settle for treating all artifacts as single-unit ones.
+        let mut data_builder =
+            DeploymentUnitMapBuilder::new(DeploymentUnitScope::Repository);
 
         let existing_target_names = repo
             .repo
             .targets()
             .signed
             .targets_iter()
-            .map(|(name, _)| name.resolved().to_string())
+            .filter_map(|(name, target)| {
+                let target_name = name.resolved().to_string();
+                if target_name == ArtifactsDocument::FILE_NAME {
+                    // The artifacts document does not refer to itself.
+                    return None;
+                }
+
+                let hash_bytes = <[u8; 32]>::try_from(
+                    target.hashes.sha256.clone().into_vec(),
+                )
+                .expect("SHA-256 hash should be exactly 32 bytes");
+                let hash = ArtifactHash(hash_bytes);
+
+                let Some(artifact) =
+                    artifacts_by_target_name.get(target_name.as_str())
+                else {
+                    errors.push(anyhow!(
+                        "artifact `{}` not found in {}",
+                        target_name,
+                        ArtifactsDocument::FILE_NAME
+                    ));
+                    return None;
+                };
+
+                let Ok(()) = data_builder.insert(DeploymentUnitData {
+                    name: artifact.name.to_owned(),
+                    version: artifact.version.clone(),
+                    kind: artifact.kind.clone(),
+                    hash,
+                }) else {
+                    errors.push(anyhow!(
+                        "failed to add deployment unit for artifact `{}`",
+                        target_name
+                    ));
+                    return None;
+                };
+
+                Some(target_name)
+            })
             .collect::<BTreeSet<_>>();
+
+        // If any errors were found, return them.
+        if !errors.is_empty() {
+            return Err(merge_anyhow_list(errors));
+        }
 
         let editor = RepositoryEditor::from_repo(
             repo.repo_path
@@ -252,6 +323,9 @@ impl OmicronRepoEditor {
             repo_path: repo.repo_path,
             artifacts,
             existing_target_names,
+            existing_deployment_units: DeploymentUnitMapBuilder::new(
+                DeploymentUnitScope::Repository,
+            ),
         })
     }
 
@@ -276,11 +350,17 @@ impl OmicronRepoEditor {
             repo_path,
             artifacts: ArtifactsDocument::empty(system_version),
             existing_target_names: BTreeSet::new(),
+            existing_deployment_units: DeploymentUnitMapBuilder::new(
+                DeploymentUnitScope::Repository,
+            ),
         })
     }
 
     /// Adds an artifact to the repository.
-    pub fn add_artifact(&mut self, new_artifact: &AddArtifact) -> Result<()> {
+    pub fn add_artifact(
+        &mut self,
+        new_artifact: &AddArtifact,
+    ) -> Result<ArtifactHash> {
         let target_name = format!(
             "{}-{}-{}.tar.gz",
             new_artifact.kind(),
@@ -288,34 +368,87 @@ impl OmicronRepoEditor {
             new_artifact.version(),
         );
 
-        // make sure we're not overwriting an existing target (either one that
+        let mut errors = Vec::new();
+
+        // Make sure we're not overwriting an existing target (either one that
         // existed when we opened the repo, or one that's been added via this
         // method)
-        if !self.existing_target_names.insert(target_name.clone()) {
-            bail!(
+        if self.existing_target_names.contains(&target_name) {
+            errors.push(anyhow!(
                 "a target named {target_name} already exists in the repository",
-            );
+            ));
         }
 
-        let version = ArtifactVersion::new(new_artifact.version().to_string())
-            .context("invalid artifact version")?;
-
-        self.artifacts.artifacts.push(Artifact {
-            name: new_artifact.name().to_owned(),
-            version,
-            kind: new_artifact.kind().clone(),
-            target: target_name.clone(),
-        });
-
+        // Start writing the target out to a temporary path, catching errors
+        // that might happen.
         let targets_dir = self.repo_path.join("targets");
 
         let mut file = TargetWriter::new(&targets_dir, target_name.clone())?;
         new_artifact.write_to(&mut file).with_context(|| {
             format!("error writing artifact `{target_name}")
         })?;
-        file.finish(&mut self.editor)?;
+        let finished_file = file.finish_write();
 
-        Ok(())
+        // Make sure we're not adding a new deployment unit with the same
+        // kind/hash as an existing one.
+        let res = match new_artifact.deployment_units() {
+            ArtifactDeploymentUnits::SingleUnit
+            | ArtifactDeploymentUnits::Unknown => {
+                // For single-unit artifacts, the artifact itself is the
+                // deployment unit. For unknown artifacts, we don't know, but
+                // treat them as single-unit.
+                self.existing_deployment_units.start_insert(
+                    DeploymentUnitData {
+                        name: new_artifact.name().to_owned(),
+                        version: new_artifact.version().clone(),
+                        kind: new_artifact.kind().clone(),
+                        hash: finished_file.digest(),
+                    },
+                )
+            }
+            ArtifactDeploymentUnits::Composite { deployment_units } => {
+                // For composite artifacts, merge the deployment units.
+                self.existing_deployment_units
+                    .start_bulk_insert(deployment_units.clone())
+            }
+        };
+        let new_units = match res {
+            Ok(units) => Some(units),
+            Err(error) => {
+                errors.push(anyhow!(error));
+                None
+            }
+        };
+
+        let version =
+            match ArtifactVersion::new(new_artifact.version().to_string()) {
+                Ok(version) => Some(version),
+                Err(error) => {
+                    errors.push(
+                        anyhow!(error).context("invalid artifact version"),
+                    );
+                    None
+                }
+            };
+
+        if !errors.is_empty() {
+            return Err(merge_anyhow_list(errors));
+        }
+
+        // ---
+        // No errors past this point.
+        // ---
+
+        self.existing_target_names.insert(target_name.clone());
+        self.artifacts.artifacts.push(Artifact {
+            name: new_artifact.name().to_owned(),
+            version: version.expect("version is None => errors handled above"),
+            kind: new_artifact.kind().clone(),
+            target: target_name,
+        });
+        new_units.expect("new_units is None => errors handled above").commit();
+
+        finished_file.finalize(&mut self.editor)
     }
 
     /// Consumes self, signing the repository and writing out this repository to disk.
@@ -326,9 +459,10 @@ impl OmicronRepoEditor {
     ) -> Result<()> {
         let targets_dir = self.repo_path.join("targets");
 
-        let mut file = TargetWriter::new(&targets_dir, "artifacts.json")?;
+        let mut file =
+            TargetWriter::new(&targets_dir, ArtifactsDocument::FILE_NAME)?;
         serde_json::to_writer_pretty(&mut file, &self.artifacts)?;
-        file.finish(&mut self.editor)?;
+        file.finish_write().finalize(&mut self.editor)?;
 
         update_versions(&mut self.editor, expiry)?;
 
@@ -370,6 +504,7 @@ mod tests {
     use dropshot::{ConfigLogging, ConfigLoggingIfExists, ConfigLoggingLevel};
 
     use crate::ArtifactSource;
+    use crate::assemble::ArtifactDeploymentUnits;
 
     use super::*;
 
@@ -408,7 +543,8 @@ mod tests {
             kind.parse().unwrap(),
             name.to_string(),
             version.parse().unwrap(),
-            ArtifactSource::Memory(BufList::new()),
+            ArtifactSource::Memory(BufList::from("first")),
+            ArtifactDeploymentUnits::Unknown,
         ))
         .unwrap();
 
@@ -417,10 +553,13 @@ mod tests {
                 kind.parse().unwrap(),
                 name.to_string(),
                 version.parse().unwrap(),
-                ArtifactSource::Memory(BufList::new()),
+                ArtifactSource::Memory(BufList::from("second")),
+                ArtifactDeploymentUnits::Unknown,
             ))
-            .unwrap_err()
-            .to_string();
+            .unwrap_err();
+
+        println!("error: {:?}", err);
+        let err = err.to_string();
 
         assert!(err.contains("a target named"));
         assert!(err.contains(kind));

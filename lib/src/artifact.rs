@@ -21,6 +21,8 @@ pub use composite::CompositeHostArchiveBuilder;
 pub use composite::CompositeRotArchiveBuilder;
 pub use composite::MtimeSource;
 
+use crate::assemble::ArtifactDeploymentUnits;
+
 /// The location a artifact will be obtained from.
 #[derive(Clone, Debug)]
 pub enum ArtifactSource {
@@ -35,6 +37,7 @@ pub struct AddArtifact {
     name: String,
     version: ArtifactVersion,
     source: ArtifactSource,
+    deployment_units: ArtifactDeploymentUnits,
 }
 
 impl AddArtifact {
@@ -44,8 +47,9 @@ impl AddArtifact {
         name: String,
         version: ArtifactVersion,
         source: ArtifactSource,
+        deployment_units: ArtifactDeploymentUnits,
     ) -> Self {
-        Self { kind, name, version, source }
+        Self { kind, name, version, source, deployment_units }
     }
 
     /// Creates an [`AddArtifact`] from the path, name and version.
@@ -69,7 +73,16 @@ impl AddArtifact {
                 .to_owned(),
         };
 
-        Ok(Self { kind, name, version, source: ArtifactSource::File(path) })
+        // TODO: In the future, it would be nice to extract the deployment units
+        // from the file. But that would require parsing the file, and the code
+        // for that lives in Omicron under update-common.
+        Ok(Self {
+            kind,
+            name,
+            version,
+            source: ArtifactSource::File(path),
+            deployment_units: ArtifactDeploymentUnits::Unknown,
+        })
     }
 
     /// Returns the kind of artifact this is.
@@ -90,6 +103,11 @@ impl AddArtifact {
     /// Returns the source for this artifact.
     pub fn source(&self) -> &ArtifactSource {
         &self.source
+    }
+
+    /// Returns information about deployment units for this artifact.
+    pub fn deployment_units(&self) -> &ArtifactDeploymentUnits {
+        &self.deployment_units
     }
 
     /// Writes this artifact to the specified writer.
@@ -440,8 +458,8 @@ impl ControlPlaneZoneImages {
 
 static FILLER_TEXT: &[u8; 16] = b"tufaceousfaketxt";
 static OXIDE_JSON_FILE_NAME: &str = "oxide.json";
-static HOST_PHASE_1_FILE_NAME: &str = "image/rom";
-static HOST_PHASE_2_FILE_NAME: &str = "image/zfs.img";
+pub(crate) static HOST_PHASE_1_FILE_NAME: &str = "image/rom";
+pub(crate) static HOST_PHASE_2_FILE_NAME: &str = "image/zfs.img";
 pub static ROT_ARCHIVE_A_FILE_NAME: &str = "archive-a.zip";
 pub static ROT_ARCHIVE_B_FILE_NAME: &str = "archive-b.zip";
 static CONTROL_PLANE_ARCHIVE_ZONE_DIRECTORY: &str = "zones";

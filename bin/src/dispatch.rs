@@ -14,7 +14,9 @@ use semver::Version;
 use std::collections::BTreeMap;
 use std::io::Read;
 use tough::Repository;
-use tufaceous_artifact::{ArtifactKind, ArtifactVersion, KnownArtifactKind};
+use tufaceous_artifact::{
+    ArtifactKind, ArtifactVersion, ArtifactsDocument, KnownArtifactKind,
+};
 use tufaceous_lib::assemble::{ArtifactManifest, OmicronRepoAssembler};
 use tufaceous_lib::{
     AddArtifact, ArchiveExtractor, Key, OmicronRepo, ROT_ARCHIVE_A_FILE_NAME,
@@ -165,8 +167,9 @@ impl Args {
                     })?;
                 repo.read_artifacts().await.with_context(|| {
                     format!(
-                        "error loading artifacts.json from extracted archive \
-                         at `{dest}`"
+                        "error loading {} from extracted archive \
+                         at `{dest}`",
+                        ArtifactsDocument::FILE_NAME
                     )
                 })?;
 
@@ -432,8 +435,7 @@ async fn show(log: &slog::Logger, repo_path: &Utf8Path) -> Result<()> {
         println!(
             "    {:37} {:>9} {:13} {:>7}",
             artifact_info.artifact_target,
-            // XXX-dap Display for ArtifactKind does not honor width
-            artifact_info.artifact_kind.to_string(),
+            artifact_info.artifact_kind,
             artifact_info.artifact_name,
             artifact_info.artifact_version,
         );
@@ -535,11 +537,9 @@ async fn show(log: &slog::Logger, repo_path: &Utf8Path) -> Result<()> {
         println!(
             "    {:61} {:>10} {:36} {:>7} {:25}",
             artifact_info.artifact_target,
-            // XXX-dap Display for ArtifactKind does not honor width
-            artifact_info.artifact_kind.to_string(),
+            artifact_info.artifact_kind,
             artifact_info.artifact_name,
-            // XXX-dap Display for ArtifactVersion does not honor width
-            artifact_info.artifact_version.to_string(),
+            artifact_info.artifact_version,
             key_name.unwrap_or("UNKNOWN"),
         );
 
@@ -624,8 +624,7 @@ async fn show(log: &slog::Logger, repo_path: &Utf8Path) -> Result<()> {
         println!(
             "    {:75} {:21} {:40} {:26}",
             artifact_info.artifact_target,
-            // XXX-dap Display for ArtifactKind does not honor width
-            artifact_info.artifact_kind.to_string(),
+            artifact_info.artifact_kind,
             artifact_info.artifact_name,
             artifact_info.artifact_version,
         );
