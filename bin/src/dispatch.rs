@@ -175,9 +175,11 @@ impl Args {
 
                 Ok(())
             }
-            Command::Show => show(log, &repo_path).await.with_context(|| {
-                format!("error showing repository at `{repo_path}`")
-            }),
+            Command::Artifacts => {
+                show_artifacts(log, &repo_path).await.with_context(|| {
+                    format!("error showing repository at `{repo_path}`")
+                })
+            }
             Command::Assemble {
                 manifest_path,
                 output_path,
@@ -272,8 +274,8 @@ enum Command {
         /// The destination to extract the file to.
         dest: Utf8PathBuf,
     },
-    /// Summarizes the contents of an Omicron TUF repository
-    Show,
+    /// Summarizes the artifacts of an Omicron TUF repository
+    Artifacts,
     /// Assembles a repository from a provided manifest.
     Assemble {
         /// Path to artifact manifest.
@@ -325,16 +327,10 @@ struct ArtifactInfo {
 }
 
 enum ArtifactInfoDetails {
-    SpHubrisImage(CommonCabooseInfo),
+    SpHubrisArchive(CommonCabooseInfo),
     RotArtifact { a: RotCabooseInfo, b: RotCabooseInfo },
+    RotBootloaderArchive(RotCabooseInfo),
     NoDetails,
-}
-
-#[derive(Ord, PartialOrd, Eq, PartialEq)]
-enum ArtifactFileKind {
-    SpHubrisImage,
-    RotArtifact,
-    Other,
 }
 
 struct CommonCabooseInfo {
@@ -346,13 +342,19 @@ struct CommonCabooseInfo {
 
 struct RotCabooseInfo {
     board: String,
+    // We don't currently use this but it's here for consistency and in case we
+    // need it in the future.
+    #[allow(dead_code)]
     git_commit: String,
     version: String,
     name: String,
     sign: String,
 }
 
-async fn show(log: &slog::Logger, repo_path: &Utf8Path) -> Result<()> {
+async fn show_artifacts(
+    log: &slog::Logger,
+    repo_path: &Utf8Path,
+) -> Result<()> {
     let omicron_repo =
         OmicronRepo::load_untrusted_ignore_expiration(log, &repo_path)
             .await
@@ -364,41 +366,51 @@ async fn show(log: &slog::Logger, repo_path: &Utf8Path) -> Result<()> {
         .context("reading artifacts document")?;
     println!("system version: {}", artifacts_document.system_version);
 
-    let mut all_artifacts = BTreeMap::new();
+    let mut sp_artifacts = Vec::new();
+    let mut rot_artifacts = Vec::new();
+    let mut other_artifacts = Vec::new();
+    let mut rot_bootloader_artifacts = Vec::new();
+
     for artifact_metadata in &artifacts_document.artifacts {
         eprintln!("loading artifact {}", artifact_metadata.target);
         let known_artifact_kind =
             artifact_metadata.kind.to_known().ok_or_else(|| {
                 anyhow!("unknown artifact kind: {}", &artifact_metadata.kind)
             })?;
-        let (details, file_kind) = match known_artifact_kind {
+        let (details, list) = match known_artifact_kind {
             KnownArtifactKind::GimletSp
             | KnownArtifactKind::PscSp
             | KnownArtifactKind::SwitchSp => (
                 // This target is itself a Hubris archive.
-                ArtifactInfoDetails::SpHubrisImage(
+                ArtifactInfoDetails::SpHubrisArchive(
                     load_caboose(&artifact_metadata.target, tuf_repo).await?,
                 ),
-                ArtifactFileKind::SpHubrisImage,
+                &mut sp_artifacts,
             ),
             KnownArtifactKind::GimletRot
             | KnownArtifactKind::PscRot
             | KnownArtifactKind::SwitchRot => {
                 let details =
                     load_rot(&artifact_metadata.target, tuf_repo).await?;
-                (details, ArtifactFileKind::RotArtifact)
+                (details, &mut rot_artifacts)
             }
             KnownArtifactKind::GimletRotBootloader
             | KnownArtifactKind::PscRotBootloader
-            | KnownArtifactKind::SwitchRotBootloader => {
-                // XXX-dap
-                (ArtifactInfoDetails::NoDetails, ArtifactFileKind::Other)
-            }
+            | KnownArtifactKind::SwitchRotBootloader => (
+                ArtifactInfoDetails::RotBootloaderArchive(
+                    load_rot_bootloader_caboose(
+                        &artifact_metadata.target,
+                        tuf_repo,
+                    )
+                    .await?,
+                ),
+                &mut rot_bootloader_artifacts,
+            ),
             KnownArtifactKind::Host
             | KnownArtifactKind::Trampoline
             | KnownArtifactKind::ControlPlane
             | KnownArtifactKind::Zone => {
-                (ArtifactInfoDetails::NoDetails, ArtifactFileKind::Other)
+                (ArtifactInfoDetails::NoDetails, &mut other_artifacts)
             }
         };
 
@@ -410,20 +422,13 @@ async fn show(log: &slog::Logger, repo_path: &Utf8Path) -> Result<()> {
             details,
         };
 
-        all_artifacts
-            .entry(file_kind)
-            .or_insert_with(Vec::new)
-            .push(artifact_info);
+        list.push(artifact_info);
     }
 
     println!("SP Artifacts (Hubris archives)\n");
     println!("    {:37} {:9} {:13} {:7}", "TARGET", "KIND", "NAME", "VERSION");
-    for artifact_info in all_artifacts
-        .get(&ArtifactFileKind::SpHubrisImage)
-        .into_iter()
-        .flatten()
-    {
-        let ArtifactInfoDetails::SpHubrisImage(caboose_info) =
+    for artifact_info in &sp_artifacts {
+        let ArtifactInfoDetails::SpHubrisArchive(caboose_info) =
             &artifact_info.details
         else {
             panic!("internal type mismatch");
@@ -516,14 +521,92 @@ async fn show(log: &slog::Logger, repo_path: &Utf8Path) -> Result<()> {
     .into_iter()
     .collect();
 
+    println!("\nRoT Bootloader Artifacts\n");
+    println!(
+        "    {:75} {:21} {:40} {:7} {:25}",
+        "TARGET", "KIND", "NAME", "VERSION", "SIGNING KEY"
+    );
+    for artifact_info in &rot_bootloader_artifacts {
+        let ArtifactInfoDetails::RotBootloaderArchive(rot_caboose) =
+            &artifact_info.details
+        else {
+            panic!("internal type mismatch");
+        };
+
+        let key_name =
+            known_signature_names.get(rot_caboose.sign.as_str()).map(|s| *s);
+
+        // Only print fields that we don't expect are duplicated or otherwise
+        // uninteresting (like the Git commit).  If we're wrong about these
+        // being duplicated, we'll print a warning below.
+        println!(
+            "    {:75} {:>21} {:40} {:>7} {:25}",
+            artifact_info.artifact_target,
+            artifact_info.artifact_kind,
+            artifact_info.artifact_name,
+            artifact_info.artifact_version,
+            key_name.unwrap_or("UNKNOWN"),
+        );
+
+        if rot_caboose.board != rot_caboose.name {
+            eprintln!(
+                "warning: expected caboose \"board\" and \"name\" \
+                 to be the same, but they're not"
+            );
+        }
+
+        if key_name.is_none() {
+            eprintln!("warning: unrecognized \"sign\"");
+        }
+
+        if rot_caboose.version.to_string()
+            != artifact_info.artifact_version.as_str()
+        {
+            eprintln!(
+                "warning: caboose version {} does not match \
+                     artifact version {}",
+                rot_caboose.version, artifact_info.artifact_version
+            );
+        }
+
+        // XXX-dap
+        // See the similar comment above.  RoT images sometimes have their
+        // key ("selfsigned-bart", "production-release", or "staging-devel")
+        // tacked onto the end of the board name in their artifact name.
+        // XXX-dap verify my assumptions here
+        // if caboose_info.board != artifact_info.artifact_name
+        //     && format!("{}-lab", caboose_info.board)
+        //         != artifact_info.artifact_name
+        // {
+        //     eprintln!(
+        //         "warning: target {}: caboose board {} does not match \
+        //          artifact name {}",
+        //         artifact_info.artifact_target,
+        //         caboose_info.board,
+        //         artifact_info.artifact_name,
+        //     );
+        // }
+
+        // XXX-dap
+        // See above comment.  Similarly, the artifact name sometimes has
+        // keys appended to it.
+        // if caboose_info.name != artifact_info.artifact_name {
+        //     eprintln!(
+        //         "warning: target {}: caboose name {} does not match \
+        //          artifact name {}",
+        //         artifact_info.artifact_target,
+        //         caboose_info.name,
+        //         artifact_info.artifact_name,
+        //     );
+        // }
+    }
+
     println!("\nRoT Artifacts (composite artifacts with two Hubris images)\n");
     println!(
         "    {:61} {:10} {:36} {:7} {:25}",
         "TARGET", "KIND", "NAME", "VERSION", "SIGNING KEY"
     );
-    for artifact_info in
-        all_artifacts.get(&ArtifactFileKind::RotArtifact).into_iter().flatten()
-    {
+    for artifact_info in &rot_artifacts {
         let ArtifactInfoDetails::RotArtifact { a, b } = &artifact_info.details
         else {
             panic!("internal type mismatch");
@@ -615,14 +698,12 @@ async fn show(log: &slog::Logger, repo_path: &Utf8Path) -> Result<()> {
 
     println!("\nOther artifacts\n");
     println!(
-        "    {:75} {:21} {:40} {:26}",
+        "    {:61} {:13} {:13} {:26}",
         "TARGET", "KIND", "NAME", "VERSION"
     );
-    for artifact_info in
-        all_artifacts.get(&ArtifactFileKind::Other).into_iter().flatten()
-    {
+    for artifact_info in &other_artifacts {
         println!(
-            "    {:75} {:21} {:40} {:26}",
+            "    {:61} {:13} {:13} {:26}",
             artifact_info.artifact_target,
             artifact_info.artifact_kind,
             artifact_info.artifact_name,
@@ -684,6 +765,23 @@ fn load_caboose_common_fields(
     )
     .context("unexpected non-UTF8 version")?;
     Ok(CommonCabooseInfo { board, git_commit, version, name })
+}
+
+async fn load_rot_bootloader_caboose(
+    target_name: &str,
+    tuf_repo: &Repository,
+) -> Result<RotCabooseInfo> {
+    load_rot_bootloader_caboose_impl(target_name, tuf_repo).await.with_context(
+        || format!("loading caboose for target {:?}", target_name),
+    )
+}
+
+async fn load_rot_bootloader_caboose_impl(
+    target_name: &str,
+    tuf_repo: &Repository,
+) -> Result<RotCabooseInfo> {
+    let v = load_target_bytes(target_name, tuf_repo).await?;
+    load_rot_caboose_from_archive_bytes(v).await
 }
 
 async fn load_rot_caboose_from_archive_bytes(
