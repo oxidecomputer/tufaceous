@@ -189,6 +189,7 @@ impl ArtifactManifest {
                     }
                     DeserializedArtifactSource::CompositeControlPlane {
                         zones,
+                        measurement_corpus,
                     } => {
                         ensure!(
                             kind == KnownArtifactKind::ControlPlane,
@@ -215,6 +216,14 @@ impl ArtifactManifest {
                             zone.with_name_and_entry(
                                 &artifact_data.version,
                                 |name, entry| builder.append_zone(name, entry),
+                            )?;
+                        }
+                        for manifest in measurement_corpus {
+                            manifest.with_name_and_entry(
+                                &artifact_data.version,
+                                |name, entry| {
+                                    builder.append_measurement(name, entry)
+                                },
                             )?;
                         }
                         ArtifactSource::Memory(builder.finish()?.into())
@@ -262,7 +271,10 @@ impl ArtifactManifest {
     /// details if any artifacts are missing.
     pub fn verify_all_present(&self) -> Result<()> {
         let all_artifacts: BTreeSet<_> = KnownArtifactKind::iter()
-            .filter(|k| !matches!(k, KnownArtifactKind::Zone))
+            .filter(|k| {
+                !matches!(k, KnownArtifactKind::Zone)
+                    && !matches!(k, KnownArtifactKind::MeasurementCorpus)
+            })
             .collect();
         let present_artifacts: BTreeSet<_> =
             self.artifacts.keys().copied().collect();
@@ -301,7 +313,8 @@ impl<'a> FakeDataAttributes<'a> {
             KnownArtifactKind::Host
             | KnownArtifactKind::Trampoline
             | KnownArtifactKind::ControlPlane
-            | KnownArtifactKind::Zone => {
+            | KnownArtifactKind::Zone
+            | KnownArtifactKind::MeasurementCorpus => {
                 return make_filler_text(
                     &self.kind.to_string(),
                     self.version,
@@ -484,6 +497,7 @@ pub enum DeserializedArtifactSource {
     },
     CompositeControlPlane {
         zones: Vec<DeserializedControlPlaneZoneSource>,
+        measurement_corpus: Vec<DeserializedControlPlaneZoneSource>,
     },
 }
 
@@ -510,9 +524,15 @@ impl DeserializedArtifactSource {
                 archive_b.apply_size_delta(size_delta)?;
                 Ok(())
             }
-            DeserializedArtifactSource::CompositeControlPlane { zones } => {
+            DeserializedArtifactSource::CompositeControlPlane {
+                zones,
+                measurement_corpus,
+            } => {
                 for zone in zones {
                     zone.apply_size_delta(size_delta)?;
+                }
+                for manifest in measurement_corpus {
+                    manifest.apply_size_delta(size_delta)?;
                 }
                 Ok(())
             }
@@ -570,6 +590,8 @@ impl DeserializedFileArtifactSource {
     }
 }
 
+// FIXME probably give this a better name if we're going to use it for
+// measurements
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum DeserializedControlPlaneZoneSource {
