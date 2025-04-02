@@ -2,7 +2,6 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use std::collections::HashMap;
 use std::io::{BufWriter, Write};
 
 use anyhow::{Context, Result, anyhow, bail};
@@ -10,6 +9,7 @@ use camino::Utf8Path;
 use flate2::Compression;
 use flate2::write::GzEncoder;
 use sha2::{Digest, Sha256};
+use tufaceous_artifact::ArtifactHash;
 use tufaceous_brand_metadata::{ArchiveType, Metadata};
 
 use super::{
@@ -31,7 +31,6 @@ pub struct CompositeEntry<'a> {
 
 pub struct CompositeControlPlaneArchiveBuilder<W: Write> {
     inner: CompositeTarballBuilder<W>,
-    hashes: HashMap<[u8; 32], String>,
 }
 
 impl<W: Write> CompositeControlPlaneArchiveBuilder<W> {
@@ -39,29 +38,22 @@ impl<W: Write> CompositeControlPlaneArchiveBuilder<W> {
         let metadata = Metadata::new(ArchiveType::ControlPlane);
         let inner =
             CompositeTarballBuilder::new(writer, metadata, mtime_source)?;
-        Ok(Self { inner, hashes: HashMap::new() })
+        Ok(Self { inner })
     }
 
     pub fn append_zone(
         &mut self,
         name: &str,
         entry: CompositeEntry<'_>,
-    ) -> Result<()> {
+    ) -> Result<(ArtifactHash, String)> {
         let name_path = Utf8Path::new(name);
         if name_path.file_name() != Some(name) {
             bail!("control plane zone filenames should not contain paths");
         }
-        if let Some(duplicate) =
-            self.hashes.insert(Sha256::digest(entry.data).into(), name.into())
-        {
-            bail!(
-                "duplicate zones are not allowed \
-                ({name} and {duplicate} have the same checksum)"
-            );
-        }
         let path =
             Utf8Path::new(CONTROL_PLANE_ARCHIVE_ZONE_DIRECTORY).join(name_path);
-        self.inner.append_file(path.as_str(), entry)
+        let hash = self.inner.append_file(path.as_str(), entry)?;
+        Ok((hash, name.to_owned()))
     }
 
     pub fn finish(self) -> Result<W> {
@@ -84,14 +76,14 @@ impl<W: Write> CompositeRotArchiveBuilder<W> {
     pub fn append_archive_a(
         &mut self,
         entry: CompositeEntry<'_>,
-    ) -> Result<()> {
+    ) -> Result<ArtifactHash> {
         self.inner.append_file(ROT_ARCHIVE_A_FILE_NAME, entry)
     }
 
     pub fn append_archive_b(
         &mut self,
         entry: CompositeEntry<'_>,
-    ) -> Result<()> {
+    ) -> Result<ArtifactHash> {
         self.inner.append_file(ROT_ARCHIVE_B_FILE_NAME, entry)
     }
 
@@ -112,11 +104,17 @@ impl<W: Write> CompositeHostArchiveBuilder<W> {
         Ok(Self { inner })
     }
 
-    pub fn append_phase_1(&mut self, entry: CompositeEntry<'_>) -> Result<()> {
+    pub fn append_phase_1(
+        &mut self,
+        entry: CompositeEntry<'_>,
+    ) -> Result<ArtifactHash> {
         self.inner.append_file(HOST_PHASE_1_FILE_NAME, entry)
     }
 
-    pub fn append_phase_2(&mut self, entry: CompositeEntry<'_>) -> Result<()> {
+    pub fn append_phase_2(
+        &mut self,
+        entry: CompositeEntry<'_>,
+    ) -> Result<ArtifactHash> {
         self.inner.append_file(HOST_PHASE_2_FILE_NAME, entry)
     }
 
@@ -147,12 +145,14 @@ impl<W: Write> CompositeTarballBuilder<W> {
         &mut self,
         path: &str,
         entry: CompositeEntry<'_>,
-    ) -> Result<()> {
+    ) -> Result<ArtifactHash> {
         let header =
             make_tar_header(path, entry.data.len(), entry.mtime_source);
         self.builder
             .append(&header, entry.data)
-            .with_context(|| format!("error append {path:?}"))
+            .with_context(|| format!("error append {path:?}"))?;
+        let hash = Sha256::digest(entry.data);
+        Ok(ArtifactHash(hash.into()))
     }
 
     fn finish(self) -> Result<W> {
