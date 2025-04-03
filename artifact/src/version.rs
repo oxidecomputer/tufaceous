@@ -216,6 +216,12 @@ mod tests {
         );
     }
 
+    #[test]
+    fn display_respects_padding() {
+        let v = ArtifactVersion::new_const("5.4.3");
+        assert_eq!(format!("{v:x>10}"), "xxxxx5.4.3");
+    }
+
     #[proptest]
     fn proptest_valid_version(#[strategy(PROPTEST_REGEX)] version: String) {
         validate_version(&version).unwrap();
