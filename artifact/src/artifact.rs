@@ -4,6 +4,7 @@
 
 use std::{fmt, str::FromStr};
 
+use daft::Diffable;
 use hex::FromHexError;
 use semver::Version;
 use serde::{Deserialize, Serialize};
@@ -54,8 +55,18 @@ pub struct Artifact {
 
 /// The hash of an artifact.
 #[derive(
-    Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize,
+    Copy,
+    Clone,
+    Diffable,
+    Eq,
+    PartialEq,
+    Ord,
+    PartialOrd,
+    Hash,
+    Serialize,
+    Deserialize,
 )]
+#[daft(leaf)]
 #[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
 #[cfg_attr(feature = "proptest", derive(test_strategy::Arbitrary))]
 #[serde(transparent)]
@@ -99,7 +110,16 @@ impl FromStr for ArtifactHash {
 /// A hash-based identifier for an artifact or deployment unit: the kind and
 /// hash.
 #[derive(
-    Debug, Clone, PartialEq, Eq, Hash, Ord, PartialOrd, Deserialize, Serialize,
+    Debug,
+    Diffable,
+    Clone,
+    PartialEq,
+    Eq,
+    Hash,
+    Ord,
+    PartialOrd,
+    Deserialize,
+    Serialize,
 )]
 #[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
 pub struct ArtifactHashId {
