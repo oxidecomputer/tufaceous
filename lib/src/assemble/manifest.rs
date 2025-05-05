@@ -355,8 +355,7 @@ impl ArtifactManifest {
     pub fn verify_all_present(&self) -> Result<()> {
         let all_artifacts: BTreeSet<_> = KnownArtifactKind::iter()
             .filter(|k| {
-                !matches!(k, KnownArtifactKind::Zone)
-                    && !matches!(k, KnownArtifactKind::MeasurementCorpus)
+                !matches!(k, KnownArtifactKind::Zone | KnownArtifactKind::MeasurementCorpus)
             })
             .collect();
         let present_artifacts: BTreeSet<_> =
