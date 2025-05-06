@@ -1,4 +1,4 @@
-# This manifest has two control plane zones that hash to the same contents. This
+# This manifest has two measurement corpora that hash to the same contents. This
 # is not allowed.
 
 system_version = "1.0.0"
