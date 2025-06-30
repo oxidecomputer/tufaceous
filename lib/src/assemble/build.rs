@@ -54,7 +54,7 @@ impl OmicronRepoAssembler {
                     .tempdir()?;
                 // This will cause the directory to be preserved -- we're going
                 // to clean it up if it's successful.
-                let path = dir.into_path();
+                let path = dir.keep();
                 (path, true)
             }
         };
