@@ -45,9 +45,13 @@ impl OmicronRepo {
         repo_path: &Utf8Path,
         system_version: Version,
         keys: Vec<Key>,
+        root: Option<SignedRole<Root>>,
         expiry: DateTime<Utc>,
     ) -> Result<Self> {
-        let root = crate::root::new_root(keys.clone(), expiry).await?;
+        let root = match root {
+            Some(root) => root,
+            None => crate::root::new_root(keys.clone(), expiry).await?,
+        };
         let editor = OmicronRepoEditor::initialize(
             repo_path.to_owned(),
             root,
@@ -595,6 +599,7 @@ mod tests {
             tempdir.path(),
             "0.0.0".parse().unwrap(),
             vec![Key::generate_ed25519().unwrap()],
+            None,
             Utc::now() + Days::new(1),
         )
         .await
