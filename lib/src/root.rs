@@ -13,7 +13,7 @@ use tough::schema::{KeyHolder, RoleKeys, RoleType, Root};
 
 use crate::key::Key;
 
-pub(crate) async fn new_root(
+pub async fn new_root(
     keys: Vec<Key>,
     expires: DateTime<Utc>,
 ) -> Result<SignedRole<Root>> {
