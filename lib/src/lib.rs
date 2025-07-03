@@ -7,7 +7,7 @@ mod artifact;
 pub mod assemble;
 mod key;
 mod repository;
-mod root;
+pub mod root;
 mod target;
 mod utils;
 

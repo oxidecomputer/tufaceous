@@ -14,6 +14,7 @@ use futures::TryStreamExt;
 use semver::Version;
 use tough::editor::RepositoryEditor;
 use tough::editor::signed::SignedRole;
+use tough::error::Error;
 use tough::schema::{Root, Target};
 use tough::{ExpirationEnforcement, Repository, RepositoryLoader, TargetName};
 use tufaceous_artifact::{
@@ -31,6 +32,7 @@ use crate::utils::merge_anyhow_list;
 use crate::{AddArtifact, ArchiveBuilder};
 
 /// A TUF repository describing Omicron.
+#[derive(Debug)]
 pub struct OmicronRepo {
     log: slog::Logger,
     repo: Repository,
@@ -44,9 +46,9 @@ impl OmicronRepo {
         repo_path: &Utf8Path,
         system_version: Version,
         keys: Vec<Key>,
+        root: SignedRole<Root>,
         expiry: DateTime<Utc>,
     ) -> Result<Self> {
-        let root = crate::root::new_root(keys.clone(), expiry).await?;
         let editor = OmicronRepoEditor::initialize(
             repo_path.to_owned(),
             root,
@@ -67,6 +69,86 @@ impl OmicronRepo {
     /// Loads a repository from the given path.
     ///
     /// This method enforces expirations. To load without expiration enforcement, use
+    /// [`Self::load_ignore_expiration`].
+    pub async fn load(
+        log: &slog::Logger,
+        repo_path: &Utf8Path,
+        trusted_roots: impl IntoIterator<Item = impl AsRef<[u8]>>,
+    ) -> Result<Self> {
+        Self::load_impl(
+            log,
+            repo_path,
+            trusted_roots,
+            ExpirationEnforcement::Safe,
+        )
+        .await
+    }
+
+    /// Loads a repository from the given path, ignoring expiration.
+    ///
+    /// Use cases for this include:
+    ///
+    /// 1. When you're editing an existing repository and will re-sign it afterwards.
+    /// 2. When you're reading a repository that was uploaded out-of-band,
+    ///    instead of fetched from a network-accessible repository
+    /// 3. In an environment in which time isn't available.
+    pub async fn load_ignore_expiration(
+        log: &slog::Logger,
+        repo_path: &Utf8Path,
+        trusted_roots: impl IntoIterator<Item = impl AsRef<[u8]>>,
+    ) -> Result<Self> {
+        Self::load_impl(
+            log,
+            repo_path,
+            trusted_roots,
+            ExpirationEnforcement::Unsafe,
+        )
+        .await
+    }
+
+    async fn load_impl(
+        log: &slog::Logger,
+        repo_path: &Utf8Path,
+        trusted_roots: impl IntoIterator<Item = impl AsRef<[u8]>>,
+        exp: ExpirationEnforcement,
+    ) -> Result<Self> {
+        let repo_path = repo_path.canonicalize_utf8()?;
+        let mut verify_error = None;
+        for root in trusted_roots {
+            match RepositoryLoader::new(
+                &root,
+                Url::from_file_path(repo_path.join("metadata"))
+                    .expect("the canonical path is not absolute?"),
+                Url::from_file_path(repo_path.join("targets"))
+                    .expect("the canonical path is not absolute?"),
+            )
+            .expiration_enforcement(exp)
+            .load()
+            .await
+            {
+                Ok(repo) => {
+                    return Ok(Self {
+                        log: log.new(slog::o!("component" => "OmicronRepo")),
+                        repo,
+                        repo_path,
+                    });
+                }
+                Err(
+                    err @ (Error::VerifyMetadata { .. }
+                    | Error::VerifyTrustedMetadata { .. }),
+                ) if verify_error.is_none() => {
+                    verify_error = Some(err.into());
+                    continue;
+                }
+                Err(err) => return Err(err.into()),
+            }
+        }
+        Err(verify_error.unwrap_or_else(|| anyhow!("trust store is empty")))
+    }
+
+    /// Loads a repository from the given path.
+    ///
+    /// This method enforces expirations. To load without expiration enforcement, use
     /// [`Self::load_untrusted_ignore_expiration`].
     pub async fn load_untrusted(
         log: &slog::Logger,
@@ -81,7 +163,9 @@ impl OmicronRepo {
     /// Use cases for this include:
     ///
     /// 1. When you're editing an existing repository and will re-sign it afterwards.
-    /// 2. In an environment in which time isn't available.
+    /// 2. When you're reading a repository that was uploaded out-of-band,
+    ///    instead of fetched from a network-accessible repository
+    /// 3. In an environment in which time isn't available.
     pub async fn load_untrusted_ignore_expiration(
         log: &slog::Logger,
         repo_path: &Utf8Path,
@@ -95,25 +179,12 @@ impl OmicronRepo {
         repo_path: &Utf8Path,
         exp: ExpirationEnforcement,
     ) -> Result<Self> {
-        let log = log.new(slog::o!("component" => "OmicronRepo"));
         let repo_path = repo_path.canonicalize_utf8()?;
         let root_json = repo_path.join("metadata").join("1.root.json");
         let root = tokio::fs::read(&root_json)
             .await
             .with_context(|| format!("error reading from {root_json}"))?;
-
-        let repo = RepositoryLoader::new(
-            &root,
-            Url::from_file_path(repo_path.join("metadata"))
-                .expect("the canonical path is not absolute?"),
-            Url::from_file_path(repo_path.join("targets"))
-                .expect("the canonical path is not absolute?"),
-        )
-        .expiration_enforcement(exp)
-        .load()
-        .await?;
-
-        Ok(Self { log, repo, repo_path })
+        Self::load_impl(log, &repo_path, &[root], exp).await
     }
 
     /// Returns a canonicalized form of the repository path.
@@ -503,10 +574,95 @@ mod tests {
     use dropshot::test_util::LogContext;
     use dropshot::{ConfigLogging, ConfigLoggingIfExists, ConfigLoggingLevel};
 
-    use crate::ArtifactSource;
-    use crate::assemble::ArtifactDeploymentUnits;
+    use crate::assemble::{
+        ArtifactDeploymentUnits, ArtifactManifest, OmicronRepoAssembler,
+    };
+    use crate::{ArchiveExtractor, ArtifactSource};
 
     use super::*;
+
+    #[tokio::test]
+    async fn load_trusted() {
+        let log_config = ConfigLogging::File {
+            level: ConfigLoggingLevel::Trace,
+            path: "UNUSED".into(),
+            if_exists: ConfigLoggingIfExists::Fail,
+        };
+        let logctx = LogContext::new(
+            "reject_artifacts_with_the_same_filename",
+            &log_config,
+        );
+
+        // Generate a "trusted" root and an "untrusted" root.
+        let expiry = Utc::now() + Days::new(1);
+        let trusted_key = Key::generate_ed25519().unwrap();
+        let trusted_root =
+            crate::root::new_root(vec![trusted_key.clone()], expiry)
+                .await
+                .unwrap();
+        let untrusted_key = Key::generate_ed25519().unwrap();
+        let untrusted_root =
+            crate::root::new_root(vec![untrusted_key], expiry).await.unwrap();
+
+        // Generate a repository using the trusted root.
+        let tempdir = Utf8TempDir::new().unwrap();
+        let archive_path = tempdir.path().join("repo.zip");
+        let mut assembler = OmicronRepoAssembler::new(
+            &logctx.log,
+            ArtifactManifest::new_fake(),
+            vec![trusted_key],
+            expiry,
+            archive_path.clone(),
+        );
+        assembler.set_root_role(trusted_root.clone());
+        assembler.build().await.unwrap();
+        // And now that we've created an archive and cleaned up the build
+        // directory, immediately unarchive it... this is a bit silly, huh?
+        let repo_dir = tempdir.path().join("repo");
+        ArchiveExtractor::from_path(&archive_path)
+            .unwrap()
+            .extract(&repo_dir)
+            .unwrap();
+
+        // If the trust store contains the root we generated the repo from, we
+        // should successfully load it.
+        for trust_store in [
+            vec![trusted_root.buffer()],
+            vec![trusted_root.buffer(), untrusted_root.buffer()],
+            vec![untrusted_root.buffer(), trusted_root.buffer()],
+            vec![trusted_root.buffer(), trusted_root.buffer()],
+        ] {
+            OmicronRepo::load(&logctx.log, &repo_dir, trust_store)
+                .await
+                .unwrap();
+        }
+        // If the trust store is empty, we should fail.
+        assert_eq!(
+            OmicronRepo::load(&logctx.log, &repo_dir, [] as [Vec<u8>; 0])
+                .await
+                .unwrap_err()
+                .to_string(),
+            "trust store is empty"
+        );
+        // If the trust store otherwise does not contain the root we generated
+        // the repo from, we should also fail.
+        for trust_store in [
+            vec![untrusted_root.buffer()],
+            vec![untrusted_root.buffer(), untrusted_root.buffer()],
+        ] {
+            assert_eq!(
+                OmicronRepo::load(&logctx.log, &repo_dir, trust_store)
+                    .await
+                    .unwrap_err()
+                    .to_string(),
+                "Failed to verify timestamp metadata: \
+                Signature threshold of 1 not met for role timestamp \
+                (0 valid signatures)"
+            )
+        }
+
+        logctx.cleanup_successful();
+    }
 
     #[tokio::test]
     async fn reject_artifacts_with_the_same_filename() {
@@ -520,12 +676,16 @@ mod tests {
             &log_config,
         );
         let tempdir = Utf8TempDir::new().unwrap();
+        let keys = vec![Key::generate_ed25519().unwrap()];
+        let expiry = Utc::now() + Days::new(1);
+        let root = crate::root::new_root(keys.clone(), expiry).await.unwrap();
         let mut repo = OmicronRepo::initialize(
             &logctx.log,
             tempdir.path(),
             "0.0.0".parse().unwrap(),
-            vec![Key::generate_ed25519().unwrap()],
-            Utc::now() + Days::new(1),
+            keys,
+            root,
+            expiry,
         )
         .await
         .unwrap()

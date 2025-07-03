@@ -5,6 +5,8 @@
 use anyhow::{Context, Result};
 use camino::{Utf8Path, Utf8PathBuf};
 use chrono::{DateTime, Utc};
+use tough::editor::signed::SignedRole;
+use tough::schema::Root;
 
 use crate::{AddArtifact, Key, OmicronRepo, utils::merge_anyhow_list};
 
@@ -17,6 +19,7 @@ pub struct OmicronRepoAssembler {
     manifest: ArtifactManifest,
     build_dir: Option<Utf8PathBuf>,
     keys: Vec<Key>,
+    root: Option<SignedRole<Root>>,
     expiry: DateTime<Utc>,
     output_path: Utf8PathBuf,
 }
@@ -34,6 +37,7 @@ impl OmicronRepoAssembler {
             manifest,
             build_dir: None,
             keys,
+            root: None,
             expiry,
             output_path,
         }
@@ -41,6 +45,11 @@ impl OmicronRepoAssembler {
 
     pub fn set_build_dir(&mut self, build_dir: Utf8PathBuf) -> &mut Self {
         self.build_dir = Some(build_dir);
+        self
+    }
+
+    pub fn set_root_role(&mut self, root_role: SignedRole<Root>) -> &mut Self {
+        self.root = Some(root_role);
         self
     }
 
@@ -92,11 +101,18 @@ impl OmicronRepoAssembler {
     }
 
     async fn build_impl(&self, build_dir: &Utf8Path) -> Result<()> {
+        let root = match &self.root {
+            Some(root) => root.clone(),
+            None => {
+                crate::root::new_root(self.keys.clone(), self.expiry).await?
+            }
+        };
         let mut repository = OmicronRepo::initialize(
             &self.log,
             build_dir,
             self.manifest.system_version.clone(),
             self.keys.clone(),
+            root,
             self.expiry,
         )
         .await?
