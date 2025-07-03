@@ -44,13 +44,16 @@ impl Args {
         match self.command {
             Command::Init { system_version, no_generate_key } => {
                 let keys = maybe_generate_keys(self.keys, no_generate_key)?;
+                let root =
+                    tufaceous_lib::root::new_root(keys.clone(), self.expiry)
+                        .await?;
 
                 let repo = OmicronRepo::initialize(
                     log,
                     &repo_path,
                     system_version,
                     keys,
-                    None,
+                    root,
                     self.expiry,
                 )
                 .await?;

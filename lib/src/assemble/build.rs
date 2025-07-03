@@ -101,12 +101,18 @@ impl OmicronRepoAssembler {
     }
 
     async fn build_impl(&self, build_dir: &Utf8Path) -> Result<()> {
+        let root = match &self.root {
+            Some(root) => root.clone(),
+            None => {
+                crate::root::new_root(self.keys.clone(), self.expiry).await?
+            }
+        };
         let mut repository = OmicronRepo::initialize(
             &self.log,
             build_dir,
             self.manifest.system_version.clone(),
             self.keys.clone(),
-            self.root.clone(),
+            root,
             self.expiry,
         )
         .await?
