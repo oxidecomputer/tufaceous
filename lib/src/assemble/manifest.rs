@@ -704,8 +704,10 @@ pub enum DeserializedControlPlaneZoneSource {
         #[serde(skip_serializing_if = "Option::is_none")]
         file_name: Option<String>,
     },
+    #[serde(rename_all = "snake_case")]
     Fake {
-        name: String,
+        artifact_name: String,
+        file_name: String,
         #[serde(deserialize_with = "deserialize_byte_size")]
         size: u64,
     },
@@ -738,7 +740,11 @@ impl DeserializedControlPlaneZoneSource {
                 // change this to use the mtime on disk in the future?)
                 (name.to_owned(), data, MtimeSource::Now)
             }
-            DeserializedControlPlaneZoneSource::Fake { name, size } => {
+            DeserializedControlPlaneZoneSource::Fake {
+                artifact_name,
+                file_name,
+                size,
+            } => {
                 use flate2::{Compression, write::GzEncoder};
                 use tufaceous_brand_metadata::{
                     ArchiveType, LayerInfo, Metadata,
@@ -750,7 +756,7 @@ impl DeserializedControlPlaneZoneSource {
                 ));
 
                 let metadata = Metadata::new(ArchiveType::Layer(LayerInfo {
-                    pkg: name.clone(),
+                    pkg: artifact_name.clone(),
                     version: version.clone(),
                 }));
                 metadata.append_to_tar(&mut tar, 0)?;
@@ -764,11 +770,12 @@ impl DeserializedControlPlaneZoneSource {
                 h.set_cksum();
                 tar.append(
                     &h,
-                    make_filler_text(name, version, *size as usize).as_slice(),
+                    make_filler_text(artifact_name, version, *size as usize)
+                        .as_slice(),
                 )?;
 
                 let data = tar.into_inner()?.finish()?;
-                (format!("{name}.tar.gz"), data, MtimeSource::Zero)
+                (file_name.clone(), data, MtimeSource::Zero)
             }
         };
         let entry = CompositeEntry { data: &data, mtime_source };

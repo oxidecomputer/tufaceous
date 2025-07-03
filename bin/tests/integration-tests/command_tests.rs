@@ -240,7 +240,8 @@ fn test_assemble_duplicate_zone() -> Result<()> {
     cmd.args([
         "assemble",
         "--skip-all-present",
-        "invalid-manifests/duplicate-zone.toml",
+        // TODO: should we also check duplicate zone artifact names?
+        "invalid-manifests/duplicate-zone-file-name.toml",
     ]);
     cmd.arg(&archive_path);
     cmd.assert()
@@ -250,7 +251,7 @@ fn test_assemble_duplicate_zone() -> Result<()> {
         ))
         .stderr(predicate::str::contains("zone/"))
         .stderr(predicate::str::contains(
-            r#"(existing name: zone1.tar.gz, version: 1.0.0; new name: zone1.tar.gz, version: 1.0.0)"#,
+            r#"(existing name: zone1.tar.gz, version: 1.0.0; new name: zone1-dup.tar.gz, version: 1.0.0)"#,
         ));
 
     logctx.cleanup_successful();
