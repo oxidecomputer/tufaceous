@@ -32,6 +32,7 @@ use crate::utils::merge_anyhow_list;
 use crate::{AddArtifact, ArchiveBuilder};
 
 /// A TUF repository describing Omicron.
+#[derive(Debug)]
 pub struct OmicronRepo {
     log: slog::Logger,
     repo: Repository,
@@ -76,7 +77,7 @@ impl OmicronRepo {
     pub async fn load(
         log: &slog::Logger,
         repo_path: &Utf8Path,
-        trusted_roots: &[Vec<u8>],
+        trusted_roots: impl IntoIterator<Item = impl AsRef<[u8]>>,
     ) -> Result<Self> {
         Self::load_impl(
             log,
@@ -98,7 +99,7 @@ impl OmicronRepo {
     pub async fn load_ignore_expiration(
         log: &slog::Logger,
         repo_path: &Utf8Path,
-        trusted_roots: &[Vec<u8>],
+        trusted_roots: impl IntoIterator<Item = impl AsRef<[u8]>>,
     ) -> Result<Self> {
         Self::load_impl(
             log,
@@ -112,7 +113,7 @@ impl OmicronRepo {
     async fn load_impl(
         log: &slog::Logger,
         repo_path: &Utf8Path,
-        trusted_roots: &[Vec<u8>],
+        trusted_roots: impl IntoIterator<Item = impl AsRef<[u8]>>,
         exp: ExpirationEnforcement,
     ) -> Result<Self> {
         let repo_path = repo_path.canonicalize_utf8()?;
@@ -577,10 +578,95 @@ mod tests {
     use dropshot::test_util::LogContext;
     use dropshot::{ConfigLogging, ConfigLoggingIfExists, ConfigLoggingLevel};
 
-    use crate::ArtifactSource;
-    use crate::assemble::ArtifactDeploymentUnits;
+    use crate::assemble::{
+        ArtifactDeploymentUnits, ArtifactManifest, OmicronRepoAssembler,
+    };
+    use crate::{ArchiveExtractor, ArtifactSource};
 
     use super::*;
+
+    #[tokio::test]
+    async fn load_trusted() {
+        let log_config = ConfigLogging::File {
+            level: ConfigLoggingLevel::Trace,
+            path: "UNUSED".into(),
+            if_exists: ConfigLoggingIfExists::Fail,
+        };
+        let logctx = LogContext::new(
+            "reject_artifacts_with_the_same_filename",
+            &log_config,
+        );
+
+        // Generate a "trusted" root and an "untrusted" root.
+        let expiry = Utc::now() + Days::new(1);
+        let trusted_key = Key::generate_ed25519().unwrap();
+        let trusted_root =
+            crate::root::new_root(vec![trusted_key.clone()], expiry)
+                .await
+                .unwrap();
+        let untrusted_key = Key::generate_ed25519().unwrap();
+        let untrusted_root =
+            crate::root::new_root(vec![untrusted_key], expiry).await.unwrap();
+
+        // Generate a repository using the trusted root.
+        let tempdir = Utf8TempDir::new().unwrap();
+        let archive_path = tempdir.path().join("repo.zip");
+        let mut assembler = OmicronRepoAssembler::new(
+            &logctx.log,
+            ArtifactManifest::new_fake(),
+            vec![trusted_key],
+            expiry,
+            archive_path.clone(),
+        );
+        assembler.set_root_role(trusted_root.clone());
+        assembler.build().await.unwrap();
+        // And now that we've created an archive and cleaned up the build
+        // directory, immediately unarchive it... this is a bit silly, huh?
+        let repo_dir = tempdir.path().join("repo");
+        ArchiveExtractor::from_path(&archive_path)
+            .unwrap()
+            .extract(&repo_dir)
+            .unwrap();
+
+        // If the trust store contains the root we generated the repo from, we
+        // should successfully load it.
+        for trust_store in [
+            vec![trusted_root.buffer()],
+            vec![trusted_root.buffer(), untrusted_root.buffer()],
+            vec![untrusted_root.buffer(), trusted_root.buffer()],
+            vec![trusted_root.buffer(), trusted_root.buffer()],
+        ] {
+            OmicronRepo::load(&logctx.log, &repo_dir, trust_store)
+                .await
+                .unwrap();
+        }
+        // If the trust store is empty, we should fail.
+        assert_eq!(
+            OmicronRepo::load(&logctx.log, &repo_dir, [] as [Vec<u8>; 0])
+                .await
+                .unwrap_err()
+                .to_string(),
+            "trust store is empty"
+        );
+        // If the trust store otherwise does not contain the root we generated
+        // the repo from, we should also fail.
+        for trust_store in [
+            vec![untrusted_root.buffer()],
+            vec![untrusted_root.buffer(), untrusted_root.buffer()],
+        ] {
+            assert_eq!(
+                OmicronRepo::load(&logctx.log, &repo_dir, trust_store)
+                    .await
+                    .unwrap_err()
+                    .to_string(),
+                "Failed to verify timestamp metadata: \
+                Signature threshold of 1 not met for role timestamp \
+                (0 valid signatures)"
+            )
+        }
+
+        logctx.cleanup_successful();
+    }
 
     #[tokio::test]
     async fn reject_artifacts_with_the_same_filename() {
