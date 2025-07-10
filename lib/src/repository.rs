@@ -136,7 +136,7 @@ impl OmicronRepo {
                 Err(
                     err @ (Error::VerifyMetadata { .. }
                     | Error::VerifyTrustedMetadata { .. }),
-                ) if verify_error.is_none() => {
+                ) => {
                     verify_error = Some(err.into());
                     continue;
                 }
@@ -631,6 +631,11 @@ mod tests {
             vec![trusted_root.buffer(), untrusted_root.buffer()],
             vec![untrusted_root.buffer(), trusted_root.buffer()],
             vec![trusted_root.buffer(), trusted_root.buffer()],
+            vec![
+                untrusted_root.buffer(),
+                untrusted_root.buffer(),
+                trusted_root.buffer(),
+            ],
         ] {
             OmicronRepo::load(&logctx.log, &repo_dir, trust_store)
                 .await
