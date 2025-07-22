@@ -196,6 +196,9 @@ pub enum KnownArtifactKind {
     SwitchSp,
     SwitchRot,
     SwitchRotBootloader,
+
+    // Reference Measurements
+    MeasurementCorpus,
 }
 
 impl KnownArtifactKind {
@@ -222,6 +225,7 @@ impl KnownArtifactKind {
             | KnownArtifactKind::Trampoline
             | KnownArtifactKind::ControlPlane
             | KnownArtifactKind::Zone
+            | KnownArtifactKind::MeasurementCorpus
             | KnownArtifactKind::PscSp
             | KnownArtifactKind::PscRotBootloader
             | KnownArtifactKind::SwitchSp
