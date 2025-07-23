@@ -737,7 +737,14 @@ pub enum DeserializedControlPlaneZoneSource {
         file_name: Option<String>,
     },
     #[serde(rename_all = "snake_case")]
-    Fake {
+    FakeZone {
+        artifact_name: String,
+        file_name: String,
+        #[serde(deserialize_with = "deserialize_byte_size")]
+        size: u64,
+    },
+    #[serde(rename_all = "snake_case")]
+    FakeMeasurement {
         artifact_name: String,
         file_name: String,
         #[serde(deserialize_with = "deserialize_byte_size")]
@@ -747,7 +754,7 @@ pub enum DeserializedControlPlaneZoneSource {
 
 impl DeserializedControlPlaneZoneSource {
     fn is_fake(&self) -> bool {
-        matches!(self, DeserializedControlPlaneZoneSource::Fake { .. })
+        matches!(self, DeserializedControlPlaneZoneSource::FakeZone { .. })
     }
 
     fn with_name_and_entry<F, T>(
@@ -772,7 +779,7 @@ impl DeserializedControlPlaneZoneSource {
                 // change this to use the mtime on disk in the future?)
                 (name.to_owned(), data, MtimeSource::Now)
             }
-            DeserializedControlPlaneZoneSource::Fake {
+            DeserializedControlPlaneZoneSource::FakeZone {
                 artifact_name,
                 file_name,
                 size,
@@ -809,6 +816,17 @@ impl DeserializedControlPlaneZoneSource {
                 let data = tar.into_inner()?.finish()?;
                 (file_name.clone(), data, MtimeSource::Zero)
             }
+            DeserializedControlPlaneZoneSource::FakeMeasurement {
+                artifact_name,
+                file_name,
+                size,
+            } => {
+                // Should we produce something that looks kinda like a real
+                // measurement.cbor? For now, just produce garbage.
+                let data =
+                    make_filler_text(artifact_name, version, *size as usize);
+                (file_name.clone(), data, MtimeSource::Zero)
+            }
         };
         let entry = CompositeEntry { data: &data, mtime_source };
         f(&name, entry)
@@ -819,7 +837,14 @@ impl DeserializedControlPlaneZoneSource {
             DeserializedControlPlaneZoneSource::File { .. } => {
                 bail!("cannot apply size delta to `file` source")
             }
-            DeserializedControlPlaneZoneSource::Fake { size, .. } => {
+            DeserializedControlPlaneZoneSource::FakeZone { size, .. } => {
+                (*size) = (*size).saturating_add_signed(size_delta);
+                Ok(())
+            }
+            DeserializedControlPlaneZoneSource::FakeMeasurement {
+                size,
+                ..
+            } => {
                 (*size) = (*size).saturating_add_signed(size_delta);
                 Ok(())
             }
