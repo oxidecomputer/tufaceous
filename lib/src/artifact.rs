@@ -370,6 +370,7 @@ impl RotArchives {
 }
 
 /// Represents an entry type in a control plane, used with `ControlPlaneImages::extract_into`
+#[derive(Debug, Clone, Copy)]
 pub enum ControlPlaneEntry {
     Zone,
     MeasurementCorpus,
