@@ -19,7 +19,8 @@ use crate::{
     ArtifactSource, CompositeControlPlaneArchiveBuilder, CompositeEntry,
     CompositeHostArchiveBuilder, CompositeRotArchiveBuilder,
     HOST_PHASE_1_FILE_NAME, HOST_PHASE_2_FILE_NAME, MtimeSource,
-    ROT_ARCHIVE_A_FILE_NAME, ROT_ARCHIVE_B_FILE_NAME, make_filler_text,
+    ROT_ARCHIVE_A_FILE_NAME, ROT_ARCHIVE_B_FILE_NAME, make_filler_corim,
+    make_filler_text,
 };
 
 use super::{ArtifactDeploymentUnits, DeploymentUnitMapBuilder};
@@ -633,14 +634,10 @@ impl DeserializedArtifactSource {
                 Ok(())
             }
             DeserializedArtifactSource::CompositeControlPlane {
-                zones,
-                measurement_corpus,
+                zones, ..
             } => {
                 for zone in zones {
                     zone.apply_size_delta(size_delta)?;
-                }
-                for manifest in measurement_corpus {
-                    manifest.apply_size_delta(size_delta)?;
                 }
                 Ok(())
             }
@@ -744,12 +741,7 @@ pub enum DeserializedControlPlaneZoneSource {
         size: u64,
     },
     #[serde(rename_all = "snake_case")]
-    FakeMeasurement {
-        artifact_name: String,
-        file_name: String,
-        #[serde(deserialize_with = "deserialize_byte_size")]
-        size: u64,
-    },
+    FakeMeasurement { artifact_name: String, file_name: String },
 }
 
 impl DeserializedControlPlaneZoneSource {
@@ -819,12 +811,10 @@ impl DeserializedControlPlaneZoneSource {
             DeserializedControlPlaneZoneSource::FakeMeasurement {
                 artifact_name,
                 file_name,
-                size,
             } => {
                 // Should we produce something that looks kinda like a real
                 // measurement.cbor? For now, just produce garbage.
-                let data =
-                    make_filler_text(artifact_name, version, *size as usize);
+                let data = make_filler_corim(artifact_name, version)?;
                 (file_name.clone(), data, MtimeSource::Zero)
             }
         };
@@ -841,12 +831,8 @@ impl DeserializedControlPlaneZoneSource {
                 (*size) = (*size).saturating_add_signed(size_delta);
                 Ok(())
             }
-            DeserializedControlPlaneZoneSource::FakeMeasurement {
-                size,
-                ..
-            } => {
-                (*size) = (*size).saturating_add_signed(size_delta);
-                Ok(())
+            DeserializedControlPlaneZoneSource::FakeMeasurement { .. } => {
+                bail!("cannot apply size delta to `fake_measurement` source")
             }
         }
     }

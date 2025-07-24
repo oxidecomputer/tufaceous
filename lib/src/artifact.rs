@@ -128,8 +128,24 @@ impl AddArtifact {
     }
 }
 
+pub(crate) fn make_filler_corim(
+    artifact_name: &str,
+    version: &ArtifactVersion,
+) -> Result<Vec<u8>> {
+    // Generate a fake CoRIM for testing. The combination
+    // of artifact_name and version can ensure a unique hash
+    let mut builder = rats_corim::CorimBuilder::new();
+
+    builder.vendor("TUF Tester".to_string());
+    builder.tag_id(version.to_string());
+    builder.id(artifact_name.to_string());
+    builder.add_hash("test-hash".to_string(), 10, vec![0xff; 32]);
+
+    Ok(builder.build()?.to_vec()?)
+}
+
 pub(crate) fn make_filler_text(
-    // This can be either the artifact kind, or the deployment unit kind for a
+    // this can be either the artifact kind, or the deployment unit kind for a
     // composite artifact.
     kind: &str,
     version: &ArtifactVersion,
