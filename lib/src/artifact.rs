@@ -137,7 +137,8 @@ pub(crate) fn make_filler_corim(
     let mut builder = rats_corim::CorimBuilder::new();
 
     builder.vendor("TUF Tester".to_string());
-    builder.tag_id(version.to_string());
+    builder.tag_id(format!("corim-{}", version.to_string()));
+    builder.version(version.to_string());
     builder.id(artifact_name.to_string());
     builder.add_hash("test-hash".to_string(), 10, vec![0xff; 32]);
 

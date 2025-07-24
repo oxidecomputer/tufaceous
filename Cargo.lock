@@ -2331,7 +2331,7 @@ dependencies = [
 [[package]]
 name = "rats-corim"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/rats-corim.git?branch=main#bb4a08dd507514f98c54f5fc67eadf14a0705f4e"
+source = "git+https://github.com/oxidecomputer/rats-corim.git?branch=extend_version#3b668377b27e7845c94e0338a31c327d9d9e5132"
 dependencies = [
  "ciborium",
  "ciborium-io",
