@@ -13,7 +13,6 @@ use tufaceous_artifact::ArtifactHash;
 use tufaceous_brand_metadata::{ArchiveType, Metadata};
 
 use super::{
-    CONTROL_PLANE_ARCHIVE_MEASUREMENT_DIRECTORY,
     CONTROL_PLANE_ARCHIVE_ZONE_DIRECTORY, HOST_PHASE_1_FILE_NAME,
     HOST_PHASE_2_FILE_NAME, ROT_ARCHIVE_A_FILE_NAME, ROT_ARCHIVE_B_FILE_NAME,
 };
@@ -53,21 +52,6 @@ impl<W: Write> CompositeControlPlaneArchiveBuilder<W> {
         }
         let path =
             Utf8Path::new(CONTROL_PLANE_ARCHIVE_ZONE_DIRECTORY).join(name_path);
-        let hash = self.inner.append_file(path.as_str(), entry)?;
-        Ok((hash, name.to_owned()))
-    }
-
-    pub fn append_measurement(
-        &mut self,
-        name: &str,
-        entry: CompositeEntry<'_>,
-    ) -> Result<(ArtifactHash, String)> {
-        let name_path = Utf8Path::new(name);
-        if name_path.file_name() != Some(name) {
-            bail!("measurement filenames should not contain paths");
-        }
-        let path = Utf8Path::new(CONTROL_PLANE_ARCHIVE_MEASUREMENT_DIRECTORY)
-            .join(name_path);
         let hash = self.inner.append_file(path.as_str(), entry)?;
         Ok((hash, name.to_owned()))
     }
