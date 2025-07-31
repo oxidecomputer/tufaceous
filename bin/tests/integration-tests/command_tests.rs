@@ -81,11 +81,25 @@ async fn test_init_and_add() -> Result<()> {
     let artifacts = repo.read_artifacts().await?;
     assert_eq!(
         artifacts.artifacts.len(),
-        3,
-        "repo should contain exactly 3 artifacts: {artifacts:?}"
+        // 3 artifacts added above + installinator_document.json.
+        4,
+        "repo should contain exactly 4 artifacts: {artifacts:?}"
     );
 
     let mut artifacts_iter = artifacts.artifacts.into_iter();
+    let artifact = artifacts_iter.next().unwrap();
+    assert_eq!(artifact.name, "installinator_document", "artifact name");
+    assert_eq!(artifact.version, "0.0.0".parse().unwrap(), "artifact version");
+    assert_eq!(
+        artifact.kind,
+        ArtifactKind::INSTALLINATOR_DOCUMENT,
+        "artifact kind"
+    );
+    assert_eq!(
+        artifact.target, "installinator_document-0.0.0.json",
+        "artifact target"
+    );
+
     let artifact = artifacts_iter.next().unwrap();
     assert_eq!(artifact.name, "nexus", "artifact name");
     assert_eq!(artifact.version, "42.0.0".parse().unwrap(), "artifact version");

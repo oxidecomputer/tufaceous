@@ -9,7 +9,10 @@ use clap::{CommandFactory, Parser};
 use semver::Version;
 use tufaceous_artifact::{ArtifactKind, ArtifactVersion, ArtifactsDocument};
 use tufaceous_lib::assemble::{ArtifactManifest, OmicronRepoAssembler};
-use tufaceous_lib::{AddArtifact, ArchiveExtractor, Key, OmicronRepo};
+use tufaceous_lib::{
+    AddArtifact, ArchiveExtractor, IncludeInstallinatorDocument, Key,
+    OmicronRepo,
+};
 
 #[derive(Debug, Parser)]
 pub struct Args {
@@ -42,6 +45,11 @@ impl Args {
         };
 
         match self.command {
+            // TODO-cleanup: we no longer use the init and add commands in
+            // production. We should get rid of these options and direct users
+            // towards assemble. (If necessary, we should build tooling for
+            // making it easy to build up a manifest that can then be
+            // assembled.)
             Command::Init { system_version, no_generate_key } => {
                 let keys = maybe_generate_keys(self.keys, no_generate_key)?;
                 let root =
@@ -55,6 +63,7 @@ impl Args {
                     keys,
                     root,
                     self.expiry,
+                    IncludeInstallinatorDocument::Yes,
                 )
                 .await?;
                 slog::info!(
@@ -121,7 +130,13 @@ impl Args {
                 editor
                     .add_artifact(&new_artifact)
                     .context("error adding artifact")?;
-                editor.sign_and_finish(self.keys, self.expiry).await?;
+                editor
+                    .sign_and_finish(
+                        self.keys,
+                        self.expiry,
+                        IncludeInstallinatorDocument::Yes,
+                    )
+                    .await?;
                 println!(
                     "added {} {}, version {}",
                     new_artifact.kind(),
@@ -144,7 +159,11 @@ impl Args {
 
                 Ok(())
             }
-            Command::Extract { archive_file, dest } => {
+            Command::Extract {
+                archive_file,
+                dest,
+                no_installinator_document,
+            } => {
                 let mut extractor = ArchiveExtractor::from_path(&archive_file)?;
                 extractor.extract(&dest)?;
 
@@ -157,13 +176,41 @@ impl Args {
                          (extracted files are still available)"
                         )
                     })?;
-                repo.read_artifacts().await.with_context(|| {
-                    format!(
-                        "error loading {} from extracted archive \
-                         at `{dest}`",
-                        ArtifactsDocument::FILE_NAME
+                let artifacts =
+                    repo.read_artifacts().await.with_context(|| {
+                        format!(
+                            "error loading {} from extracted archive \
+                             at `{dest}`",
+                            ArtifactsDocument::FILE_NAME
+                        )
+                    })?;
+                if !no_installinator_document {
+                    // There should be a reference to an installinator document
+                    // within artifacts_document.
+                    let installinator_doc_artifact = artifacts
+                        .artifacts
+                        .iter()
+                        .find(|artifact| {
+                            artifact.kind
+                                == ArtifactKind::INSTALLINATOR_DOCUMENT
+                        })
+                        .context(
+                            "could not find artifact with kind \
+                            `installinator_document` within artifacts.json",
+                        )?;
+
+                    repo.read_installinator_document(
+                        &installinator_doc_artifact.target,
                     )
-                })?;
+                    .await
+                    .with_context(|| {
+                        format!(
+                            "error loading {} from extracted archive \
+                            at `{dest}`",
+                            installinator_doc_artifact.target,
+                        )
+                    })?;
+                }
 
                 Ok(())
             }
@@ -174,6 +221,7 @@ impl Args {
                 no_generate_key,
                 skip_all_present,
                 allow_non_semver,
+                no_installinator_document,
             } => {
                 // The filename must end with "zip".
                 if output_path.extension() != Some("zip") {
@@ -195,6 +243,11 @@ impl Args {
                     manifest,
                     keys,
                     self.expiry,
+                    if no_installinator_document {
+                        IncludeInstallinatorDocument::No
+                    } else {
+                        IncludeInstallinatorDocument::Yes
+                    },
                     output_path,
                 );
                 if let Some(dir) = build_dir {
@@ -260,6 +313,10 @@ enum Command {
 
         /// The destination to extract the file to.
         dest: Utf8PathBuf,
+
+        /// Indicate that the file does not contain an installinator document.
+        #[clap(long)]
+        no_installinator_document: bool,
     },
     /// Assembles a repository from a provided manifest.
     Assemble {
@@ -287,6 +344,12 @@ enum Command {
         /// allowed to be non-semver by default.
         #[clap(long)]
         allow_non_semver: bool,
+
+        /// Do not include the installinator document.
+        ///
+        /// Transitional option for v15 -> v16, meant to be used for testing.
+        #[clap(long)]
+        no_installinator_document: bool,
     },
 }
 

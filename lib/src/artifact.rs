@@ -8,9 +8,13 @@ use std::path::Path;
 use anyhow::{Context, Result, bail};
 use buf_list::BufList;
 use bytes::Bytes;
-use camino::Utf8PathBuf;
+use camino::{Utf8Path, Utf8PathBuf};
 use fs_err::File;
-use tufaceous_artifact::{ArtifactKind, ArtifactVersion};
+use tough::editor::RepositoryEditor;
+use tufaceous_artifact::{
+    ArtifactHash, ArtifactKind, ArtifactVersion, InstallinatorArtifact,
+    InstallinatorArtifactKind, KnownArtifactKind,
+};
 use tufaceous_brand_metadata::Metadata;
 
 mod composite;
@@ -22,6 +26,7 @@ pub use composite::CompositeRotArchiveBuilder;
 pub use composite::MtimeSource;
 
 use crate::assemble::ArtifactDeploymentUnits;
+use crate::target::{TargetFinishWrite, TargetWriter};
 
 /// The location a artifact will be obtained from.
 #[derive(Clone, Debug)]
@@ -110,8 +115,33 @@ impl AddArtifact {
         &self.deployment_units
     }
 
-    /// Writes this artifact to the specified writer.
-    pub(crate) fn write_to<W: Write>(&self, writer: &mut W) -> Result<()> {
+    pub(crate) fn target_name(&self) -> String {
+        format!("{}-{}-{}.tar.gz", self.kind, self.name, self.version)
+    }
+
+    /// Writes this artifact as a temporary file, returning a
+    /// [`TempWrittenArtifact`].
+    pub(crate) fn write_temp(
+        &self,
+        targets_dir: &Utf8Path,
+    ) -> Result<TempWrittenArtifact> {
+        let target_name = self.target_name();
+        let mut file = TargetWriter::new(targets_dir, &target_name)?;
+        self.write_to(&mut file).with_context(|| {
+            format!("error writing artifact `{target_name}")
+        })?;
+        let finished_file = file.finish_write();
+        Ok(TempWrittenArtifact {
+            kind: self.kind.clone(),
+            name: self.name.clone(),
+            version: self.version.clone(),
+            deployment_units: self.deployment_units.clone(),
+            finished_file,
+        })
+    }
+
+    /// Writes this artifact to the specifid writer.
+    fn write_to<W: Write>(&self, writer: &mut W) -> Result<()> {
         match &self.source {
             ArtifactSource::File(path) => {
                 let mut reader = File::open(path)?;
@@ -128,8 +158,101 @@ impl AddArtifact {
     }
 }
 
+/// A newly-added artifact that's been written out to a temporary file.
+#[must_use = "the artifact is still temporary and must be finalized"]
+pub(crate) struct TempWrittenArtifact {
+    kind: ArtifactKind,
+    name: String,
+    version: ArtifactVersion,
+    deployment_units: ArtifactDeploymentUnits,
+    finished_file: TargetFinishWrite,
+}
+
+impl TempWrittenArtifact {
+    pub(crate) fn name(&self) -> &str {
+        &self.name
+    }
+
+    pub(crate) fn version(&self) -> &ArtifactVersion {
+        &self.version
+    }
+
+    pub(crate) fn kind(&self) -> &ArtifactKind {
+        &self.kind
+    }
+
+    pub(crate) fn digest(&self) -> ArtifactHash {
+        self.finished_file.digest()
+    }
+
+    pub(crate) fn deployment_units(&self) -> &ArtifactDeploymentUnits {
+        &self.deployment_units
+    }
+
+    /// Returns information about installinator artifacts for this newly-added
+    /// artifact.
+    pub(crate) fn installinator_artifacts(
+        &self,
+    ) -> impl Iterator<Item = InstallinatorArtifact> + '_ {
+        let known = self.kind.to_known();
+
+        // Currently, a `TempWrittenArtifact` corresponds to zero or one
+        // installinator artifacts so we can just return an Option. If, in the
+        // future, a single `TempWrittenArtifact` corresponds to multiple
+        // installinator artifacts, we'd have to return a more complex iterator.
+        let artifact = match known {
+            Some(KnownArtifactKind::Host) => {
+                // The host phase 2 artifact is an installinator artifact.
+                let host_phase_2 = match &self.deployment_units {
+                    ArtifactDeploymentUnits::SingleUnit
+                    | ArtifactDeploymentUnits::Unknown => {
+                        panic!(
+                            "expected Host artifact to be Composite, found {:?}",
+                            self.deployment_units
+                        );
+                    }
+                    ArtifactDeploymentUnits::Composite { deployment_units } => {
+                        deployment_units
+                            .values()
+                            .find(|unit| {
+                                unit.kind == ArtifactKind::HOST_PHASE_2
+                            })
+                            .unwrap_or_else(|| {
+                                panic!(
+                                    "Host artifact must have a host phase 2 \
+                                     deployment unit, found {:?}",
+                                    deployment_units,
+                                )
+                            })
+                    }
+                };
+                Some(InstallinatorArtifact {
+                    name: host_phase_2.name.clone(),
+                    kind: InstallinatorArtifactKind::HostPhase2,
+                    hash: host_phase_2.hash,
+                })
+            }
+            Some(KnownArtifactKind::ControlPlane) => {
+                Some(InstallinatorArtifact {
+                    name: self.name.clone(),
+                    kind: InstallinatorArtifactKind::ControlPlane,
+                    hash: self.digest(),
+                })
+            }
+            Some(_) | None => None,
+        };
+        artifact.into_iter()
+    }
+
+    pub(crate) fn finalize(
+        self,
+        editor: &mut RepositoryEditor,
+    ) -> Result<ArtifactHash> {
+        self.finished_file.finalize(editor)
+    }
+}
+
 pub(crate) fn make_filler_text(
-    // This can be either the artifact kind, or the deployment unit kind for a
     // composite artifact.
     kind: &str,
     version: &ArtifactVersion,

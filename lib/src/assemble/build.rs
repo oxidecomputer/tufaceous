@@ -8,7 +8,10 @@ use chrono::{DateTime, Utc};
 use tough::editor::signed::SignedRole;
 use tough::schema::Root;
 
-use crate::{AddArtifact, Key, OmicronRepo, utils::merge_anyhow_list};
+use crate::{
+    AddArtifact, IncludeInstallinatorDocument, Key, OmicronRepo,
+    utils::merge_anyhow_list,
+};
 
 use super::ArtifactManifest;
 
@@ -21,6 +24,7 @@ pub struct OmicronRepoAssembler {
     keys: Vec<Key>,
     root: Option<SignedRole<Root>>,
     expiry: DateTime<Utc>,
+    include_installinator_doc: IncludeInstallinatorDocument,
     output_path: Utf8PathBuf,
 }
 
@@ -30,6 +34,7 @@ impl OmicronRepoAssembler {
         manifest: ArtifactManifest,
         keys: Vec<Key>,
         expiry: DateTime<Utc>,
+        include_installinator_doc: IncludeInstallinatorDocument,
         output_path: Utf8PathBuf,
     ) -> Self {
         Self {
@@ -39,6 +44,7 @@ impl OmicronRepoAssembler {
             keys,
             root: None,
             expiry,
+            include_installinator_doc,
             output_path,
         }
     }
@@ -114,6 +120,7 @@ impl OmicronRepoAssembler {
             self.keys.clone(),
             root,
             self.expiry,
+            self.include_installinator_doc,
         )
         .await?
         .into_editor()
@@ -146,7 +153,13 @@ impl OmicronRepoAssembler {
         }
 
         // Write out the repository.
-        repository.sign_and_finish(self.keys.clone(), self.expiry).await?;
+        repository
+            .sign_and_finish(
+                self.keys.clone(),
+                self.expiry,
+                self.include_installinator_doc,
+            )
+            .await?;
 
         // Now reopen the repository to archive it into a zip file.
         let repo2 = OmicronRepo::load_untrusted(&self.log, build_dir)
