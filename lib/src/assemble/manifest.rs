@@ -3,8 +3,9 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::fmt;
+use std::io::BufReader;
 use std::str::FromStr;
+use std::{fmt, fs};
 
 use anyhow::{Context, Result, bail, ensure};
 use camino::{Utf8Path, Utf8PathBuf};
@@ -18,8 +19,9 @@ use crate::assemble::{DeploymentUnitData, DeploymentUnitScope};
 use crate::{
     ArtifactSource, CompositeControlPlaneArchiveBuilder, CompositeEntry,
     CompositeHostArchiveBuilder, CompositeRotArchiveBuilder,
-    HOST_PHASE_1_FILE_NAME, HOST_PHASE_2_FILE_NAME, MtimeSource,
-    ROT_ARCHIVE_A_FILE_NAME, ROT_ARCHIVE_B_FILE_NAME, make_filler_text,
+    HOST_PHASE_1_FILE_NAME, HOST_PHASE_2_FILE_NAME, HostPhaseImages,
+    MtimeSource, ROT_ARCHIVE_A_FILE_NAME, ROT_ARCHIVE_B_FILE_NAME,
+    make_filler_text,
 };
 
 use super::{ArtifactDeploymentUnits, DeploymentUnitMapBuilder};
@@ -95,10 +97,57 @@ impl ArtifactManifest {
             .into_iter()
             .map(|artifact_data| {
                 let (source, deployment_units) = match artifact_data.source {
-                    DeserializedArtifactSource::File { path } => (
-                        ArtifactSource::File(base_dir.join(path)),
-                        ArtifactDeploymentUnits::SingleUnit,
-                    ),
+                    DeserializedArtifactSource::File { path } => {
+                        let path = base_dir.join(&path);
+
+                        // Host images are actually composite artifacts, and we
+                        // need to treat them that way for installinator.
+                        let deployment_units =
+                            if kind == KnownArtifactKind::Host {
+                                let file =
+                                fs::File::open(&path).with_context(|| {
+                                    format!(
+                                        "error opening host image at `{path}`"
+                                    )
+                                })?;
+                                let reader = BufReader::new(file);
+                                let images = HostPhaseImages::extract(reader)?;
+
+                                let mut data_builder =
+                                    DeploymentUnitMapBuilder::new(
+                                        DeploymentUnitScope::Artifact {
+                                            composite_kind: kind,
+                                        },
+                                    );
+                                data_builder
+                                    .insert(DeploymentUnitData {
+                                        name: HOST_PHASE_1_FILE_NAME.to_owned(),
+                                        version: artifact_data.version.clone(),
+                                        kind: ArtifactKind::HOST_PHASE_1,
+                                        hash: images.phase_1_hash(),
+                                    })
+                                    .expect("unique kind");
+                                data_builder
+                                    .insert(DeploymentUnitData {
+                                        name: HOST_PHASE_2_FILE_NAME.to_owned(),
+                                        version: artifact_data.version.clone(),
+                                        kind: ArtifactKind::HOST_PHASE_2,
+                                        hash: images.phase_2_hash(),
+                                    })
+                                    .expect("unique kind");
+
+                                data_builder.finish_units()
+                            } else {
+                                // It would be nice to extract other kinds of
+                                // composite artifacts here, but (a) we don't
+                                // have a need for that in this case and (b) the
+                                // code for that currently lives in omicron's
+                                // update-common.
+                                ArtifactDeploymentUnits::SingleUnit
+                            };
+
+                        (ArtifactSource::File(path), deployment_units)
+                    }
                     DeserializedArtifactSource::Fake { size, data_version } => {
                         // This test-only environment variable is used to
                         // simulate two artifacts with different
@@ -382,6 +431,11 @@ impl<'a> FakeDataAttributes<'a> {
                     &self.kind.to_string(),
                     self.version,
                     size,
+                );
+            }
+            KnownArtifactKind::InstallinatorDocument => {
+                panic!(
+                    "fake manifest should not have an installinator document"
                 );
             }
 

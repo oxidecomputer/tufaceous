@@ -10,6 +10,7 @@ use buf_list::BufList;
 use bytes::Bytes;
 use camino::{Utf8Path, Utf8PathBuf};
 use fs_err::File;
+use sha2::{Digest, Sha256};
 use tough::editor::RepositoryEditor;
 use tufaceous_artifact::{
     ArtifactHash, ArtifactKind, ArtifactVersion, InstallinatorArtifact,
@@ -78,9 +79,6 @@ impl AddArtifact {
                 .to_owned(),
         };
 
-        // TODO: In the future, it would be nice to extract the deployment units
-        // from the file. But that would require parsing the file, and the code
-        // for that lives in Omicron under update-common.
         Ok(Self {
             kind,
             name,
@@ -369,6 +367,16 @@ impl HostPhaseImages {
         }
 
         Ok(())
+    }
+
+    pub fn phase_1_hash(&self) -> ArtifactHash {
+        let hash = Sha256::digest(&self.phase_1);
+        ArtifactHash(hash.into())
+    }
+
+    pub fn phase_2_hash(&self) -> ArtifactHash {
+        let hash = Sha256::digest(&self.phase_2);
+        ArtifactHash(hash.into())
     }
 }
 

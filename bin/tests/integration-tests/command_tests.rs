@@ -92,7 +92,7 @@ async fn test_init_and_add() -> Result<()> {
     assert_eq!(artifact.version, "0.0.0".parse().unwrap(), "artifact version");
     assert_eq!(
         artifact.kind,
-        ArtifactKind::INSTALLINATOR_DOCUMENT,
+        ArtifactKind::from_known(KnownArtifactKind::InstallinatorDocument),
         "artifact kind"
     );
     assert_eq!(

@@ -7,12 +7,11 @@ use camino::Utf8PathBuf;
 use chrono::{DateTime, Utc};
 use clap::{CommandFactory, Parser};
 use semver::Version;
-use tufaceous_artifact::{ArtifactKind, ArtifactVersion, ArtifactsDocument};
-use tufaceous_lib::assemble::{ArtifactManifest, OmicronRepoAssembler};
-use tufaceous_lib::{
-    AddArtifact, ArchiveExtractor, IncludeInstallinatorDocument, Key,
-    OmicronRepo,
+use tufaceous_artifact::{
+    ArtifactKind, ArtifactVersion, ArtifactsDocument, KnownArtifactKind,
 };
+use tufaceous_lib::assemble::{ArtifactManifest, OmicronRepoAssembler};
+use tufaceous_lib::{AddArtifact, ArchiveExtractor, Key, OmicronRepo};
 
 #[derive(Debug, Parser)]
 pub struct Args {
@@ -63,7 +62,7 @@ impl Args {
                     keys,
                     root,
                     self.expiry,
-                    IncludeInstallinatorDocument::Yes,
+                    true,
                 )
                 .await?;
                 slog::info!(
@@ -130,13 +129,7 @@ impl Args {
                 editor
                     .add_artifact(&new_artifact)
                     .context("error adding artifact")?;
-                editor
-                    .sign_and_finish(
-                        self.keys,
-                        self.expiry,
-                        IncludeInstallinatorDocument::Yes,
-                    )
-                    .await?;
+                editor.sign_and_finish(self.keys, self.expiry, true).await?;
                 println!(
                     "added {} {}, version {}",
                     new_artifact.kind(),
@@ -191,8 +184,10 @@ impl Args {
                         .artifacts
                         .iter()
                         .find(|artifact| {
-                            artifact.kind
-                                == ArtifactKind::INSTALLINATOR_DOCUMENT
+                            artifact.kind.to_known()
+                                == Some(
+                                    KnownArtifactKind::InstallinatorDocument,
+                                )
                         })
                         .context(
                             "could not find artifact with kind \
@@ -243,11 +238,7 @@ impl Args {
                     manifest,
                     keys,
                     self.expiry,
-                    if no_installinator_document {
-                        IncludeInstallinatorDocument::No
-                    } else {
-                        IncludeInstallinatorDocument::Yes
-                    },
+                    !no_installinator_document,
                     output_path,
                 );
                 if let Some(dir) = build_dir {

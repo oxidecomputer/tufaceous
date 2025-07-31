@@ -8,10 +8,7 @@ use chrono::{DateTime, Utc};
 use tough::editor::signed::SignedRole;
 use tough::schema::Root;
 
-use crate::{
-    AddArtifact, IncludeInstallinatorDocument, Key, OmicronRepo,
-    utils::merge_anyhow_list,
-};
+use crate::{AddArtifact, Key, OmicronRepo, utils::merge_anyhow_list};
 
 use super::ArtifactManifest;
 
@@ -24,7 +21,7 @@ pub struct OmicronRepoAssembler {
     keys: Vec<Key>,
     root: Option<SignedRole<Root>>,
     expiry: DateTime<Utc>,
-    include_installinator_doc: IncludeInstallinatorDocument,
+    include_installinator_doc: bool,
     output_path: Utf8PathBuf,
 }
 
@@ -34,7 +31,7 @@ impl OmicronRepoAssembler {
         manifest: ArtifactManifest,
         keys: Vec<Key>,
         expiry: DateTime<Utc>,
-        include_installinator_doc: IncludeInstallinatorDocument,
+        include_installinator_doc: bool,
         output_path: Utf8PathBuf,
     ) -> Self {
         Self {

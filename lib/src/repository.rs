@@ -18,8 +18,8 @@ use tough::error::Error;
 use tough::schema::{Root, Target};
 use tough::{ExpirationEnforcement, Repository, RepositoryLoader, TargetName};
 use tufaceous_artifact::{
-    Artifact, ArtifactHash, ArtifactKind, ArtifactVersion, ArtifactsDocument,
-    InstallinatorDocument,
+    Artifact, ArtifactHash, ArtifactVersion, ArtifactsDocument,
+    InstallinatorDocument, KnownArtifactKind,
 };
 use url::Url;
 
@@ -49,7 +49,10 @@ impl OmicronRepo {
         keys: Vec<Key>,
         root: SignedRole<Root>,
         expiry: DateTime<Utc>,
-        include_installinator_doc: IncludeInstallinatorDocument,
+        // TODO-cleanup: This is a transitional option for v15 -> v16, meant to be used
+        // for testing. After v16 we can assume that all valid TUF repositories have
+        // installinator documents.
+        include_installinator_doc: bool,
     ) -> Result<Self> {
         let editor = OmicronRepoEditor::initialize(
             repo_path.to_owned(),
@@ -335,7 +338,8 @@ impl OmicronRepoEditor {
         // artifacts_document.
         let installinator_document =
             match artifacts.artifacts.iter().find(|artifact| {
-                artifact.kind == ArtifactKind::INSTALLINATOR_DOCUMENT
+                artifact.kind.to_known()
+                    == Some(KnownArtifactKind::InstallinatorDocument)
             }) {
                 Some(artifact) => {
                     repo.read_installinator_document(&artifact.target).await?
@@ -570,48 +574,45 @@ impl OmicronRepoEditor {
         mut self,
         keys: Vec<Key>,
         expiry: DateTime<Utc>,
-        include_installinator_doc: IncludeInstallinatorDocument,
+        include_installinator_doc: bool,
     ) -> Result<()> {
         let targets_dir = self.repo_path.join("targets");
 
-        match include_installinator_doc {
-            IncludeInstallinatorDocument::Yes => {
-                let mut installinator_doc_writer = TargetWriter::new(
-                    &targets_dir,
-                    self.installinator_document.file_name(),
-                )?;
-                serde_json::to_writer_pretty(
-                    &mut installinator_doc_writer,
-                    &self.installinator_document,
-                )?;
-                installinator_doc_writer
-                    .finish_write()
-                    .finalize(&mut self.editor)?;
+        if include_installinator_doc {
+            let mut installinator_doc_writer = TargetWriter::new(
+                &targets_dir,
+                self.installinator_document.file_name(),
+            )?;
+            serde_json::to_writer_pretty(
+                &mut installinator_doc_writer,
+                &self.installinator_document,
+            )?;
+            installinator_doc_writer
+                .finish_write()
+                .finalize(&mut self.editor)?;
 
-                // Add the installinator document in the artifacts.json if it's missing.
-                //
-                // TODO: our production users don't add artifacts incrementally to a TUF
-                // repo -- rather, they generate a manifest and create the TUF repo in a
-                // one-shot fashion. We should clean up any code we have to handle
-                // incremental updates of TUF repos, and remove this scan as part of
-                // that.
-                let system_version = self.artifacts.system_version.clone();
-                let artifact_version = ArtifactVersion::new(
-                    system_version.to_string(),
-                )
-                .expect("system versions are usable as artifact versions");
-                if !self.artifacts.artifacts.iter().any(|artifact| {
-                    artifact.kind == ArtifactKind::INSTALLINATOR_DOCUMENT
-                }) {
-                    self.artifacts.artifacts.push(Artifact {
-                        name: ArtifactKind::INSTALLINATOR_DOCUMENT.to_string(),
-                        version: artifact_version,
-                        kind: ArtifactKind::INSTALLINATOR_DOCUMENT,
-                        target: self.installinator_document.file_name(),
-                    });
-                }
+            // Add the installinator document in the artifacts.json if it's missing.
+            //
+            // TODO: our production users don't add artifacts incrementally to a TUF
+            // repo -- rather, they generate a manifest and create the TUF repo in a
+            // one-shot fashion. We should clean up any code we have to handle
+            // incremental updates of TUF repos, and remove this scan as part of
+            // that.
+            let system_version = self.artifacts.system_version.clone();
+            let artifact_version =
+                ArtifactVersion::new(system_version.to_string())
+                    .expect("system versions are usable as artifact versions");
+            if !self.artifacts.artifacts.iter().any(|artifact| {
+                artifact.kind.to_known()
+                    == Some(KnownArtifactKind::InstallinatorDocument)
+            }) {
+                self.artifacts.artifacts.push(Artifact {
+                    name: KnownArtifactKind::InstallinatorDocument.to_string(),
+                    version: artifact_version,
+                    kind: KnownArtifactKind::InstallinatorDocument.into(),
+                    target: self.installinator_document.file_name(),
+                });
             }
-            IncludeInstallinatorDocument::No => {}
         }
 
         let mut artifacts_doc_writer =
@@ -635,17 +636,6 @@ impl OmicronRepoEditor {
             .context("error writing repository")?;
         Ok(())
     }
-}
-
-/// Whether to include the installinator document.
-///
-/// TODO-cleanup: This is a transitional option for v15 -> v16, meant to be used
-/// for testing. After v16 we can assume that all valid TUF repositories have
-/// installinator documents.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum IncludeInstallinatorDocument {
-    Yes,
-    No,
 }
 
 fn update_versions(
@@ -710,7 +700,7 @@ mod tests {
             ArtifactManifest::new_fake(),
             vec![trusted_key],
             expiry,
-            IncludeInstallinatorDocument::Yes,
+            true,
             archive_path.clone(),
         );
         assembler.set_root_role(trusted_root.clone());
@@ -790,7 +780,7 @@ mod tests {
             keys,
             root,
             expiry,
-            IncludeInstallinatorDocument::Yes,
+            true,
         )
         .await
         .unwrap()
