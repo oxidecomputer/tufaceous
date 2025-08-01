@@ -182,6 +182,13 @@ pub enum KnownArtifactKind {
     GimletRotBootloader,
     Host,
     Trampoline,
+    /// Installinator document identifier.
+    ///
+    /// While the installinator document is a metadata file similar to
+    /// [`ArtifactsDocument`](crate::ArtifactsDocument), Wicketd and Nexus treat
+    /// it as an opaque single-unit artifact to avoid backwards compatibility
+    /// issues.
+    InstallinatorDocument,
     /// Composite artifact of all control plane zones
     ControlPlane,
     /// Individual control plane zone
@@ -220,6 +227,7 @@ impl KnownArtifactKind {
             | KnownArtifactKind::GimletRotBootloader
             | KnownArtifactKind::Host
             | KnownArtifactKind::Trampoline
+            | KnownArtifactKind::InstallinatorDocument
             | KnownArtifactKind::ControlPlane
             | KnownArtifactKind::Zone
             | KnownArtifactKind::PscSp

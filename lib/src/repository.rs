@@ -19,6 +19,7 @@ use tough::schema::{Root, Target};
 use tough::{ExpirationEnforcement, Repository, RepositoryLoader, TargetName};
 use tufaceous_artifact::{
     Artifact, ArtifactHash, ArtifactVersion, ArtifactsDocument,
+    InstallinatorDocument, KnownArtifactKind,
 };
 use url::Url;
 
@@ -48,6 +49,10 @@ impl OmicronRepo {
         keys: Vec<Key>,
         root: SignedRole<Root>,
         expiry: DateTime<Utc>,
+        // TODO-cleanup: This is a transitional option for v15 -> v16, meant to be used
+        // for testing. After v16 we can assume that all valid TUF repositories have
+        // installinator documents.
+        include_installinator_doc: bool,
     ) -> Result<Self> {
         let editor = OmicronRepoEditor::initialize(
             repo_path.to_owned(),
@@ -57,7 +62,7 @@ impl OmicronRepo {
         .await?;
 
         editor
-            .sign_and_finish(keys, expiry)
+            .sign_and_finish(keys, expiry, include_installinator_doc)
             .await
             .context("error signing new repository")?;
 
@@ -199,20 +204,33 @@ impl OmicronRepo {
 
     /// Reads the artifacts document from the repo.
     pub async fn read_artifacts(&self) -> Result<ArtifactsDocument> {
+        self.read_json(ArtifactsDocument::FILE_NAME).await
+    }
+
+    /// Reads the installinator document from the repo.
+    pub async fn read_installinator_document(
+        &self,
+        file_name: &str,
+    ) -> Result<InstallinatorDocument> {
+        self.read_json(file_name).await
+    }
+
+    /// Reads a JSON document from the repo by target name.
+    async fn read_json<T>(&self, file_name: &str) -> Result<T>
+    where
+        T: serde::de::DeserializeOwned,
+    {
         let reader = self
             .repo
-            .read_target(&ArtifactsDocument::FILE_NAME.try_into()?)
+            .read_target(&file_name.try_into()?)
             .await?
-            .ok_or_else(|| {
-                anyhow!("{} should be present", ArtifactsDocument::FILE_NAME)
-            })?;
-        let buf_list =
-            reader.try_collect::<BufList>().await.with_context(|| {
-                format!("error reading from {}", ArtifactsDocument::FILE_NAME)
-            })?;
-        serde_json::from_reader(buf_list::Cursor::new(&buf_list)).with_context(
-            || format!("error deserializing {}", ArtifactsDocument::FILE_NAME),
-        )
+            .ok_or_else(|| anyhow!("{} should be present", file_name))?;
+        let buf_list = reader
+            .try_collect::<BufList>()
+            .await
+            .with_context(|| format!("error reading from {}", file_name))?;
+        serde_json::from_reader(buf_list::Cursor::new(&buf_list))
+            .with_context(|| format!("error deserializing {}", file_name))
     }
 
     /// Archives the repository to the given path as a zip file.
@@ -301,6 +319,7 @@ pub struct OmicronRepoEditor {
     editor: RepositoryEditor,
     repo_path: Utf8PathBuf,
     artifacts: ArtifactsDocument,
+    installinator_document: InstallinatorDocument,
 
     // Set of `TargetName::resolved()` names for every target that existed when
     // the repo was opened. We use this to ensure we don't overwrite an existing
@@ -314,6 +333,31 @@ pub struct OmicronRepoEditor {
 impl OmicronRepoEditor {
     async fn new(repo: OmicronRepo) -> Result<Self> {
         let artifacts = repo.read_artifacts().await?;
+
+        // There should be a reference to an installinator document within
+        // artifacts_document.
+        let installinator_document =
+            match artifacts.artifacts.iter().find(|artifact| {
+                artifact.kind.to_known()
+                    == Some(KnownArtifactKind::InstallinatorDocument)
+            }) {
+                Some(artifact) => {
+                    repo.read_installinator_document(&artifact.target).await?
+                }
+                None => {
+                    // With empty repos and those without a preexisting
+                    // installinator document, we generate an empty one.
+                    //
+                    // This isn't quite correct for incrementally updated TUF
+                    // repos created via `tufaceous init` and `tufaceous add`,
+                    // but our production users don't use that functionality and
+                    // those should be removed in the future.
+                    InstallinatorDocument::empty(
+                        artifacts.system_version.clone(),
+                    )
+                }
+            };
+
         let artifacts_by_target_name = artifacts
             .artifacts
             .iter()
@@ -393,6 +437,7 @@ impl OmicronRepoEditor {
             editor,
             repo_path: repo.repo_path,
             artifacts,
+            installinator_document,
             existing_target_names,
             existing_deployment_units: DeploymentUnitMapBuilder::new(
                 DeploymentUnitScope::Repository,
@@ -419,7 +464,10 @@ impl OmicronRepoEditor {
         Ok(Self {
             editor,
             repo_path,
-            artifacts: ArtifactsDocument::empty(system_version),
+            artifacts: ArtifactsDocument::empty(system_version.clone()),
+            installinator_document: InstallinatorDocument::empty(
+                system_version,
+            ),
             existing_target_names: BTreeSet::new(),
             existing_deployment_units: DeploymentUnitMapBuilder::new(
                 DeploymentUnitScope::Repository,
@@ -453,12 +501,7 @@ impl OmicronRepoEditor {
         // Start writing the target out to a temporary path, catching errors
         // that might happen.
         let targets_dir = self.repo_path.join("targets");
-
-        let mut file = TargetWriter::new(&targets_dir, target_name.clone())?;
-        new_artifact.write_to(&mut file).with_context(|| {
-            format!("error writing artifact `{target_name}")
-        })?;
-        let finished_file = file.finish_write();
+        let new_artifact = new_artifact.write_temp(&targets_dir)?;
 
         // Make sure we're not adding a new deployment unit with the same
         // kind/hash as an existing one.
@@ -473,7 +516,7 @@ impl OmicronRepoEditor {
                         name: new_artifact.name().to_owned(),
                         version: new_artifact.version().clone(),
                         kind: new_artifact.kind().clone(),
-                        hash: finished_file.digest(),
+                        hash: new_artifact.digest(),
                     },
                 )
             }
@@ -517,9 +560,13 @@ impl OmicronRepoEditor {
             kind: new_artifact.kind().clone(),
             target: target_name,
         });
+        self.installinator_document
+            .artifacts
+            .extend(new_artifact.installinator_artifacts());
+        // The host phase 2 image is part of the host image.
         new_units.expect("new_units is None => errors handled above").commit();
 
-        finished_file.finalize(&mut self.editor)
+        new_artifact.finalize(&mut self.editor)
     }
 
     /// Consumes self, signing the repository and writing out this repository to disk.
@@ -527,13 +574,54 @@ impl OmicronRepoEditor {
         mut self,
         keys: Vec<Key>,
         expiry: DateTime<Utc>,
+        include_installinator_doc: bool,
     ) -> Result<()> {
         let targets_dir = self.repo_path.join("targets");
 
-        let mut file =
+        if include_installinator_doc {
+            let mut installinator_doc_writer = TargetWriter::new(
+                &targets_dir,
+                self.installinator_document.file_name(),
+            )?;
+            serde_json::to_writer_pretty(
+                &mut installinator_doc_writer,
+                &self.installinator_document,
+            )?;
+            installinator_doc_writer
+                .finish_write()
+                .finalize(&mut self.editor)?;
+
+            // Add the installinator document in the artifacts.json if it's missing.
+            //
+            // TODO: our production users don't add artifacts incrementally to a TUF
+            // repo -- rather, they generate a manifest and create the TUF repo in a
+            // one-shot fashion. We should clean up any code we have to handle
+            // incremental updates of TUF repos, and remove this scan as part of
+            // that.
+            let system_version = self.artifacts.system_version.clone();
+            let artifact_version =
+                ArtifactVersion::new(system_version.to_string())
+                    .expect("system versions are usable as artifact versions");
+            if !self.artifacts.artifacts.iter().any(|artifact| {
+                artifact.kind.to_known()
+                    == Some(KnownArtifactKind::InstallinatorDocument)
+            }) {
+                self.artifacts.artifacts.push(Artifact {
+                    name: KnownArtifactKind::InstallinatorDocument.to_string(),
+                    version: artifact_version,
+                    kind: KnownArtifactKind::InstallinatorDocument.into(),
+                    target: self.installinator_document.file_name(),
+                });
+            }
+        }
+
+        let mut artifacts_doc_writer =
             TargetWriter::new(&targets_dir, ArtifactsDocument::FILE_NAME)?;
-        serde_json::to_writer_pretty(&mut file, &self.artifacts)?;
-        file.finish_write().finalize(&mut self.editor)?;
+        serde_json::to_writer_pretty(
+            &mut artifacts_doc_writer,
+            &self.artifacts,
+        )?;
+        artifacts_doc_writer.finish_write().finalize(&mut self.editor)?;
 
         update_versions(&mut self.editor, expiry)?;
 
@@ -612,6 +700,7 @@ mod tests {
             ArtifactManifest::new_fake(),
             vec![trusted_key],
             expiry,
+            true,
             archive_path.clone(),
         );
         assembler.set_root_role(trusted_root.clone());
@@ -691,6 +780,7 @@ mod tests {
             keys,
             root,
             expiry,
+            true,
         )
         .await
         .unwrap()
