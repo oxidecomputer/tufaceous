@@ -8,7 +8,9 @@ use chrono::{DateTime, Utc};
 use tough::editor::signed::SignedRole;
 use tough::schema::Root;
 
-use crate::{AddArtifact, Key, OmicronRepo, utils::merge_anyhow_list};
+use crate::{
+    AddArtifact, Key, OmicronRepo, OmicronRepoEditor, utils::merge_anyhow_list,
+};
 
 use super::ArtifactManifest;
 
@@ -110,17 +112,11 @@ impl OmicronRepoAssembler {
                 crate::root::new_root(self.keys.clone(), self.expiry).await?
             }
         };
-        let mut repository = OmicronRepo::initialize(
-            &self.log,
-            build_dir,
-            self.manifest.system_version.clone(),
-            self.keys.clone(),
+        let mut repository = OmicronRepoEditor::initialize(
+            build_dir.to_owned(),
             root,
-            self.expiry,
-            self.include_installinator_doc,
+            self.manifest.system_version.clone(),
         )
-        .await?
-        .into_editor()
         .await?;
 
         // Add all the artifacts.

@@ -48,7 +48,7 @@ pub struct AddArtifact {
 
 impl AddArtifact {
     /// Creates an [`AddArtifact`] from the provided source.
-    pub fn new(
+    pub(crate) fn new(
         kind: ArtifactKind,
         name: String,
         version: ArtifactVersion,
@@ -56,36 +56,6 @@ impl AddArtifact {
         deployment_units: ArtifactDeploymentUnits,
     ) -> Self {
         Self { kind, name, version, source, deployment_units }
-    }
-
-    /// Creates an [`AddArtifact`] from the path, name and version.
-    ///
-    /// If the name is `None`, it is derived from the filename of the path
-    /// without matching extensions.
-    pub fn from_path(
-        kind: ArtifactKind,
-        name: Option<String>,
-        version: ArtifactVersion,
-        path: Utf8PathBuf,
-    ) -> Result<Self> {
-        let name = match name {
-            Some(name) => name,
-            None => path
-                .file_name()
-                .context("artifact path is a directory")?
-                .split('.')
-                .next()
-                .expect("str::split has at least 1 element")
-                .to_owned(),
-        };
-
-        Ok(Self {
-            kind,
-            name,
-            version,
-            source: ArtifactSource::File(path),
-            deployment_units: ArtifactDeploymentUnits::Unknown,
-        })
     }
 
     /// Returns the kind of artifact this is.
