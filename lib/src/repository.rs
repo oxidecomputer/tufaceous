@@ -220,7 +220,7 @@ impl OmicronRepo {
     /// Regardless of this roadblock, we don't want to foreclose that option
     /// forever, so this code uses zip rather than having to deal with a
     /// migration in the future.
-    pub fn archive(&self, output_path: &Utf8Path) -> Result<()> {
+    pub(crate) fn archive(&self, output_path: &Utf8Path) -> Result<()> {
         let mut builder = ArchiveBuilder::new(output_path.to_owned())?;
 
         let metadata_dir = self.repo_path.join("metadata");
@@ -277,10 +277,8 @@ impl OmicronRepo {
     }
 }
 
-/// An [`OmicronRepo`] than can be edited.
-///
-/// Created by [`OmicronRepo::into_editor`].
-pub struct OmicronRepoEditor {
+/// An editable TUF repository, used to construct new ones.
+pub(crate) struct OmicronRepoEditor {
     editor: RepositoryEditor,
     repo_path: Utf8PathBuf,
     artifacts: ArtifactsDocument,
@@ -327,7 +325,7 @@ impl OmicronRepoEditor {
     }
 
     /// Adds an artifact to the repository.
-    pub fn add_artifact(
+    pub(crate) fn add_artifact(
         &mut self,
         new_artifact: &AddArtifact,
     ) -> Result<ArtifactHash> {
@@ -420,8 +418,9 @@ impl OmicronRepoEditor {
         new_artifact.finalize(&mut self.editor)
     }
 
-    /// Consumes self, signing the repository and writing out this repository to disk.
-    pub async fn sign_and_finish(
+    /// Consumes self, signing the repository and writing out this repository to
+    /// disk.
+    pub(crate) async fn sign_and_finish(
         mut self,
         keys: Vec<Key>,
         expiry: DateTime<Utc>,
