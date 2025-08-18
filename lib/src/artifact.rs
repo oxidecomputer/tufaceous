@@ -237,6 +237,13 @@ impl TempWrittenArtifact {
                     hash: self.digest(),
                 })
             }
+            Some(KnownArtifactKind::MeasurementCorpus) => {
+                Some(InstallinatorArtifact {
+                    name: self.name.clone(),
+                    kind: InstallinatorArtifactKind::MeasurementCorpus,
+                    hash: self.digest(),
+                })
+            }
             Some(_) | None => None,
         };
         artifact.into_iter()

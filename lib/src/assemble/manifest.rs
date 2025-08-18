@@ -394,6 +394,7 @@ impl ArtifactManifest {
                     k,
                     KnownArtifactKind::Zone
                         | KnownArtifactKind::InstallinatorDocument
+                        | KnownArtifactKind::MeasurementCorpus
                 )
             })
             .collect();
@@ -444,6 +445,13 @@ impl<'a> FakeDataAttributes<'a> {
             KnownArtifactKind::InstallinatorDocument => {
                 panic!(
                     "fake manifest should not have an installinator document"
+                );
+            }
+            KnownArtifactKind::MeasurementCorpus => {
+                return make_filler_text(
+                    &self.kind.to_string(),
+                    self.version,
+                    size,
                 );
             }
 
