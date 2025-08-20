@@ -246,6 +246,36 @@ impl KnownArtifactKind {
     pub fn iter() -> KnownArtifactKindIter {
         <Self as IntoEnumIterator>::iter()
     }
+
+    /// For fake artifacts we generate for tests, what `SIGN` value do we insert
+    /// in the Hubris caboose for this artifact kind?
+    pub fn fake_artifact_hubris_sign(&self) -> Option<String> {
+        match self {
+            // Only RoT and RoT bootloader artifacts are signed. We want to use
+            // a distinct sign value for kind of system, just like real systems
+            // have.
+            KnownArtifactKind::GimletRot
+            | KnownArtifactKind::GimletRotBootloader => {
+                Some("sign-gimlet".to_string())
+            }
+            KnownArtifactKind::SwitchRot
+            | KnownArtifactKind::SwitchRotBootloader => {
+                Some("sign-switch".to_string())
+            }
+            KnownArtifactKind::PscRot | KnownArtifactKind::PscRotBootloader => {
+                Some("sign-psc".to_string())
+            }
+
+            KnownArtifactKind::GimletSp
+            | KnownArtifactKind::Host
+            | KnownArtifactKind::Trampoline
+            | KnownArtifactKind::InstallinatorDocument
+            | KnownArtifactKind::ControlPlane
+            | KnownArtifactKind::Zone
+            | KnownArtifactKind::PscSp
+            | KnownArtifactKind::SwitchSp => None,
+        }
+    }
 }
 
 #[derive(Debug, Error)]
