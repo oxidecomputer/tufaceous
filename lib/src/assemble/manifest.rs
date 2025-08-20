@@ -461,8 +461,11 @@ impl<'a> FakeDataAttributes<'a> {
         };
 
         let caboose = {
+            // We use a fake git commit that contains `self.kind` to ensure that
+            // the artifacts we produce are distinct for each `kind`, even if
+            // all the other caboose fields are identical.
             let mut builder = CabooseBuilder::default()
-                .git_commit("this-is-fake-data")
+                .git_commit(format!("this-is-a-fake-{}", self.kind))
                 .board(board)
                 .name(board)
                 .version(self.version.to_string());
