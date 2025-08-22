@@ -427,9 +427,6 @@ impl<'a> FakeDataAttributes<'a> {
         use hubtools::{CabooseBuilder, HubrisArchiveBuilder};
 
         let board = match self.kind {
-            KnownArtifactKind::GimletRotBootloader
-            | KnownArtifactKind::PscRotBootloader
-            | KnownArtifactKind::SwitchRotBootloader => "SimRotStage0",
             // non-Hubris artifacts: just make fake data
             KnownArtifactKind::Host
             | KnownArtifactKind::Trampoline
@@ -447,27 +444,38 @@ impl<'a> FakeDataAttributes<'a> {
                 );
             }
 
-            // hubris artifacts: build a fake archive (SimGimletSp and
+            // In production, all the bootloaders and RoTs claim to have the
+            // same board (currently: `oxide-rot-1`). Let's do that here too.
+            KnownArtifactKind::GimletRotBootloader
+            | KnownArtifactKind::PscRotBootloader
+            | KnownArtifactKind::SwitchRotBootloader
+            | KnownArtifactKind::GimletRot
+            | KnownArtifactKind::PscRot
+            | KnownArtifactKind::SwitchRot => "SimRot",
+
+            // SP artifacts: build a fake archive (SimGimletSp and
             // SimGimletRot are used by sp-sim)
             KnownArtifactKind::GimletSp => "SimGimletSp",
-            KnownArtifactKind::GimletRot => "SimRot",
-            KnownArtifactKind::PscSp => "fake-psc-sp",
-            KnownArtifactKind::PscRot => "fake-psc-rot",
             KnownArtifactKind::SwitchSp => "SimSidecarSp",
-            KnownArtifactKind::SwitchRot => "SimRot",
+            KnownArtifactKind::PscSp => "SimPscSp",
         };
 
-        // For our purposes sign = board represents what we want for the RoT
-        // and we don't care about the sign value for the SP
-        // We now have an assumption that board == name for our production
-        // images
-        let caboose = CabooseBuilder::default()
-            .git_commit("this-is-fake-data")
-            .board(board)
-            .version(self.version.to_string())
-            .name(board)
-            .sign(board)
-            .build();
+        let caboose = {
+            // We use a fake git commit that contains `self.kind` to ensure that
+            // the artifacts we produce are distinct for each `kind`, even if
+            // all the other caboose fields are identical.
+            let mut builder = CabooseBuilder::default()
+                .git_commit(format!("this-is-a-fake-{}", self.kind))
+                .board(board)
+                .name(board)
+                .version(self.version.to_string());
+
+            if let Some(sign) = self.kind.fake_artifact_hubris_sign() {
+                builder = builder.sign(sign);
+            }
+
+            builder.build()
+        };
 
         let mut builder = HubrisArchiveBuilder::with_fake_image();
         builder.write_caboose(caboose.as_slice()).unwrap();
