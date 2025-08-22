@@ -62,4 +62,6 @@ pub enum InstallinatorArtifactKind {
     HostPhase2,
     /// The composite control plane artifact.
     ControlPlane,
+    /// Measurement Corpus
+    MeasurementCorpus,
 }

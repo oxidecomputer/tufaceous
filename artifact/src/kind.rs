@@ -193,6 +193,8 @@ pub enum KnownArtifactKind {
     ControlPlane,
     /// Individual control plane zone
     Zone,
+    /// MeasurementCorpus
+    MeasurementCorpus,
 
     // PSC Artifacts
     PscSp,
@@ -228,6 +230,7 @@ impl KnownArtifactKind {
             | KnownArtifactKind::Host
             | KnownArtifactKind::Trampoline
             | KnownArtifactKind::InstallinatorDocument
+            | KnownArtifactKind::MeasurementCorpus
             | KnownArtifactKind::ControlPlane
             | KnownArtifactKind::Zone
             | KnownArtifactKind::PscSp
