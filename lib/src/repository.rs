@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
 use std::num::NonZeroU64;
 
 use anyhow::{Context, Result, anyhow};
@@ -41,38 +41,9 @@ pub struct OmicronRepo {
 }
 
 impl OmicronRepo {
-    /// Initializes a new repository at the given path, writing it to disk.
-    pub async fn initialize(
-        log: &slog::Logger,
-        repo_path: &Utf8Path,
-        system_version: Version,
-        keys: Vec<Key>,
-        root: SignedRole<Root>,
-        expiry: DateTime<Utc>,
-        // TODO-cleanup: This is a transitional option for v15 -> v16, meant to be used
-        // for testing. After v16 we can assume that all valid TUF repositories have
-        // installinator documents.
-        include_installinator_doc: bool,
-    ) -> Result<Self> {
-        let editor = OmicronRepoEditor::initialize(
-            repo_path.to_owned(),
-            root,
-            system_version,
-        )
-        .await?;
-
-        editor
-            .sign_and_finish(keys, expiry, include_installinator_doc)
-            .await
-            .context("error signing new repository")?;
-
-        // In theory we "trust" the key we just used to sign this repository,
-        // but the code path is equivalent to `load_untrusted`.
-        Self::load_untrusted(log, repo_path).await
-    }
-
     /// Loads a repository from the given path.
     ///
+    #[cfg(test)]
     /// This method enforces expirations. To load without expiration enforcement, use
     /// [`Self::load_ignore_expiration`].
     pub async fn load(
@@ -249,7 +220,7 @@ impl OmicronRepo {
     /// Regardless of this roadblock, we don't want to foreclose that option
     /// forever, so this code uses zip rather than having to deal with a
     /// migration in the future.
-    pub fn archive(&self, output_path: &Utf8Path) -> Result<()> {
+    pub(crate) fn archive(&self, output_path: &Utf8Path) -> Result<()> {
         let mut builder = ArchiveBuilder::new(output_path.to_owned())?;
 
         let metadata_dir = self.repo_path.join("metadata");
@@ -292,12 +263,6 @@ impl OmicronRepo {
         Ok(())
     }
 
-    /// Converts `self` into an `OmicronRepoEditor`, which can be used to perform
-    /// modifications to the repository.
-    pub async fn into_editor(self) -> Result<OmicronRepoEditor> {
-        OmicronRepoEditor::new(self).await
-    }
-
     /// Prepends the target digest to the name if using consistent snapshots. Returns both the
     /// digest and the filename.
     ///
@@ -312,10 +277,8 @@ impl OmicronRepo {
     }
 }
 
-/// An [`OmicronRepo`] than can be edited.
-///
-/// Created by [`OmicronRepo::into_editor`].
-pub struct OmicronRepoEditor {
+/// An editable TUF repository, used to construct new ones.
+pub(crate) struct OmicronRepoEditor {
     editor: RepositoryEditor,
     repo_path: Utf8PathBuf,
     artifacts: ArtifactsDocument,
@@ -331,121 +294,7 @@ pub struct OmicronRepoEditor {
 }
 
 impl OmicronRepoEditor {
-    async fn new(repo: OmicronRepo) -> Result<Self> {
-        let artifacts = repo.read_artifacts().await?;
-
-        // There should be a reference to an installinator document within
-        // artifacts_document.
-        let installinator_document =
-            match artifacts.artifacts.iter().find(|artifact| {
-                artifact.kind.to_known()
-                    == Some(KnownArtifactKind::InstallinatorDocument)
-            }) {
-                Some(artifact) => {
-                    repo.read_installinator_document(&artifact.target).await?
-                }
-                None => {
-                    // With empty repos and those without a preexisting
-                    // installinator document, we generate an empty one.
-                    //
-                    // This isn't quite correct for incrementally updated TUF
-                    // repos created via `tufaceous init` and `tufaceous add`,
-                    // but our production users don't use that functionality and
-                    // those should be removed in the future.
-                    InstallinatorDocument::empty(
-                        artifacts.system_version.clone(),
-                    )
-                }
-            };
-
-        let artifacts_by_target_name = artifacts
-            .artifacts
-            .iter()
-            .map(|artifact| (artifact.target.as_str(), artifact))
-            .collect::<BTreeMap<_, _>>();
-
-        let mut errors = Vec::new();
-
-        // TODO: In the future, it would be nice to extract deployment units
-        // from composite artifacts. But that would require parsing each file,
-        // and the code for that lives in Omicron under update-common.
-        //
-        // For now we settle for treating all artifacts as single-unit ones.
-        let mut data_builder =
-            DeploymentUnitMapBuilder::new(DeploymentUnitScope::Repository);
-
-        let existing_target_names = repo
-            .repo
-            .targets()
-            .signed
-            .targets_iter()
-            .filter_map(|(name, target)| {
-                let target_name = name.resolved().to_string();
-                if target_name == ArtifactsDocument::FILE_NAME {
-                    // The artifacts document does not refer to itself.
-                    return None;
-                }
-
-                let hash_bytes = <[u8; 32]>::try_from(
-                    target.hashes.sha256.clone().into_vec(),
-                )
-                .expect("SHA-256 hash should be exactly 32 bytes");
-                let hash = ArtifactHash(hash_bytes);
-
-                let Some(artifact) =
-                    artifacts_by_target_name.get(target_name.as_str())
-                else {
-                    errors.push(anyhow!(
-                        "artifact `{}` not found in {}",
-                        target_name,
-                        ArtifactsDocument::FILE_NAME
-                    ));
-                    return None;
-                };
-
-                let Ok(()) = data_builder.insert(DeploymentUnitData {
-                    name: artifact.name.to_owned(),
-                    version: artifact.version.clone(),
-                    kind: artifact.kind.clone(),
-                    hash,
-                }) else {
-                    errors.push(anyhow!(
-                        "failed to add deployment unit for artifact `{}`",
-                        target_name
-                    ));
-                    return None;
-                };
-
-                Some(target_name)
-            })
-            .collect::<BTreeSet<_>>();
-
-        // If any errors were found, return them.
-        if !errors.is_empty() {
-            return Err(merge_anyhow_list(errors));
-        }
-
-        let editor = RepositoryEditor::from_repo(
-            repo.repo_path
-                .join("metadata")
-                .join(format!("{}.root.json", repo.repo.root().signed.version)),
-            repo.repo,
-        )
-        .await?;
-
-        Ok(Self {
-            editor,
-            repo_path: repo.repo_path,
-            artifacts,
-            installinator_document,
-            existing_target_names,
-            existing_deployment_units: DeploymentUnitMapBuilder::new(
-                DeploymentUnitScope::Repository,
-            ),
-        })
-    }
-
-    async fn initialize(
+    pub(crate) async fn initialize(
         repo_path: Utf8PathBuf,
         root: SignedRole<Root>,
         system_version: Version,
@@ -476,7 +325,7 @@ impl OmicronRepoEditor {
     }
 
     /// Adds an artifact to the repository.
-    pub fn add_artifact(
+    pub(crate) fn add_artifact(
         &mut self,
         new_artifact: &AddArtifact,
     ) -> Result<ArtifactHash> {
@@ -569,8 +418,9 @@ impl OmicronRepoEditor {
         new_artifact.finalize(&mut self.editor)
     }
 
-    /// Consumes self, signing the repository and writing out this repository to disk.
-    pub async fn sign_and_finish(
+    /// Consumes self, signing the repository and writing out this repository to
+    /// disk.
+    pub(crate) async fn sign_and_finish(
         mut self,
         keys: Vec<Key>,
         expiry: DateTime<Utc>,
@@ -773,18 +623,11 @@ mod tests {
         let keys = vec![Key::generate_ed25519().unwrap()];
         let expiry = Utc::now() + Days::new(1);
         let root = crate::root::new_root(keys.clone(), expiry).await.unwrap();
-        let mut repo = OmicronRepo::initialize(
-            &logctx.log,
-            tempdir.path(),
-            "0.0.0".parse().unwrap(),
-            keys,
+        let mut repo = OmicronRepoEditor::initialize(
+            tempdir.path().to_owned(),
             root,
-            expiry,
-            true,
+            "0.0.0".parse().unwrap(),
         )
-        .await
-        .unwrap()
-        .into_editor()
         .await
         .unwrap();
 

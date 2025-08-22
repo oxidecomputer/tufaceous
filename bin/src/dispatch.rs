@@ -5,13 +5,10 @@
 use anyhow::{Context, Result, bail};
 use camino::Utf8PathBuf;
 use chrono::{DateTime, Utc};
-use clap::{CommandFactory, Parser};
-use semver::Version;
-use tufaceous_artifact::{
-    ArtifactKind, ArtifactVersion, ArtifactsDocument, KnownArtifactKind,
-};
+use clap::Parser;
+use tufaceous_artifact::{ArtifactsDocument, KnownArtifactKind};
 use tufaceous_lib::assemble::{ArtifactManifest, OmicronRepoAssembler};
-use tufaceous_lib::{AddArtifact, ArchiveExtractor, Key, OmicronRepo};
+use tufaceous_lib::{ArchiveExtractor, Key, OmicronRepo};
 
 #[derive(Debug, Parser)]
 pub struct Args {
@@ -38,117 +35,44 @@ pub struct Args {
 impl Args {
     /// Executes these arguments.
     pub async fn exec(self, log: &slog::Logger) -> Result<()> {
-        let repo_path = match self.repo {
-            Some(repo) => repo,
-            None => std::env::current_dir()?.try_into()?,
-        };
-
         match self.command {
-            // TODO-cleanup: we no longer use the init and add commands in
-            // production. We should get rid of these options and direct users
-            // towards assemble. (If necessary, we should build tooling for
-            // making it easy to build up a manifest that can then be
-            // assembled.)
-            Command::Init { system_version, no_generate_key } => {
-                let keys = maybe_generate_keys(self.keys, no_generate_key)?;
-                let root =
-                    tufaceous_lib::root::new_root(keys.clone(), self.expiry)
-                        .await?;
-
-                let repo = OmicronRepo::initialize(
-                    log,
-                    &repo_path,
-                    system_version,
-                    keys,
-                    root,
-                    self.expiry,
-                    true,
-                )
-                .await?;
-                slog::info!(
-                    log,
-                    "Initialized TUF repository in {}",
-                    repo.repo_path()
-                );
-                Ok(())
-            }
-            Command::Add {
-                kind,
-                allow_unknown_kinds,
-                path,
-                name,
-                version,
+            Command::Assemble {
+                manifest_path,
+                output_path,
+                build_dir,
+                no_generate_key,
+                skip_all_present,
                 allow_non_semver,
+                no_installinator_document,
             } => {
-                if !allow_unknown_kinds {
-                    // Try converting kind to a known kind.
-                    if kind.to_known().is_none() {
-                        // Simulate a failure to parse (though ideally there would
-                        // be a way to also specify the underlying error -- there
-                        // doesn't appear to be a public API to do so in clap 4).
-                        let mut error = clap::Error::new(
-                            clap::error::ErrorKind::ValueValidation,
-                        )
-                        .with_cmd(&Args::command());
-                        error.insert(
-                            clap::error::ContextKind::InvalidArg,
-                            clap::error::ContextValue::String(
-                                "<KIND>".to_owned(),
-                            ),
-                        );
-                        error.insert(
-                            clap::error::ContextKind::InvalidValue,
-                            clap::error::ContextValue::String(kind.to_string()),
-                        );
-                        error.exit();
-                    }
-                }
-
-                if !allow_non_semver {
-                    if let Err(error) = version.as_str().parse::<Version>() {
-                        let error = Args::command().error(
-                            clap::error::ErrorKind::ValueValidation,
-                            format!(
-                                "version `{version}` is not valid semver \
-                                 (pass in --allow-non-semver to override): {error}"
-                            ),
-                        );
-                        error.exit();
-                    }
-                }
-
-                let repo = OmicronRepo::load_untrusted_ignore_expiration(
-                    log, &repo_path,
-                )
-                .await?;
-                let mut editor = repo.into_editor().await?;
-
-                let new_artifact =
-                    AddArtifact::from_path(kind, name, version, path)?;
-
-                editor
-                    .add_artifact(&new_artifact)
-                    .context("error adding artifact")?;
-                editor.sign_and_finish(self.keys, self.expiry, true).await?;
-                println!(
-                    "added {} {}, version {}",
-                    new_artifact.kind(),
-                    new_artifact.name(),
-                    new_artifact.version()
-                );
-                Ok(())
-            }
-            Command::Archive { output_path } => {
                 // The filename must end with "zip".
                 if output_path.extension() != Some("zip") {
                     bail!("output path `{output_path}` must end with .zip");
                 }
 
-                let repo = OmicronRepo::load_untrusted_ignore_expiration(
-                    log, &repo_path,
-                )
-                .await?;
-                repo.archive(&output_path)?;
+                let manifest = ArtifactManifest::from_path(&manifest_path)
+                    .context("error reading manifest")?;
+                if !allow_non_semver {
+                    manifest.verify_all_semver()?;
+                }
+                if !skip_all_present {
+                    manifest.verify_all_present()?;
+                }
+
+                let keys = maybe_generate_keys(self.keys, no_generate_key)?;
+                let mut assembler = OmicronRepoAssembler::new(
+                    log,
+                    manifest,
+                    keys,
+                    self.expiry,
+                    !no_installinator_document,
+                    output_path,
+                );
+                if let Some(dir) = build_dir {
+                    assembler.set_build_dir(dir);
+                }
+
+                assembler.build().await?;
 
                 Ok(())
             }
@@ -166,7 +90,7 @@ impl Args {
                     .with_context(|| {
                         format!(
                             "error loading extracted repository at `{dest}` \
-                         (extracted files are still available)"
+                             (extracted files are still available)"
                         )
                     })?;
                 let artifacts =
@@ -209,106 +133,12 @@ impl Args {
 
                 Ok(())
             }
-            Command::Assemble {
-                manifest_path,
-                output_path,
-                build_dir,
-                no_generate_key,
-                skip_all_present,
-                allow_non_semver,
-                no_installinator_document,
-            } => {
-                // The filename must end with "zip".
-                if output_path.extension() != Some("zip") {
-                    bail!("output path `{output_path}` must end with .zip");
-                }
-
-                let manifest = ArtifactManifest::from_path(&manifest_path)
-                    .context("error reading manifest")?;
-                if !allow_non_semver {
-                    manifest.verify_all_semver()?;
-                }
-                if !skip_all_present {
-                    manifest.verify_all_present()?;
-                }
-
-                let keys = maybe_generate_keys(self.keys, no_generate_key)?;
-                let mut assembler = OmicronRepoAssembler::new(
-                    log,
-                    manifest,
-                    keys,
-                    self.expiry,
-                    !no_installinator_document,
-                    output_path,
-                );
-                if let Some(dir) = build_dir {
-                    assembler.set_build_dir(dir);
-                }
-
-                assembler.build().await?;
-
-                Ok(())
-            }
         }
     }
 }
 
 #[derive(Debug, Parser)]
 enum Command {
-    /// Create a new rack update TUF repository
-    Init {
-        /// The system version.
-        system_version: Version,
-
-        /// Disable random key generation and exit if no keys are provided
-        #[clap(long)]
-        no_generate_key: bool,
-    },
-    Add {
-        /// The kind of artifact this is.
-        kind: ArtifactKind,
-
-        /// Allow artifact kinds that aren't known to tufaceous
-        #[clap(long)]
-        allow_unknown_kinds: bool,
-
-        /// Path to the artifact.
-        path: Utf8PathBuf,
-
-        /// Override the name for this artifact (default: filename with extension stripped)
-        #[clap(long)]
-        name: Option<String>,
-
-        /// Artifact version.
-        ///
-        /// This is required to be semver by default, but can be overridden with
-        /// --allow-non-semver.
-        version: ArtifactVersion,
-
-        /// Allow versions to be non-semver.
-        ///
-        /// Transitional option for v13 -> v14. After v14, versions will be
-        /// allowed to be non-semver by default.
-        #[clap(long)]
-        allow_non_semver: bool,
-    },
-    /// Archives this repository to a zip file.
-    Archive {
-        /// The path to write the archive to (must end with .zip).
-        output_path: Utf8PathBuf,
-    },
-    /// Validates and extracts a repository created by the `archive` command.
-    Extract {
-        /// The file to extract.
-        archive_file: Utf8PathBuf,
-
-        /// The destination to extract the file to.
-        dest: Utf8PathBuf,
-
-        /// Indicate that the file does not contain an installinator document.
-        #[clap(long)]
-        no_installinator_document: bool,
-    },
     /// Assembles a repository from a provided manifest.
     Assemble {
         /// Path to artifact manifest.
@@ -339,6 +169,18 @@ enum Command {
         /// Do not include the installinator document.
         ///
         /// Transitional option for v15 -> v16, meant to be used for testing.
+        #[clap(long)]
+        no_installinator_document: bool,
+    },
+    /// Validates and extracts a repository created by the `assemble` command.
+    Extract {
+        /// The file to extract.
+        archive_file: Utf8PathBuf,
+
+        /// The destination to extract the file to.
+        dest: Utf8PathBuf,
+
+        /// Indicate that the file does not contain an installinator document.
         #[clap(long)]
         no_installinator_document: bool,
     },
