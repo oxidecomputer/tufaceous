@@ -13,8 +13,9 @@ use tufaceous_artifact::ArtifactHash;
 use tufaceous_brand_metadata::{ArchiveType, Metadata};
 
 use super::{
-    CONTROL_PLANE_ARCHIVE_ZONE_DIRECTORY, HOST_PHASE_1_FILE_NAME,
-    HOST_PHASE_2_FILE_NAME, ROT_ARCHIVE_A_FILE_NAME, ROT_ARCHIVE_B_FILE_NAME,
+    CONTROL_PLANE_ARCHIVE_ZONE_DIRECTORY, COSMO_HOST_PHASE_1_FILE_NAME,
+    GIMLET_HOST_PHASE_1_FILE_NAME, HOST_PHASE_2_FILE_NAME,
+    ROT_ARCHIVE_A_FILE_NAME, ROT_ARCHIVE_B_FILE_NAME,
 };
 
 /// Represents a single entry in a composite artifact.
@@ -104,11 +105,18 @@ impl<W: Write> CompositeHostArchiveBuilder<W> {
         Ok(Self { inner })
     }
 
-    pub fn append_phase_1(
+    pub fn append_gimlet_phase_1(
         &mut self,
         entry: CompositeEntry<'_>,
     ) -> Result<ArtifactHash> {
-        self.inner.append_file(HOST_PHASE_1_FILE_NAME, entry)
+        self.inner.append_file(GIMLET_HOST_PHASE_1_FILE_NAME, entry)
+    }
+
+    pub fn append_cosmo_phase_1(
+        &mut self,
+        entry: CompositeEntry<'_>,
+    ) -> Result<ArtifactHash> {
+        self.inner.append_file(COSMO_HOST_PHASE_1_FILE_NAME, entry)
     }
 
     pub fn append_phase_2(

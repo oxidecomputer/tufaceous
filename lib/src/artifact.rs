@@ -220,6 +220,30 @@ impl TempWrittenArtifact {
     }
 }
 
+pub(crate) fn make_filler_text_with_seed(
+    // composite artifact.
+    kind: &str,
+    version: &ArtifactVersion,
+    length: usize,
+    seed: &str,
+) -> Vec<u8> {
+    // Add the kind and version to the filler text first. This ensures that
+    // hashes are unique by kind and version.
+    let mut out = Vec::with_capacity(length);
+    out.extend_from_slice(kind.as_bytes());
+    out.extend_from_slice(b":");
+    out.extend_from_slice(version.as_str().as_bytes());
+    out.extend_from_slice(b":");
+    out.extend_from_slice(seed.as_bytes());
+    out.extend_from_slice(b":");
+    let remaining = length.saturating_sub(out.len());
+    out.extend(
+        std::iter::repeat(FILLER_TEXT).flatten().copied().take(remaining),
+    );
+
+    out
+}
+
 pub(crate) fn make_filler_text(
     // composite artifact.
     kind: &str,
@@ -249,33 +273,52 @@ pub(crate) fn make_filler_text(
 /// tarballs.
 #[derive(Clone, Debug)]
 pub struct HostPhaseImages {
-    pub phase_1: Bytes,
+    pub gimlet_phase_1: Bytes,
+    pub cosmo_phase_1: Bytes,
     pub phase_2: Bytes,
+}
+
+/// File sources for extraction
+///
+/// Passing three identical arguments gets confusing and error prone
+pub struct HostPhaseImageSource<W: io::Write> {
+    pub gimlet_phase_1: W,
+    pub cosmo_phase_1: W,
+    pub phase_2: W,
 }
 
 impl HostPhaseImages {
     pub fn extract<R: io::BufRead>(reader: R) -> Result<Self> {
-        let mut phase_1 = Vec::new();
+        let mut gimlet_phase_1 = Vec::new();
+        let mut cosmo_phase_1 = Vec::new();
         let mut phase_2 = Vec::new();
-        Self::extract_into(
-            reader,
-            io::Cursor::<&mut Vec<u8>>::new(&mut phase_1),
-            io::Cursor::<&mut Vec<u8>>::new(&mut phase_2),
-        )?;
-        Ok(Self { phase_1: phase_1.into(), phase_2: phase_2.into() })
+        let source = HostPhaseImageSource {
+            gimlet_phase_1: io::Cursor::<&mut Vec<u8>>::new(
+                &mut gimlet_phase_1,
+            ),
+            cosmo_phase_1: io::Cursor::<&mut Vec<u8>>::new(&mut cosmo_phase_1),
+            phase_2: io::Cursor::<&mut Vec<u8>>::new(&mut phase_2),
+        };
+
+        Self::extract_into(reader, source)?;
+        Ok(Self {
+            gimlet_phase_1: gimlet_phase_1.into(),
+            cosmo_phase_1: cosmo_phase_1.into(),
+            phase_2: phase_2.into(),
+        })
     }
 
     pub fn extract_into<R: io::BufRead, W: io::Write>(
         reader: R,
-        phase_1: W,
-        phase_2: W,
+        source: HostPhaseImageSource<W>,
     ) -> Result<()> {
         let uncompressed = flate2::bufread::GzDecoder::new(reader);
         let mut archive = tar::Archive::new(uncompressed);
 
         let mut oxide_json_found = false;
-        let mut phase_1_writer = Some(phase_1);
-        let mut phase_2_writer = Some(phase_2);
+        let mut gimlet_phase_1_writer = Some(source.gimlet_phase_1);
+        let mut cosmo_phase_1_writer = Some(source.cosmo_phase_1);
+        let mut phase_2_writer = Some(source.phase_2);
         for entry in archive
             .entries()
             .context("error building list of entries from archive")?
@@ -300,9 +343,21 @@ impl HostPhaseImages {
                     )
                 }
                 oxide_json_found = true;
-            } else if path == Path::new(HOST_PHASE_1_FILE_NAME) {
-                if let Some(phase_1) = phase_1_writer.take() {
-                    read_entry_into(entry, HOST_PHASE_1_FILE_NAME, phase_1)?;
+            } else if path == Path::new(COSMO_HOST_PHASE_1_FILE_NAME) {
+                if let Some(cosmo_phase_1) = cosmo_phase_1_writer.take() {
+                    read_entry_into(
+                        entry,
+                        COSMO_HOST_PHASE_1_FILE_NAME,
+                        cosmo_phase_1,
+                    )?;
+                }
+            } else if path == Path::new(GIMLET_HOST_PHASE_1_FILE_NAME) {
+                if let Some(gimlet_phase_1) = gimlet_phase_1_writer.take() {
+                    read_entry_into(
+                        entry,
+                        GIMLET_HOST_PHASE_1_FILE_NAME,
+                        gimlet_phase_1,
+                    )?;
                 }
             } else if path == Path::new(HOST_PHASE_2_FILE_NAME) {
                 if let Some(phase_2) = phase_2_writer.take() {
@@ -311,7 +366,8 @@ impl HostPhaseImages {
             }
 
             if oxide_json_found
-                && phase_1_writer.is_none()
+                && gimlet_phase_1_writer.is_none()
+                && cosmo_phase_1_writer.is_none()
                 && phase_2_writer.is_none()
             {
                 break;
@@ -325,8 +381,11 @@ impl HostPhaseImages {
 
         // If we didn't `.take()` the writer out of the options, we never saw
         // the expected phase1/phase2 filenames.
-        if phase_1_writer.is_some() {
-            not_found.push(HOST_PHASE_1_FILE_NAME);
+        if cosmo_phase_1_writer.is_some() {
+            not_found.push(COSMO_HOST_PHASE_1_FILE_NAME);
+        }
+        if gimlet_phase_1_writer.is_some() {
+            not_found.push(GIMLET_HOST_PHASE_1_FILE_NAME);
         }
         if phase_2_writer.is_some() {
             not_found.push(HOST_PHASE_2_FILE_NAME);
@@ -339,8 +398,13 @@ impl HostPhaseImages {
         Ok(())
     }
 
-    pub fn phase_1_hash(&self) -> ArtifactHash {
-        let hash = Sha256::digest(&self.phase_1);
+    pub fn gimlet_phase_1_hash(&self) -> ArtifactHash {
+        let hash = Sha256::digest(&self.gimlet_phase_1);
+        ArtifactHash(hash.into())
+    }
+
+    pub fn cosmo_phase_1_hash(&self) -> ArtifactHash {
+        let hash = Sha256::digest(&self.cosmo_phase_1);
         ArtifactHash(hash.into())
     }
 
@@ -559,7 +623,8 @@ impl ControlPlaneZoneImages {
 
 static FILLER_TEXT: &[u8; 16] = b"tufaceousfaketxt";
 static OXIDE_JSON_FILE_NAME: &str = "oxide.json";
-pub(crate) static HOST_PHASE_1_FILE_NAME: &str = "image/rom";
+pub(crate) static GIMLET_HOST_PHASE_1_FILE_NAME: &str = "image/gimlet.rom";
+pub(crate) static COSMO_HOST_PHASE_1_FILE_NAME: &str = "image/cosmo.rom";
 pub(crate) static HOST_PHASE_2_FILE_NAME: &str = "image/zfs.img";
 pub(crate) static ROT_ARCHIVE_A_FILE_NAME: &str = "archive-a.zip";
 pub(crate) static ROT_ARCHIVE_B_FILE_NAME: &str = "archive-b.zip";
