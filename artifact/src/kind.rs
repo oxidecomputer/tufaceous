@@ -112,21 +112,34 @@ impl ArtifactKind {
     pub const SWITCH_ROT_IMAGE_B: Self =
         Self::from_static("switch_rot_image_b");
 
-    /// Host phase 1 identifier.
+    /// Gimlet Host phase 1 identifier.
     ///
     /// Derived from [`KnownArtifactKind::Host`].
-    pub const HOST_PHASE_1: Self = Self::from_static("host_phase_1");
+    pub const GIMLET_HOST_PHASE_1: Self =
+        Self::from_static("gimlet_host_phase_1");
+
+    /// Cosmo Host phase 1 identifier.
+    ///
+    /// Derived from [`KnownArtifactKind::Host`].
+    pub const COSMO_HOST_PHASE_1: Self =
+        Self::from_static("cosmo_host_phase_1");
 
     /// Host phase 2 identifier.
     ///
     /// Derived from [`KnownArtifactKind::Host`].
     pub const HOST_PHASE_2: Self = Self::from_static("host_phase_2");
 
-    /// Trampoline phase 1 identifier.
+    /// Gimlet Trampoline phase 1 identifier.
     ///
     /// Derived from [`KnownArtifactKind::Trampoline`].
-    pub const TRAMPOLINE_PHASE_1: Self =
-        Self::from_static("trampoline_phase_1");
+    pub const GIMLET_TRAMPOLINE_PHASE_1: Self =
+        Self::from_static("gimlet_trampoline_phase_1");
+
+    /// Cosmo Trampoline phase 1 identifier.
+    ///
+    /// Derived from [`KnownArtifactKind::Trampoline`].
+    pub const COSMO_TRAMPOLINE_PHASE_1: Self =
+        Self::from_static("cosmo_trampoline_phase_1");
 
     /// Trampoline phase 2 identifier.
     ///

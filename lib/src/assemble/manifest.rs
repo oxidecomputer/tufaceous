@@ -17,11 +17,12 @@ use tufaceous_artifact::{ArtifactKind, ArtifactVersion, KnownArtifactKind};
 
 use crate::assemble::{DeploymentUnitData, DeploymentUnitScope};
 use crate::{
-    ArtifactSource, CompositeControlPlaneArchiveBuilder, CompositeEntry,
+    ArtifactSource, COSMO_HOST_PHASE_1_FILE_NAME,
+    CompositeControlPlaneArchiveBuilder, CompositeEntry,
     CompositeHostArchiveBuilder, CompositeRotArchiveBuilder,
-    HOST_PHASE_1_FILE_NAME, HOST_PHASE_2_FILE_NAME, HostPhaseImages,
+    GIMLET_HOST_PHASE_1_FILE_NAME, HOST_PHASE_2_FILE_NAME, HostPhaseImages,
     MtimeSource, ROT_ARCHIVE_A_FILE_NAME, ROT_ARCHIVE_B_FILE_NAME,
-    make_filler_text,
+    make_filler_text, make_filler_text_with_seed,
 };
 
 use super::{ArtifactDeploymentUnits, DeploymentUnitMapBuilder};
@@ -121,12 +122,23 @@ impl ArtifactManifest {
                                     );
                                 data_builder
                                     .insert(DeploymentUnitData {
-                                        name: HOST_PHASE_1_FILE_NAME.to_owned(),
+                                        name: COSMO_HOST_PHASE_1_FILE_NAME
+                                            .to_owned(),
                                         version: artifact_data.version.clone(),
-                                        kind: ArtifactKind::HOST_PHASE_1,
-                                        hash: images.phase_1_hash(),
+                                        kind: ArtifactKind::COSMO_HOST_PHASE_1,
+                                        hash: images.cosmo_phase_1_hash(),
                                     })
                                     .expect("unique kind");
+                                data_builder
+                                    .insert(DeploymentUnitData {
+                                        name: GIMLET_HOST_PHASE_1_FILE_NAME
+                                            .to_owned(),
+                                        version: artifact_data.version.clone(),
+                                        kind: ArtifactKind::GIMLET_HOST_PHASE_1,
+                                        hash: images.gimlet_phase_1_hash(),
+                                    })
+                                    .expect("unique kind");
+
                                 data_builder
                                     .insert(DeploymentUnitData {
                                         name: HOST_PHASE_2_FILE_NAME.to_owned(),
@@ -164,7 +176,8 @@ impl ArtifactManifest {
                         )
                     }
                     DeserializedArtifactSource::CompositeHost {
-                        phase_1,
+                        gimlet_phase_1,
+                        cosmo_phase_1,
                         phase_2,
                     } => {
                         ensure!(
@@ -177,25 +190,37 @@ impl ArtifactManifest {
                              artifact kind {kind:?}"
                         );
 
-                        let mtime_source =
-                            if phase_1.is_fake() && phase_2.is_fake() {
-                                // Ensure stability of fake artifacts.
-                                MtimeSource::Zero
-                            } else {
-                                MtimeSource::Now
-                            };
+                        let mtime_source = if gimlet_phase_1.is_fake()
+                            && cosmo_phase_1.is_fake()
+                            && phase_2.is_fake()
+                        {
+                            // Ensure stability of fake artifacts.
+                            MtimeSource::Zero
+                        } else {
+                            MtimeSource::Now
+                        };
 
                         let mut builder = CompositeHostArchiveBuilder::new(
                             Vec::new(),
                             mtime_source,
                         )?;
-                        let phase_1_hash = phase_1.with_entry(
-                            FakeDataAttributes::new(
+                        let cosmo_phase_1_hash = cosmo_phase_1.with_entry(
+                            FakeDataAttributes::new_with_seed(
                                 kind,
                                 &artifact_data.version,
+                                "cosmo".to_string(),
                             ),
-                            |entry| builder.append_phase_1(entry),
+                            |entry| builder.append_cosmo_phase_1(entry),
                         )?;
+                        let gimlet_phase_1_hash = gimlet_phase_1.with_entry(
+                            FakeDataAttributes::new_with_seed(
+                                kind,
+                                &artifact_data.version,
+                                "gimlet".to_string(),
+                            ),
+                            |entry| builder.append_gimlet_phase_1(entry),
+                        )?;
+
                         let phase_2_hash = phase_2.with_entry(
                             FakeDataAttributes::new(
                                 kind,
@@ -213,10 +238,19 @@ impl ArtifactManifest {
                         );
                         data_builder
                             .insert(DeploymentUnitData {
-                                name: HOST_PHASE_1_FILE_NAME.to_owned(),
+                                name: GIMLET_HOST_PHASE_1_FILE_NAME.to_owned(),
                                 version: artifact_data.version.clone(),
-                                kind: ArtifactKind::HOST_PHASE_1,
-                                hash: phase_1_hash,
+                                kind: ArtifactKind::GIMLET_HOST_PHASE_1,
+                                hash: gimlet_phase_1_hash,
+                            })
+                            .expect("unique kind");
+
+                        data_builder
+                            .insert(DeploymentUnitData {
+                                name: COSMO_HOST_PHASE_1_FILE_NAME.to_owned(),
+                                version: artifact_data.version.clone(),
+                                kind: ArtifactKind::COSMO_HOST_PHASE_1,
+                                hash: cosmo_phase_1_hash,
                             })
                             .expect("unique kind");
                         data_builder
@@ -416,22 +450,38 @@ impl ArtifactManifest {
 struct FakeDataAttributes<'a> {
     kind: KnownArtifactKind,
     version: &'a ArtifactVersion,
+    seed: String,
 }
 
 impl<'a> FakeDataAttributes<'a> {
     fn new(kind: KnownArtifactKind, version: &'a ArtifactVersion) -> Self {
-        Self { kind, version }
+        Self { kind, version, seed: "".to_string() }
+    }
+
+    fn new_with_seed(
+        kind: KnownArtifactKind,
+        version: &'a ArtifactVersion,
+        seed: String,
+    ) -> Self {
+        Self { kind, version, seed }
     }
 
     fn make_data(&self, size: usize) -> Vec<u8> {
         use hubtools::{CabooseBuilder, HubrisArchiveBuilder};
 
         let board = match self.kind {
+            KnownArtifactKind::Host | KnownArtifactKind::Trampoline => {
+                // need to use the extra seed to be able to generate different gimlet vs
+                // cosmo images
+                return make_filler_text_with_seed(
+                    &self.kind.to_string(),
+                    self.version,
+                    size,
+                    &self.seed,
+                );
+            }
             // non-Hubris artifacts: just make fake data
-            KnownArtifactKind::Host
-            | KnownArtifactKind::Trampoline
-            | KnownArtifactKind::ControlPlane
-            | KnownArtifactKind::Zone => {
+            KnownArtifactKind::ControlPlane | KnownArtifactKind::Zone => {
                 return make_filler_text(
                     &self.kind.to_string(),
                     self.version,
@@ -643,7 +693,8 @@ pub enum DeserializedArtifactSource {
         data_version: Option<ArtifactVersion>,
     },
     CompositeHost {
-        phase_1: DeserializedFileArtifactSource,
+        gimlet_phase_1: DeserializedFileArtifactSource,
+        cosmo_phase_1: DeserializedFileArtifactSource,
         phase_2: DeserializedFileArtifactSource,
     },
     CompositeRot {
@@ -665,8 +716,13 @@ impl DeserializedArtifactSource {
                 *size = (*size).saturating_add_signed(size_delta);
                 Ok(())
             }
-            DeserializedArtifactSource::CompositeHost { phase_1, phase_2 } => {
-                phase_1.apply_size_delta(size_delta)?;
+            DeserializedArtifactSource::CompositeHost {
+                gimlet_phase_1,
+                cosmo_phase_1,
+                phase_2,
+            } => {
+                gimlet_phase_1.apply_size_delta(size_delta)?;
+                cosmo_phase_1.apply_size_delta(size_delta)?;
                 phase_2.apply_size_delta(size_delta)?;
                 Ok(())
             }
