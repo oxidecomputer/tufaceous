@@ -146,6 +146,12 @@ impl ArtifactKind {
     /// Derived from [`KnownArtifactKind::Trampoline`].
     pub const TRAMPOLINE_PHASE_2: Self =
         Self::from_static("trampoline_phase_2");
+
+    /// Measurement Corpus identifier.
+    ///
+    /// Derived from [`KnownArtifactKind::MeasurementCorpus`].
+    pub const MEASUREMENT_CORPUS: Self =
+        Self::from_static("measurement_corpus");
 }
 
 impl From<KnownArtifactKind> for ArtifactKind {
@@ -206,6 +212,8 @@ pub enum KnownArtifactKind {
     ControlPlane,
     /// Individual control plane zone
     Zone,
+    /// MeasurementCorpus
+    MeasurementCorpus,
 
     // PSC Artifacts
     PscSp,
@@ -241,6 +249,7 @@ impl KnownArtifactKind {
             | KnownArtifactKind::Host
             | KnownArtifactKind::Trampoline
             | KnownArtifactKind::InstallinatorDocument
+            | KnownArtifactKind::MeasurementCorpus
             | KnownArtifactKind::ControlPlane
             | KnownArtifactKind::Zone
             | KnownArtifactKind::PscSp
@@ -283,6 +292,7 @@ impl KnownArtifactKind {
             | KnownArtifactKind::Host
             | KnownArtifactKind::Trampoline
             | KnownArtifactKind::InstallinatorDocument
+            | KnownArtifactKind::MeasurementCorpus
             | KnownArtifactKind::ControlPlane
             | KnownArtifactKind::Zone
             | KnownArtifactKind::PscSp
