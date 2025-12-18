@@ -9,9 +9,14 @@
 //! extended this format with additional archive types for identifying other
 //! types of tarballs.
 
-use std::io::{Error, ErrorKind, Read, Result, Write};
+use std::io::Error;
+use std::io::ErrorKind;
+use std::io::Read;
+use std::io::Result;
+use std::io::Write;
 
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
+use serde::Serialize;
 use tufaceous_artifact::ArtifactVersion;
 
 #[derive(Clone, Debug, Deserialize, Serialize)]

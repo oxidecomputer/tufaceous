@@ -2,16 +2,15 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-mod archive;
-mod artifact;
-pub mod assemble;
-mod key;
-mod repository;
-pub mod root;
-mod target;
-mod utils;
+pub mod edit;
+pub mod error;
+mod loader;
+mod repo;
+mod schema;
+mod util;
+mod zip_transport;
+mod zip_writer;
 
-pub use archive::*;
-pub use artifact::*;
-pub use key::*;
-pub use repository::*;
+pub use loader::*;
+pub use repo::*;
+pub use zip_transport::*;

@@ -3,11 +3,14 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 mod artifact;
+mod hash;
+pub mod hubris;
 mod installinator;
-mod kind;
+mod tags;
 mod version;
 
 pub use artifact::*;
+pub use hash::*;
 pub use installinator::*;
-pub use kind::*;
+pub use tags::*;
 pub use version::*;

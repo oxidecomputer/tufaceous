@@ -1,38 +1,29 @@
 [package]
-name = "tufaceous"
+name = "tufaceous-bin"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 publish.workspace = true
 
-[[test]]
-name = "manifest-tests"
-harness = false
+[[bin]]
+name = "tufaceous"
+path = "src/main.rs"
 
 [dependencies]
-anyhow = { workspace = true, features = ["backtrace"] }
+anyhow.workspace = true
 camino.workspace = true
 chrono.workspace = true
 clap.workspace = true
-console.workspace = true
-humantime.workspace = true
+fs-err = { workspace = true, features = ["tokio"] }
 semver.workspace = true
 slog.workspace = true
 slog-async.workspace = true
 slog-envlogger.workspace = true
 slog-term.workspace = true
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+tough.workspace = true
+tufaceous.workspace = true
 tufaceous-artifact.workspace = true
-tufaceous-lib.workspace = true
-
-[dev-dependencies]
-assert_cmd.workspace = true
-datatest-stable.workspace = true
-dropshot.workspace = true
-fs-err.workspace = true
-predicates.workspace = true
-tempfile.workspace = true
-tokio = { workspace = true, features = ["test-util"] }
 
 [lints]
 workspace = true

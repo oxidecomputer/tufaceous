@@ -2,22 +2,29 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+mod assemble;
+mod sign;
+
 use anyhow::Result;
 use clap::Parser;
 use slog::Drain;
-use tufaceous::Args;
+use slog::Logger;
+
+#[derive(Debug, Parser)]
+enum Command {
+    Assemble(assemble::Args),
+}
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    let log = setup_log();
-    let args = Args::parse();
-    args.exec(&log).await
-}
-
-fn setup_log() -> slog::Logger {
     let stderr_drain = stderr_env_drain("RUST_LOG");
     let drain = slog_async::Async::new(stderr_drain).build().fuse();
-    slog::Logger::root(drain, slog::o!())
+    let _log = Logger::root(drain, slog::o!());
+
+    let args = Command::parse();
+    match args {
+        Command::Assemble(args) => args.run().await,
+    }
 }
 
 fn stderr_env_drain(env_var: &str) -> impl Drain<Ok = (), Err = slog::Never> {

@@ -1,0 +1,457 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
+use std::collections::HashMap;
+use std::fmt::Debug;
+use std::fs::File;
+use std::io::Cursor;
+use std::io::Read;
+use std::pin::Pin;
+use std::sync::Arc;
+
+use bytes::Bytes;
+use bytes::BytesMut;
+use camino::Utf8PathBuf;
+use flate2::read::DeflateDecoder;
+use futures_util::FutureExt;
+use futures_util::Stream;
+use futures_util::StreamExt;
+use futures_util::stream;
+use rawzip::CompressionMethod;
+use rawzip::FileReader;
+use rawzip::ReaderAt;
+use rawzip::ZipArchive;
+use rawzip::ZipArchiveEntryWayfinder;
+use rawzip::ZipReader;
+use rawzip::ZipVerifier;
+use rawzip::path::RawPath;
+use rawzip::path::ZipFilePath;
+use slog::Logger;
+use slog::warn;
+use tokio::sync::mpsc;
+use tough::Transport;
+use tough::TransportError;
+use tough::TransportErrorKind;
+use tough::async_trait;
+use url::Url;
+
+use crate::error::Error;
+use crate::error::ErrorKind;
+
+const MAX_SYMLINK_TARGET_LEN: usize = 1024;
+const MAX_SYMLINK_TRAVERSAL: usize = 8;
+
+/// Implementation of [`tough::Transport`] that operates on a Zip archive.
+///
+/// URLs used with this transport must use the `zip:///` protocol. For example,
+/// if your metadata is found inside `repo/metadata` within the archive, use
+/// `zip:///repo/metadata/` as the metadata base URL.
+///
+/// Convenience methods for setting the correct transport
+/// and base URLs for loading Tufaceous-generated
+/// repositories are [`RepositoryLoader::load_zip_slice`] and
+/// [`RepositoryLoader::load_zip_file`].
+///
+/// [`RepositoryLoader::load_zip_slice`]: [`crate::RepositoryLoader::load_zip_slice`]
+/// [`RepositoryLoader::load_zip_file`]: [`crate::RepositoryLoader::load_zip_file`]
+#[derive(Debug)]
+pub struct ZipTransport<T: ReaderAt + Debug + Send + Sync + 'static> {
+    inner: Arc<Inner<T>>,
+}
+
+#[derive(Debug)]
+struct Inner<T: ReaderAt + Debug + Send + Sync + 'static> {
+    archive: ZipArchive<T>,
+    entries: HashMap<Url, Entry>,
+}
+
+#[derive(Debug, Clone, Copy)]
+enum Entry {
+    File(EntryData),
+    Symlink(EntryData),
+    Dir,
+    Duplicate,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct EntryData {
+    compression_method: CompressionMethod,
+    wayfinder: ZipArchiveEntryWayfinder,
+}
+
+// Manually implemented, as the derive macro adds an unnecessary `T: Clone`.
+impl<T: ReaderAt + Debug + Send + Sync + 'static> Clone for ZipTransport<T> {
+    fn clone(&self) -> Self {
+        Self { inner: self.inner.clone() }
+    }
+}
+
+impl<T: AsRef<[u8]> + Debug + Send + Sync + 'static> ZipTransport<Cursor<T>> {
+    pub fn from_slice(data: T, log: &Logger) -> Result<Self, Error> {
+        let archive = ZipArchive::from_slice(data).upgrade(None)?;
+        Self::from_impl_blocking(archive.into_zip_archive(), None, None, log)
+    }
+}
+
+impl ZipTransport<FileReader> {
+    pub async fn from_file(
+        archive_path: impl Into<Utf8PathBuf>,
+        log: &Logger,
+    ) -> Result<Self, Error> {
+        let archive_path = archive_path.into();
+        let log = log.clone();
+        tokio::task::spawn_blocking(move || {
+            let archive_path = archive_path;
+            let file = match File::open(&archive_path) {
+                Ok(file) => file,
+                Err(source) => {
+                    return Err(ErrorKind::OpenFile {
+                        source,
+                        path: archive_path,
+                    }
+                    .into());
+                }
+            };
+            let mut buffer = vec![0; rawzip::RECOMMENDED_BUFFER_SIZE];
+            let archive_path = Some(archive_path);
+            let archive = ZipArchive::from_file(file, &mut buffer)
+                .upgrade(archive_path.as_ref())?;
+            Self::from_impl_blocking(archive, archive_path, Some(buffer), &log)
+        })
+        .await?
+    }
+}
+
+impl<T: ReaderAt + Debug + Send + Sync + 'static> ZipTransport<T> {
+    fn from_impl_blocking(
+        archive: ZipArchive<T>,
+        archive_path: Option<Utf8PathBuf>,
+        buffer: Option<Vec<u8>>,
+        log: &Logger,
+    ) -> Result<Self, Error> {
+        let mut buffer =
+            buffer.unwrap_or_else(|| vec![0; rawzip::RECOMMENDED_BUFFER_SIZE]);
+        let expected = archive.entries_hint();
+        let mut actual: u64 = 0;
+        let mut all_entries = Vec::new();
+        let mut entries = HashMap::new();
+        let mut records = archive.entries(&mut buffer);
+        while let Some(record) =
+            records.next_entry().upgrade(archive_path.as_ref())?
+        {
+            actual += 1;
+            all_entries.push((
+                record.wayfinder(),
+                record.file_path().as_bytes().to_vec(),
+            ));
+
+            let Some(url) = path_to_url(record.file_path(), log) else {
+                continue;
+            };
+            match entries.entry(url) {
+                std::collections::hash_map::Entry::Occupied(mut e) => {
+                    e.insert(Entry::Duplicate);
+                }
+                std::collections::hash_map::Entry::Vacant(e) => {
+                    if record.is_dir() {
+                        e.insert(Entry::Dir);
+                    } else {
+                        let data = EntryData {
+                            compression_method: record.compression_method(),
+                            wayfinder: record.wayfinder(),
+                        };
+                        if record.mode().is_symlink() {
+                            e.insert(Entry::Symlink(data));
+                        } else {
+                            e.insert(Entry::File(data));
+                        }
+                    }
+                }
+            }
+        }
+
+        if expected != actual {
+            return Err(ErrorKind::ZipEntryCount {
+                expected,
+                actual,
+                archive_path,
+            }
+            .into());
+        }
+
+        let mut ranges = Vec::new();
+        for (wayfinder, raw_path) in all_entries {
+            let entry =
+                archive.get_entry(wayfinder).upgrade(archive_path.as_ref())?;
+            let header = entry
+                .local_header(&mut buffer)
+                .upgrade(archive_path.as_ref())?;
+            if raw_path != header.file_path().as_bytes() {
+                return Err(ErrorKind::ZipPathMismatch {
+                    central: raw_path,
+                    local: header.file_path().as_bytes().to_vec(),
+                    archive_path,
+                }
+                .into());
+            }
+
+            let (start, end) = entry.compressed_data_range();
+            ranges.push((start..end, raw_path));
+            // Check that no file ranges overlap with or come after the central
+            // directory.
+            if end > archive.directory_offset() {
+                return Err(ErrorKind::ZipRangeOverrun {
+                    file_path: header.file_path().as_bytes().to_vec(),
+                    data_range: start..end,
+                    archive_path,
+                }
+                .into());
+            }
+        }
+        // Check that no file ranges overlap with each other.
+        ranges.sort_by_key(|(range, _)| range.start);
+        for window in ranges.windows(2) {
+            let [(earlier, earlier_path), (later, later_path)] = window else {
+                panic!("slice::windows is broken")
+            };
+            if earlier.end > later.start {
+                return Err(ErrorKind::ZipOverlappingRanges {
+                    earlier_path: earlier_path.clone(),
+                    earlier: earlier.clone(),
+                    later_path: later_path.clone(),
+                    later: later.clone(),
+                    archive_path,
+                }
+                .into());
+            }
+        }
+
+        Ok(Self { inner: Arc::new(Inner { archive, entries }) })
+    }
+
+    fn reader_blocking(
+        &self,
+        EntryData { compression_method, wayfinder }: EntryData,
+    ) -> Result<Reader<'_, T>, ZipTransportError> {
+        let entry = self.inner.archive.get_entry(wayfinder)?;
+        let reader = entry.reader();
+        match compression_method {
+            CompressionMethod::Store => {
+                Ok(Reader::Store(entry.verifying_reader(reader)))
+            }
+            CompressionMethod::Deflate => Ok(Reader::Deflate(
+                entry.verifying_reader(DeflateDecoder::new(reader)),
+            )),
+            other => Err(ZipTransportError::CompressionMethod(other)),
+        }
+    }
+
+    fn stream(
+        self,
+        entry_data: EntryData,
+        url: Url,
+    ) -> impl Stream<Item = Result<Bytes, TransportError>> {
+        let (tx, mut rx) = mpsc::channel(1);
+        let task = tokio::task::spawn_blocking(move || {
+            let mut reader = self.reader_blocking(entry_data)?;
+            let mut buf = BytesMut::zeroed(8192);
+            while let n = reader.read(&mut buf)?
+                && n > 0
+            {
+                buf.truncate(n);
+                let Ok(()) = tx.blocking_send(buf.split().freeze()) else {
+                    break;
+                };
+                if buf.capacity() == 0 {
+                    buf.reserve(8192);
+                }
+                buf.resize(buf.capacity(), 0);
+            }
+            Ok::<_, ZipTransportError>(())
+        });
+        stream::poll_fn(move |cx| rx.poll_recv(cx)).map(Ok).chain(
+            task.into_stream().filter_map(move |result| {
+                let error = match result {
+                    Ok(Ok(())) => return std::future::ready(None),
+                    Ok(Err(error)) => error,
+                    Err(join_error) => join_error.into(),
+                };
+                std::future::ready(Some(Err(error.upgrade(url.clone()))))
+            }),
+        )
+    }
+
+    async fn read_symlink_target(
+        self,
+        entry_data: EntryData,
+        base: &Url,
+    ) -> Result<Url, ZipTransportError> {
+        let target = tokio::task::spawn_blocking(move || {
+            let mut reader = self.reader_blocking(entry_data)?;
+            let mut v = vec![0; MAX_SYMLINK_TARGET_LEN];
+            let len =
+                std::io::copy(&mut reader, &mut Cursor::new(v.as_mut_slice()))?;
+            v.truncate(len.try_into().unwrap());
+            String::from_utf8(v).map_err(|source| {
+                ZipTransportError::SymlinkUtf8(source.utf8_error())
+            })
+        })
+        .await??;
+        base.join(&target).map_err(|source| ZipTransportError::UrlJoin {
+            source,
+            url: target,
+            base: base.to_string(),
+        })
+    }
+}
+
+#[async_trait]
+impl<T: ReaderAt + Debug + Send + Sync + 'static> Transport
+    for ZipTransport<T>
+{
+    async fn fetch(
+        &self,
+        original_url: Url,
+    ) -> Result<
+        Pin<Box<dyn Stream<Item = Result<Bytes, TransportError>> + Send>>,
+        TransportError,
+    > {
+        let mut url = original_url.clone();
+        if url.scheme() != "zip" {
+            return Err(TransportError::new(
+                TransportErrorKind::UnsupportedUrlScheme,
+                url,
+            ));
+        }
+        for _ in 0..MAX_SYMLINK_TRAVERSAL {
+            match self.inner.entries.get(&url).copied() {
+                Some(Entry::File(entry_data)) => {
+                    return Ok(Box::pin(self.clone().stream(entry_data, url)));
+                }
+                Some(Entry::Symlink(entry_data)) => {
+                    url = self
+                        .clone()
+                        .read_symlink_target(entry_data, &url)
+                        .await
+                        .map_err(|error| error.upgrade(url))?;
+                }
+                Some(Entry::Dir) => {
+                    return Err(ZipTransportError::IsADirectory.upgrade(url));
+                }
+                Some(Entry::Duplicate) => {
+                    return Err(ZipTransportError::Duplicate.upgrade(url));
+                }
+                None => {
+                    return Err(ZipTransportError::FileNotFound.upgrade(url));
+                }
+            }
+        }
+        Err(ZipTransportError::SymlinkTraversalLimit.upgrade(original_url))
+    }
+}
+
+enum Reader<'a, T: ReaderAt> {
+    Store(ZipVerifier<ZipReader<&'a T>, &'a T>),
+    Deflate(ZipVerifier<DeflateDecoder<ZipReader<&'a T>>, &'a T>),
+}
+
+impl<T: ReaderAt> Read for Reader<'_, T> {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        match self {
+            Reader::Store(reader) => reader.read(buf),
+            Reader::Deflate(reader) => reader.read(buf),
+        }
+    }
+}
+
+trait ResultExt<T> {
+    fn upgrade(self, archive_path: Option<&Utf8PathBuf>) -> Result<T, Error>;
+}
+
+impl<T> ResultExt<T> for Result<T, rawzip::Error> {
+    fn upgrade(self, archive_path: Option<&Utf8PathBuf>) -> Result<T, Error> {
+        match self {
+            Ok(v) => Ok(v),
+            Err(source) => Err(ErrorKind::ReadZip {
+                source,
+                archive_path: archive_path.cloned(),
+            })?,
+        }
+    }
+}
+
+/// Possible source errors of [`ZipTransport::fetch`].
+#[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
+pub enum ZipTransportError {
+    #[error(transparent)]
+    Io(#[from] std::io::Error),
+    #[error(transparent)]
+    Join(#[from] tokio::task::JoinError),
+    #[error("failed to join {url} onto {base}")]
+    UrlJoin { source: url::ParseError, url: String, base: String },
+    #[error(transparent)]
+    Zip(#[from] rawzip::Error),
+
+    #[error("unsupported compression method {0:?}")]
+    CompressionMethod(CompressionMethod),
+    #[error("multiple entries found for file")]
+    Duplicate,
+    #[error("file not found")]
+    FileNotFound,
+    #[error("is a directory")]
+    IsADirectory,
+    #[error("reached symlink traversal limit")]
+    SymlinkTraversalLimit,
+    #[error("symlink target is not valid UTF-8")]
+    SymlinkUtf8(std::str::Utf8Error),
+}
+
+impl ZipTransportError {
+    fn upgrade(self, url: Url) -> TransportError {
+        let kind = match &self {
+            ZipTransportError::Io(_)
+            | ZipTransportError::Join(_)
+            | ZipTransportError::Zip(_) => TransportErrorKind::Other,
+
+            ZipTransportError::UrlJoin { .. }
+            | ZipTransportError::CompressionMethod(_)
+            | ZipTransportError::Duplicate
+            | ZipTransportError::FileNotFound
+            | ZipTransportError::IsADirectory
+            | ZipTransportError::SymlinkTraversalLimit
+            | ZipTransportError::SymlinkUtf8(_) => {
+                TransportErrorKind::FileNotFound
+            }
+        };
+        TransportError::new_with_cause(kind, url, self)
+    }
+}
+
+fn path_to_url(path: ZipFilePath<RawPath<'_>>, log: &Logger) -> Option<Url> {
+    path.try_normalize()
+        .inspect_err(|err| {
+            warn!(
+                log,
+                "ignoring invalid path in zip archive";
+                "path" => path.as_bytes().escape_ascii().to_string(),
+                "error" => err.to_string(),
+            );
+        })
+        .ok()
+        .and_then(|path| {
+            Url::parse("zip:///")
+                .unwrap()
+                .join(path.as_str())
+                .inspect_err(|err| {
+                    warn!(
+                        log,
+                        "ignoring invalid path in zip archive";
+                        "path" => path.as_str(),
+                        "error" => err.to_string(),
+                    );
+                })
+                .ok()
+        })
+}
