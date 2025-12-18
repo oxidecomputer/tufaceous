@@ -4,6 +4,7 @@
 
 mod v1;
 
+use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::pin::Pin;
 
@@ -34,6 +35,7 @@ pub struct Repository {
     system_version: Version,
     trust_root: Vec<u8>,
     artifacts: Artifacts,
+    metadata: BTreeMap<String, serde_json::Value>,
     v1_unpacked: Option<v1::Unpacked>,
 }
 
@@ -48,7 +50,7 @@ impl Repository {
         trust_root: Vec<u8>,
         v1_compatibility: bool,
     ) -> Result<Self, Error> {
-        let Some(ArtifactsSchema { system_version, artifacts }) =
+        let Some(ArtifactsSchema { system_version, artifacts, metadata }) =
             read_target_json(&repo, ArtifactsSchema::TARGET_NAME).await?
         else {
             if v1_compatibility
@@ -76,6 +78,7 @@ impl Repository {
             trust_root,
             system_version,
             artifacts,
+            metadata,
             v1_unpacked: None,
         })
     }
@@ -94,6 +97,10 @@ impl Repository {
 
     pub fn artifacts(&self) -> &Artifacts {
         &self.artifacts
+    }
+
+    pub fn metadata(&self) -> &BTreeMap<String, serde_json::Value> {
+        &self.metadata
     }
 
     pub fn is_v1(&self) -> bool {

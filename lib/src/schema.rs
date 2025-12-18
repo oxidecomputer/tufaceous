@@ -12,7 +12,10 @@ use tufaceous_artifact::ArtifactVersion;
 #[derive(Debug, Deserialize, Serialize)]
 pub(crate) struct ArtifactsSchema {
     pub(crate) system_version: Version,
+    #[serde(default)]
     pub(crate) artifacts: Vec<ArtifactSchema>,
+    #[serde(default)]
+    pub(crate) metadata: BTreeMap<String, serde_json::Value>,
 }
 
 impl ArtifactsSchema {

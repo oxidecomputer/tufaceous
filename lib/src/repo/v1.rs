@@ -2,6 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::io::BufRead;
 use std::io::Read;
@@ -273,6 +274,7 @@ pub(crate) async fn from_loaded(
         system_version,
         trust_root,
         artifacts: Artifacts::new(artifacts),
+        metadata: BTreeMap::new(),
         v1_unpacked: Some(Unpacked { entries }),
     }))
 }

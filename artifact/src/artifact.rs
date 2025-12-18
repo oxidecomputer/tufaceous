@@ -37,6 +37,15 @@ impl Artifacts {
         Self::from_iter(iter)
     }
 
+    pub fn len(&self) -> usize {
+        self.inner.values().map(Vec::len).sum()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        debug_assert_eq!(self.len(), 0);
+        self.inner.is_empty()
+    }
+
     pub fn insert(&mut self, artifact: Artifact) {
         self.inner.entry(artifact.known_tags()).or_default().push(artifact);
     }
