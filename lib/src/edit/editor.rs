@@ -300,10 +300,12 @@ impl<'a> RepositoryEditor<'a> {
             KnownArtifactTags::Sp { board } => {
                 let target_name = format!("sp/{name}-{version}.zip");
                 if board.as_str() != name {
-                    // This is likely a lab image. These should not be included
-                    // in the list of artifacts as a control plane should never
-                    // run them, but these should be present in the repository.
-                    // TODO: determine if this is the correct decision
+                    // This is likely a lab image. As of writing these are
+                    // stored in the TUF repo for manufacturing but are
+                    // explicitly ignored by the control plane, as they can
+                    // never be used in an actual rack. The current thinking is
+                    // that they will eventually no longer need to be in the TUF
+                    // repo. Add these as an extra target, not an artifact.
                     self.targets
                         .entry(target_name)
                         .or_default()
