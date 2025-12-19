@@ -483,6 +483,12 @@ impl<'a> RepositoryEditor<'a> {
         Ok(self)
     }
 
+    pub fn remove_target(mut self, target_name: &str) -> Self {
+        self.targets.remove(target_name);
+        self.artifacts.remove(target_name);
+        self
+    }
+
     pub fn fake_artifact(
         mut self,
         target_name: String,
@@ -582,14 +588,11 @@ impl<'a> RepositoryEditor<'a> {
         self
     }
 
-    pub fn from_repo(repo: &'a mut Repository) -> Result<Self, Error> {
+    pub fn from_repo(repo: &'a Repository) -> Result<Self, Error> {
         Self::new(repo.system_version().clone()).import_repo(repo)
     }
 
-    pub fn import_repo(
-        mut self,
-        repo: &'a mut Repository,
-    ) -> Result<Self, Error> {
+    pub fn import_repo(mut self, repo: &'a Repository) -> Result<Self, Error> {
         if repo.is_v1() {
             return Err(ErrorKind::ImportV1Repo.into());
         }

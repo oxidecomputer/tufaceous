@@ -3,6 +3,9 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 mod build;
+mod edit;
+mod list_targets;
+mod show_target;
 mod sign;
 
 use std::sync::LazyLock;
@@ -12,7 +15,7 @@ use clap::Parser;
 use slog::Drain;
 use slog::Logger;
 
-static _LOG: LazyLock<Logger> = LazyLock::new(|| {
+static LOG: LazyLock<Logger> = LazyLock::new(|| {
     let stderr_decorator = slog_term::TermDecorator::new().build();
     let stderr_drain =
         slog_term::FullFormat::new(stderr_decorator).build().fuse();
@@ -31,6 +34,11 @@ static _LOG: LazyLock<Logger> = LazyLock::new(|| {
 #[derive(Debug, Parser)]
 enum Command {
     Build(build::Args),
+    Edit(edit::Args),
+    #[clap(alias = "ls")]
+    ListTargets(list_targets::Args),
+    #[clap(aliases = ["cat", "show"])]
+    ShowTarget(show_target::Args),
 }
 
 #[tokio::main]
@@ -38,5 +46,8 @@ async fn main() -> Result<()> {
     let args = Command::parse();
     match args {
         Command::Build(args) => args.run().await,
+        Command::Edit(args) => args.run().await,
+        Command::ListTargets(args) => args.run().await,
+        Command::ShowTarget(args) => args.run().await,
     }
 }

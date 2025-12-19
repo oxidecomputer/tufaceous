@@ -15,6 +15,7 @@ camino.workspace = true
 chrono.workspace = true
 clap.workspace = true
 fs-err = { workspace = true, features = ["tokio"] }
+futures-util.workspace = true
 semver.workspace = true
 slog.workspace = true
 slog-async.workspace = true

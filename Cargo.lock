@@ -2875,6 +2875,7 @@ dependencies = [
  "chrono",
  "clap",
  "fs-err",
+ "futures-util",
  "semver",
  "slog",
  "slog-async",
