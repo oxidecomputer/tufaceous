@@ -6,11 +6,13 @@ mod artifact;
 mod hash;
 pub mod hubris;
 mod installinator;
+mod sign;
 mod tags;
 mod version;
 
 pub use artifact::*;
 pub use hash::*;
 pub use installinator::*;
+pub use sign::*;
 pub use tags::*;
 pub use version::*;

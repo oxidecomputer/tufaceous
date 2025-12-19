@@ -132,6 +132,10 @@ pub enum ErrorKind {
 
     #[error(transparent)]
     ArtifactVersion(#[from] tufaceous_artifact::ArtifactVersionError),
+    #[error("failed to read {path} as CoRIM")]
+    Corim { source: ciborium::de::Error<std::io::Error>, path: Utf8PathBuf },
+    #[error("failed to guess what kind of artifact {path} is")]
+    GuessArtifact { path: Utf8PathBuf },
     #[error("target name collision on {target_name}")]
     TargetNameCollision { target_name: String },
     #[error("failed to serialize artifacts document")]

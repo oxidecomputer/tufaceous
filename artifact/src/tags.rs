@@ -9,6 +9,7 @@ use serde::Serialize;
 use serde::de::value::MapDeserializer;
 
 use crate::InstallinatorArtifactKind;
+use crate::Sign;
 
 /// Sets of artifact tags known to the control plane.
 #[derive(
@@ -41,8 +42,8 @@ pub enum KnownArtifactTags {
         /// For unsigned images this will not be present; this will generally
         /// never occur in release repos but can be useful on hardware that has
         /// not fully made it through manufacturing yet.
-        #[serde(skip_serializing_if = "Option::is_none")]
-        sign: Option<String>,
+        #[serde(skip_serializing_if = "Sign::is_unsigned")]
+        sign: Sign,
         /// ROT images are compiled for two different locations in flash; this
         /// identifies which slot this image belongs to.
         slot: RotSlot,
@@ -58,8 +59,8 @@ pub enum KnownArtifactTags {
         /// For unsigned images this will not be present; this will generally
         /// never occur in release repos but can be useful on hardware that has
         /// not fully made it through manufacturing yet.
-        #[serde(skip_serializing_if = "Option::is_none")]
-        sign: Option<String>,
+        #[serde(skip_serializing_if = "Sign::is_unsigned")]
+        sign: Sign,
     },
 
     /// Hubris archive for a Service Processor image.
@@ -182,6 +183,7 @@ display_serialize!(OsBoard);
     Serialize,
 )]
 #[cfg_attr(any(test, feature = "proptest"), derive(test_strategy::Arbitrary))]
+#[serde(rename_all = "kebab-case")]
 pub enum RotSlot {
     A,
     B,

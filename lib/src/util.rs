@@ -32,10 +32,7 @@ pub(crate) async fn read_zone_layer_info<R: Read + Send + 'static>(
     .await?
 }
 
-pub(crate) async fn read_dir(
-    path: impl Into<Utf8PathBuf>,
-) -> Result<ReadDir, Error> {
-    let path = path.into();
+pub(crate) async fn read_dir(path: Utf8PathBuf) -> Result<ReadDir, Error> {
     match tokio::fs::read_dir(&path).await {
         Ok(inner) => Ok(ReadDir { inner, path }),
         Err(source) => Err(ErrorKind::ReadDir { source, path }.into()),
@@ -79,10 +76,6 @@ impl DirEntry {
 
     pub(crate) fn path(&self) -> &Utf8Path {
         &self.path
-    }
-
-    pub(crate) fn into_path(self) -> Utf8PathBuf {
-        self.path
     }
 
     pub(crate) fn file_name(&self) -> &str {

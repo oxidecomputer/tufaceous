@@ -72,7 +72,7 @@ impl RepositoryLoader {
     }
 
     /// Add a trusted root role to the trust store.
-    pub fn trust_root(mut self, trust_root: impl AsRef<str>) -> Self {
+    pub fn trust_root(mut self, trust_root: impl AsRef<[u8]>) -> Self {
         self.trust_roots.push(trust_root.as_ref().into());
         self
     }
@@ -127,7 +127,7 @@ impl RepositoryLoader {
     /// Load a Tufaceous-generated ZIP archive from a file.
     pub async fn load_zip_file(
         self,
-        archive_path: impl Into<Utf8PathBuf>,
+        archive_path: Utf8PathBuf,
         log: &Logger,
     ) -> Result<Repository, Error> {
         let transport = ZipTransport::from_file(archive_path, log).await?;

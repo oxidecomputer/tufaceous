@@ -178,8 +178,9 @@ impl<'a> UnsignedRepository<'a> {
         while let Some(entry) = read_dir.try_next().await? {
             // This is opening a file within the tempdir that is about to be
             // deleted. This is expected to be fine.
-            let source =
-                TargetSource::File(FileSource::open(entry.path()).await?);
+            let source = TargetSource::File(
+                FileSource::open(entry.path().to_owned()).await?,
+            );
             sources.insert(
                 (FilePrefix::Metadata, entry.file_name().into()),
                 source,
@@ -273,6 +274,17 @@ fn deflate_heuristic(buf: &[u8]) -> Compression {
     } else if buf.starts_with(b"\x1f\x8b") {
         // gzip, e.g. illumos zone tarball
         Compression::none()
+    } else if buf.starts_with(b"\x78")
+        && let [x, y] = &buf[..2]
+        && u16::from_be_bytes([*x, *y]) % 31 == 0
+    {
+        // zlib
+        if y & 0xc0 == 0 {
+            // compression level 0
+            Compression::best()
+        } else {
+            Compression::none()
+        }
     } else if buf.starts_with(b"PK\x03\x04") {
         // ZIP archive, e.g. hubris archive. not necessarily compressed based on
         // this heuristic alone but in our case it's very likely.

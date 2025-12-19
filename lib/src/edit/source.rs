@@ -90,15 +90,12 @@ impl BytesSource {
 #[derive(Debug)]
 pub(crate) struct FileSource {
     file: File,
-    path: Utf8PathBuf,
+    pub(crate) path: Utf8PathBuf,
     length_sha256: Option<(u64, ArtifactHash)>,
 }
 
 impl FileSource {
-    pub(crate) async fn open(
-        path: impl Into<Utf8PathBuf>,
-    ) -> Result<Self, Error> {
-        let path = path.into();
+    pub(crate) async fn open(path: Utf8PathBuf) -> Result<Self, Error> {
         let file = File::open(&path).await.map_err(|source| {
             ErrorKind::OpenFile { source, path: path.clone() }
         })?;
@@ -109,7 +106,21 @@ impl FileSource {
         Self { file, path, length_sha256: None }
     }
 
-    async fn read(
+    pub(crate) async fn into_target(
+        mut self,
+    ) -> Result<Target<'static>, Error> {
+        let (length, sha256) = match self.length_sha256 {
+            Some(inner) => inner,
+            None => self.read_impl(None).await?,
+        };
+        Ok(Target {
+            length,
+            sha256: sha256.0.to_vec(),
+            source: TargetSource::File(self),
+        })
+    }
+
+    async fn read_impl(
         &mut self,
         mut vec: Option<&mut Vec<u8>>,
     ) -> Result<(u64, ArtifactHash), Error> {
@@ -131,31 +142,38 @@ impl FileSource {
         Ok(*self.length_sha256.insert((length, sha256)))
     }
 
-    pub(crate) async fn into_target(
-        mut self,
-    ) -> Result<Target<'static>, Error> {
-        let (length, sha256) = match self.length_sha256 {
+    pub(crate) async fn sha256(&mut self) -> Result<ArtifactHash, Error> {
+        let (_, sha256) = match self.length_sha256 {
             Some(inner) => inner,
-            None => self.read(None).await?,
+            None => self.read_impl(None).await?,
         };
-        Ok(Target {
-            length,
-            sha256: sha256.0.to_vec(),
-            source: TargetSource::File(self),
-        })
+        Ok(sha256)
+    }
+
+    pub(crate) async fn read_to_end(&mut self) -> Result<Vec<u8>, Error> {
+        let mut vec = Vec::new();
+        self.read_impl(Some(&mut vec)).await?;
+        Ok(vec)
+    }
+
+    pub(crate) async fn read_hubris_archive(
+        &mut self,
+    ) -> Result<RawHubrisArchive, Error> {
+        RawHubrisArchive::from_vec(self.read_to_end().await?).map_err(
+            |source| {
+                ErrorKind::ReadHubrisArchive { source, path: self.path.clone() }
+                    .into()
+            },
+        )
     }
 
     pub(crate) async fn read_hubris_caboose(
         &mut self,
     ) -> Result<Caboose, Error> {
-        let mut image = Vec::new();
-        self.read(Some(&mut image)).await?;
-        RawHubrisArchive::from_vec(image)
-            .and_then(|image| image.read_caboose())
-            .map_err(|source| {
-                ErrorKind::ReadHubrisArchive { source, path: self.path.clone() }
-                    .into()
-            })
+        self.read_hubris_archive().await?.read_caboose().map_err(|source| {
+            ErrorKind::ReadHubrisArchive { source, path: self.path.clone() }
+                .into()
+        })
     }
 
     pub(crate) fn stream(

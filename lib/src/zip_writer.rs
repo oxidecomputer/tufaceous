@@ -8,6 +8,7 @@ use atomicwrites::AtomicFile;
 use atomicwrites::OverwriteBehavior;
 use bytes::Bytes;
 use camino::Utf8Path;
+use camino::Utf8PathBuf;
 use flate2::Compression;
 use flate2::write::DeflateEncoder;
 use rawzip::CompressionMethod;
@@ -31,9 +32,8 @@ impl<W: Write + Send + 'static> ZipWriter<W> {
 }
 
 impl ZipWriter<()> {
-    pub(crate) fn create(path: impl AsRef<Utf8Path>) -> Self {
-        let file =
-            AtomicFile::new(path.as_ref(), OverwriteBehavior::AllowOverwrite);
+    pub(crate) fn create(path: &Utf8Path) -> Self {
+        let file = AtomicFile::new(path, OverwriteBehavior::AllowOverwrite);
         let (file_tx, file_rx) = mpsc::channel(1);
         let task = tokio::task::spawn_blocking(move || {
             file.write(|file| write_task(file, file_rx).map(|_| ())).map_err(
@@ -50,7 +50,7 @@ impl ZipWriter<()> {
 impl<W> ZipWriter<W> {
     pub(crate) fn new_file(
         &mut self,
-        name: impl Into<String>,
+        name: Utf8PathBuf,
     ) -> ZipFileBuilder<'_, W> {
         let (bytes_tx, bytes_rx) = mpsc::channel(1);
         ZipFileBuilder {

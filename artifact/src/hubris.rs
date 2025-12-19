@@ -9,6 +9,7 @@ use hubtools::CabooseError;
 
 use crate::KnownArtifactTags;
 use crate::RotSlot;
+use crate::Sign;
 
 impl KnownArtifactTags {
     pub fn from_rot_caboose(
@@ -17,7 +18,7 @@ impl KnownArtifactTags {
     ) -> Result<Self, ReadCabooseError> {
         Ok(KnownArtifactTags::Rot {
             board: read_board(caboose)?,
-            sign: read_sign(caboose)?,
+            sign: Sign(read_sign(caboose)?),
             slot,
         })
     }
@@ -27,7 +28,7 @@ impl KnownArtifactTags {
     ) -> Result<Self, ReadCabooseError> {
         Ok(KnownArtifactTags::RotBootloader {
             board: read_board(caboose)?,
-            sign: read_sign(caboose)?,
+            sign: Sign(read_sign(caboose)?),
         })
     }
 
@@ -56,6 +57,10 @@ fn read_sign(caboose: &Caboose) -> Result<Option<String>, ReadCabooseError> {
         Err(CabooseError::MissingTag { .. }) => Ok(None),
         Err(error) => Err(error.into()),
     }
+}
+
+pub fn read_name(caboose: &Caboose) -> Result<&str, ReadCabooseError> {
+    utf8(caboose.name()?, "NAME")
 }
 
 pub fn read_version(caboose: &Caboose) -> Result<&str, ReadCabooseError> {

@@ -96,10 +96,9 @@ impl<T: AsRef<[u8]> + Debug + Send + Sync + 'static> ZipTransport<Cursor<T>> {
 
 impl ZipTransport<FileReader> {
     pub async fn from_file(
-        archive_path: impl Into<Utf8PathBuf>,
+        archive_path: Utf8PathBuf,
         log: &Logger,
     ) -> Result<Self, Error> {
-        let archive_path = archive_path.into();
         let log = log.clone();
         tokio::task::spawn_blocking(move || {
             let archive_path = archive_path;

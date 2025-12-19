@@ -28,13 +28,14 @@ pub struct InstallinatorDocument {
 pub struct InstallinatorArtifact {
     /// A file name; not necessarily the target name.
     pub name: String,
+    #[serde(flatten)]
     pub kind: InstallinatorArtifactKind,
     pub sha256: ArtifactHash,
 }
 
 /// The artifact kind for an installinator artifact.
 #[derive(Debug, Clone, Deserialize, Serialize)]
-#[serde(rename_all = "snake_case")]
+#[serde(tag = "kind", rename_all = "kebab-case")]
 pub enum InstallinatorArtifactKind {
     /// A measurement corpus.
     MeasurementCorpus,
