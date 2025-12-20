@@ -4,6 +4,7 @@
 
 use std::collections::BTreeMap;
 use std::collections::HashMap;
+use std::collections::HashSet;
 use std::collections::hash_map::IntoValues;
 use std::collections::hash_map::Values;
 use std::iter::Flatten;
@@ -12,7 +13,7 @@ use crate::ArtifactHash;
 use crate::ArtifactVersion;
 use crate::KnownArtifactTags;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Artifact {
     pub target_name: String,
     pub version: ArtifactVersion,
@@ -27,9 +28,9 @@ impl Artifact {
     }
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Artifacts {
-    inner: HashMap<Option<KnownArtifactTags>, Vec<Artifact>>,
+    inner: HashMap<Option<KnownArtifactTags>, HashSet<Artifact>>,
 }
 
 impl Artifacts {
@@ -38,7 +39,7 @@ impl Artifacts {
     }
 
     pub fn len(&self) -> usize {
-        self.inner.values().map(Vec::len).sum()
+        self.inner.values().map(HashSet::len).sum()
     }
 
     pub fn is_empty(&self) -> bool {
@@ -47,16 +48,25 @@ impl Artifacts {
     }
 
     pub fn insert(&mut self, artifact: Artifact) {
-        self.inner.entry(artifact.known_tags()).or_default().push(artifact);
+        self.inner.entry(artifact.known_tags()).or_default().insert(artifact);
     }
 
     pub fn get(&self, tags: KnownArtifactTags) -> Result<&Artifact, GetError> {
         let vec = self.inner.get(&Some(tags)).ok_or(GetError::NotFound)?;
-        if vec.len() == 1 { Ok(&vec[0]) } else { Err(GetError::TooMany) }
+        if vec.len() == 1
+            && let Some(artifact) = vec.iter().next()
+        {
+            Ok(artifact)
+        } else {
+            Err(GetError::TooMany)
+        }
     }
 
-    pub fn get_all(&self, tags: KnownArtifactTags) -> &[Artifact] {
-        self.inner.get(&Some(tags)).map(Vec::as_slice).unwrap_or_default()
+    pub fn get_all(
+        &self,
+        tags: KnownArtifactTags,
+    ) -> impl Iterator<Item = &Artifact> {
+        self.inner.get(&Some(tags)).map(HashSet::iter).unwrap_or_default()
     }
 
     pub fn iter(&self) -> Iter<'_> {
@@ -100,7 +110,7 @@ impl<'a> IntoIterator for &'a Artifacts {
 
 #[derive(Debug)]
 pub struct IntoIter {
-    inner: Flatten<IntoValues<Option<KnownArtifactTags>, Vec<Artifact>>>,
+    inner: Flatten<IntoValues<Option<KnownArtifactTags>, HashSet<Artifact>>>,
 }
 
 impl Iterator for IntoIter {
@@ -113,7 +123,7 @@ impl Iterator for IntoIter {
 
 #[derive(Debug, Clone)]
 pub struct Iter<'a> {
-    inner: Flatten<Values<'a, Option<KnownArtifactTags>, Vec<Artifact>>>,
+    inner: Flatten<Values<'a, Option<KnownArtifactTags>, HashSet<Artifact>>>,
 }
 
 impl<'a> Iterator for Iter<'a> {
