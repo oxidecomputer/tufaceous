@@ -18,7 +18,7 @@ use crate::Sign;
 #[cfg_attr(any(test, feature = "proptest"), derive(test_strategy::Arbitrary))]
 #[serde(tag = "kind", rename_all = "kebab-case")]
 pub enum KnownArtifactTags {
-    /// JSON document describing the artifacts installinator is responsible for
+    /// JSON document describing the artifacts Installinator is responsible for
     /// writing during mupdate and sled recovery.
     InstallinatorDocument {},
 
@@ -110,7 +110,9 @@ impl KnownArtifactTags {
                 Some(InstallinatorArtifactKind::HostPhase2)
             }
             KnownArtifactTags::Zone { name } => {
-                Some(InstallinatorArtifactKind::Zone { name: name.clone() })
+                Some(InstallinatorArtifactKind::Zone {
+                    zone_name: name.clone(),
+                })
             }
             _ => None,
         }

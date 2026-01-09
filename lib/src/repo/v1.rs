@@ -79,8 +79,7 @@ pub(crate) async fn from_loaded(
                 continue;
             }
         };
-        let Some((sha256, length)) =
-            sha256_length(&repo, log, &artifact.target)
+        let Some((hash, length)) = sha256_length(&repo, log, &artifact.target)
         else {
             continue;
         };
@@ -109,7 +108,7 @@ pub(crate) async fn from_loaded(
                     target_name: artifact.target,
                     version: artifact.version,
                     tags: tags.to_tags(),
-                    sha256,
+                    hash,
                     length,
                 });
             }
@@ -137,7 +136,7 @@ pub(crate) async fn from_loaded(
                     target_name: artifact.target,
                     version: artifact.version,
                     tags: tags.to_tags(),
-                    sha256,
+                    hash,
                     length,
                 });
             }
@@ -149,7 +148,7 @@ pub(crate) async fn from_loaded(
                 let unpacked =
                     CompositeArtifact::unpack(&repo, &target).await?;
                 for (tar_path, inner) in unpacked.entries {
-                    let UnpackedArtifact { file, sha256, length } = inner;
+                    let UnpackedArtifact { file, hash, length } = inner;
                     let slot = match tar_path.as_ref() {
                         "archive-a.zip" => RotSlot::A,
                         "archive-b.zip" => RotSlot::B,
@@ -182,13 +181,13 @@ pub(crate) async fn from_loaded(
                     let target_name = format!("{}/{tar_path}", artifact.target);
                     entries.insert(
                         target_name.clone(),
-                        UnpackedArtifact { file, sha256, length },
+                        UnpackedArtifact { file, hash, length },
                     );
                     artifacts.insert(Artifact {
                         target_name,
                         version: artifact.version.clone(),
                         tags: tags.to_tags(),
-                        sha256,
+                        hash,
                         length,
                     });
                 }
@@ -218,7 +217,7 @@ pub(crate) async fn from_loaded(
                     target_name: artifact.target,
                     version: artifact.version,
                     tags: KnownArtifactTags::InstallinatorDocument {}.to_tags(),
-                    sha256,
+                    hash,
                     length,
                 });
             }
@@ -227,7 +226,7 @@ pub(crate) async fn from_loaded(
                 let unpacked =
                     CompositeArtifact::unpack(&repo, &artifact.target).await?;
                 for (tar_path, inner) in unpacked.entries {
-                    let UnpackedArtifact { file, sha256, length } = inner;
+                    let UnpackedArtifact { file, hash, length } = inner;
                     if tar_path.starts_with("zones/") {
                         let path = tar_path.to_string();
                         let (file, layer_info) =
@@ -241,7 +240,7 @@ pub(crate) async fn from_loaded(
                             format!("{}/{tar_path}", artifact.target);
                         entries.insert(
                             target_name.clone(),
-                            UnpackedArtifact { file, sha256, length },
+                            UnpackedArtifact { file, hash, length },
                         );
                         artifacts.insert(Artifact {
                             target_name,
@@ -250,7 +249,7 @@ pub(crate) async fn from_loaded(
                                 name: layer_info.pkg,
                             }
                             .to_tags(),
-                            sha256,
+                            hash,
                             length,
                         });
                     }
@@ -262,7 +261,7 @@ pub(crate) async fn from_loaded(
                     target_name: artifact.target,
                     version: artifact.version,
                     tags: KnownArtifactTags::MeasurementCorpus {}.to_tags(),
-                    sha256,
+                    hash,
                     length,
                 });
             }
@@ -282,7 +281,7 @@ pub(crate) async fn from_loaded(
 #[derive(Debug, Clone)]
 pub(crate) struct UnpackedArtifact {
     file: Arc<FileReader>,
-    sha256: ArtifactHash,
+    hash: ArtifactHash,
     length: u64,
 }
 
@@ -306,7 +305,7 @@ impl UnpackedArtifact {
                 .await??;
                 let bytes = buf.split().freeze();
                 if bytes.is_empty() {
-                    let msg = if self.sha256
+                    let msg = if self.hash
                         != ArtifactHash(hasher.finalize().into())
                     {
                         "invalid checksum"
@@ -387,8 +386,8 @@ impl CompositeArtifact {
                     length += u64::try_from(n).unwrap();
                 }
                 let file = Arc::new(file.into());
-                let sha256 = ArtifactHash(hasher.finalize().into());
-                entries.insert(path, UnpackedArtifact { file, sha256, length });
+                let hash = ArtifactHash(hasher.finalize().into());
+                entries.insert(path, UnpackedArtifact { file, hash, length });
             }
             Ok(Self { entries })
         });
@@ -422,7 +421,7 @@ fn unpack_os(
             target_name: target_name.clone(),
             version: artifact.version.clone(),
             tags: tags.to_tags(),
-            sha256: inner.sha256,
+            hash: inner.hash,
             length: inner.length,
         });
         entries.insert(target_name, inner);

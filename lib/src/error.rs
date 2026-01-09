@@ -140,7 +140,7 @@ pub enum ErrorKind {
     TargetNameCollision { target_name: String },
     #[error("failed to serialize artifacts document")]
     SerializeArtifacts(#[source] serde_json::Error),
-    #[error("failed to serialize installinator document")]
+    #[error("failed to serialize Installinator document")]
     SerializeInstallinator(#[source] serde_json::Error),
     #[error("no root provided to sign repository")]
     NoSigningRoot,

@@ -3,22 +3,26 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use std::collections::BTreeMap;
-use std::collections::HashMap;
-use std::collections::HashSet;
-use std::collections::hash_map::IntoValues;
-use std::collections::hash_map::Values;
+use std::collections::BTreeSet;
+use std::collections::btree_map::IntoValues;
+use std::collections::btree_map::Values;
 use std::iter::Flatten;
+
+use serde::Deserialize;
+use serde::Serialize;
 
 use crate::ArtifactHash;
 use crate::ArtifactVersion;
 use crate::KnownArtifactTags;
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(
+    Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Deserialize, Serialize,
+)]
 pub struct Artifact {
     pub target_name: String,
     pub version: ArtifactVersion,
     pub tags: BTreeMap<String, String>,
-    pub sha256: ArtifactHash,
+    pub hash: ArtifactHash,
     pub length: u64,
 }
 
@@ -30,7 +34,7 @@ impl Artifact {
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Artifacts {
-    inner: HashMap<Option<KnownArtifactTags>, HashSet<Artifact>>,
+    inner: BTreeMap<Option<KnownArtifactTags>, BTreeSet<Artifact>>,
 }
 
 impl Artifacts {
@@ -39,7 +43,7 @@ impl Artifacts {
     }
 
     pub fn len(&self) -> usize {
-        self.inner.values().map(HashSet::len).sum()
+        self.inner.values().map(BTreeSet::len).sum()
     }
 
     pub fn is_empty(&self) -> bool {
@@ -54,7 +58,7 @@ impl Artifacts {
     pub fn get(&self, tags: KnownArtifactTags) -> Result<&Artifact, GetError> {
         let vec = self.inner.get(&Some(tags)).ok_or(GetError::NotFound)?;
         if vec.len() == 1
-            && let Some(artifact) = vec.iter().next()
+            && let Some(artifact) = vec.first()
         {
             Ok(artifact)
         } else {
@@ -66,7 +70,7 @@ impl Artifacts {
         &self,
         tags: KnownArtifactTags,
     ) -> impl Iterator<Item = &Artifact> {
-        self.inner.get(&Some(tags)).map(HashSet::iter).unwrap_or_default()
+        self.inner.get(&Some(tags)).map(BTreeSet::iter).unwrap_or_default()
     }
 
     pub fn iter(&self) -> Iter<'_> {
@@ -108,9 +112,47 @@ impl<'a> IntoIterator for &'a Artifacts {
     }
 }
 
+impl<'de> Deserialize<'de> for Artifacts {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        struct Visitor;
+
+        impl<'de> serde::de::Visitor<'de> for Visitor {
+            type Value = Artifacts;
+
+            fn expecting(
+                &self,
+                f: &mut std::fmt::Formatter,
+            ) -> std::fmt::Result {
+                write!(f, "a sequence")
+            }
+
+            fn visit_seq<A>(self, mut seq: A) -> Result<Artifacts, A::Error>
+            where
+                A: serde::de::SeqAccess<'de>,
+            {
+                std::iter::from_fn(|| seq.next_element().transpose()).collect()
+            }
+        }
+
+        deserializer.deserialize_seq(Visitor)
+    }
+}
+
+impl Serialize for Artifacts {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.collect_seq(self.iter())
+    }
+}
+
 #[derive(Debug)]
 pub struct IntoIter {
-    inner: Flatten<IntoValues<Option<KnownArtifactTags>, HashSet<Artifact>>>,
+    inner: Flatten<IntoValues<Option<KnownArtifactTags>, BTreeSet<Artifact>>>,
 }
 
 impl Iterator for IntoIter {
@@ -123,7 +165,7 @@ impl Iterator for IntoIter {
 
 #[derive(Debug, Clone)]
 pub struct Iter<'a> {
-    inner: Flatten<Values<'a, Option<KnownArtifactTags>, HashSet<Artifact>>>,
+    inner: Flatten<Values<'a, Option<KnownArtifactTags>, BTreeSet<Artifact>>>,
 }
 
 impl<'a> Iterator for Iter<'a> {

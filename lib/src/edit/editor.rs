@@ -710,7 +710,7 @@ impl<'a> RepositoryEditor<'a> {
                     && let Ok(sha256) = target.sha256.as_slice().try_into()
                 {
                     document.artifacts.push(InstallinatorArtifact {
-                        name: file_name.to_owned(),
+                        file_name: file_name.to_owned(),
                         kind,
                         sha256,
                     });

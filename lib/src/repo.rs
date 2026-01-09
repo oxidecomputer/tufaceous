@@ -69,8 +69,8 @@ impl Repository {
         let artifacts = artifacts
             .into_iter()
             .filter_map(|ArtifactSchema { target_name, version, tags }| {
-                let (sha256, length) = sha256_length(&repo, log, &target_name)?;
-                Some(Artifact { target_name, version, tags, sha256, length })
+                let (hash, length) = sha256_length(&repo, log, &target_name)?;
+                Some(Artifact { target_name, version, tags, hash, length })
             })
             .collect();
         Ok(Repository {
