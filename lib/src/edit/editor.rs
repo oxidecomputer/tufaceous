@@ -40,6 +40,7 @@ use crate::edit::source::Target;
 use crate::edit::source::TargetSource;
 use crate::error::Error;
 use crate::error::ErrorKind;
+use crate::error::try_path;
 use crate::schema::ArtifactSchema;
 use crate::schema::ArtifactsSchema;
 
@@ -101,9 +102,11 @@ impl<'a> RepositoryEditor<'a> {
             Some(corim) => corim,
             None => {
                 let vec = source.read_to_end().await?;
-                ciborium::from_reader(vec.as_slice()).map_err(|s| {
-                    ErrorKind::Corim { source: s, path: source.path.clone() }
-                })?
+                try_path!(
+                    ciborium::from_reader(vec.as_slice()),
+                    Corim,
+                    source.path
+                )
             }
         };
         let sha256 = source.sha256().await?;
@@ -178,37 +181,30 @@ impl<'a> RepositoryEditor<'a> {
         let tarball_path = output_dir.join("os.tar.gz");
         let metadata_sources = tokio::task::spawn_blocking(move || {
             let mut sources = Vec::new();
-            let file =
-                std::fs::File::open(&tarball_path).map_err(|source| {
-                    ErrorKind::OpenFile { source, path: tarball_path.clone() }
-                })?;
+            let file = try_path!(
+                std::fs::File::open(&tarball_path),
+                OpenFile,
+                tarball_path
+            );
             let mut archive = tar::Archive::new(GzDecoder::new(file));
-            for entry in archive.entries().map_err(|source| {
-                ErrorKind::ReadFile { source, path: tarball_path.clone() }
-            })? {
-                let mut entry = entry.map_err(|source| {
-                    ErrorKind::ReadFile { source, path: tarball_path.clone() }
-                })?;
+            for entry in try_path!(archive.entries(), ReadFile, tarball_path) {
+                let mut entry = try_path!(entry, ReadFile, tarball_path);
                 if entry.header().entry_type() != tar::EntryType::Regular {
                     continue;
                 }
-                let path = entry
-                    .path()
-                    .and_then(|path| {
+                let path = try_path!(
+                    entry.path().and_then(|path| {
                         Utf8PathBuf::try_from(path.into_owned())
                             .map_err(|error| error.into_io_error())
-                    })
-                    .map_err(|source| ErrorKind::ReadFile {
-                        source,
-                        path: tarball_path.clone(),
-                    })?;
+                    }),
+                    ReadFile,
+                    tarball_path
+                );
                 if path == "image/zfs.img" {
                     break;
                 }
                 let mut vec = Vec::new();
-                entry.read_to_end(&mut vec).map_err(|source| {
-                    ErrorKind::ReadFile { source, path: tarball_path.clone() }
-                })?;
+                try_path!(entry.read_to_end(&mut vec), ReadFile, tarball_path);
                 sources.push((path, vec));
             }
             Ok::<_, Error>(sources)
@@ -368,16 +364,14 @@ impl<'a> RepositoryEditor<'a> {
     pub async fn zone_image(self, path: Utf8PathBuf) -> Result<Self, Error> {
         let cloned_path = path.clone();
         let (file, layer_info) = tokio::task::spawn_blocking(move || {
-            let file = std::fs::File::open(&path).map_err(|source| {
-                ErrorKind::ReadFile { source, path: path.clone() }
-            })?;
+            let file = try_path!(std::fs::File::open(&path), ReadFile, path);
             let mut archive = tar::Archive::new(GzDecoder::new(file));
-            let layer_info = Metadata::read_from_tar(&mut archive)
-                .and_then(|metadata| metadata.layer_info().cloned())
-                .map_err(|source| ErrorKind::ReadZoneOxideJson {
-                    source,
-                    path: path.clone(),
-                })?;
+            let layer_info = try_path!(
+                Metadata::read_from_tar(&mut archive)
+                    .and_then(|metadata| metadata.layer_info().cloned()),
+                ReadZoneOxideJson,
+                path
+            );
             Ok::<_, Error>((archive.into_inner().into_inner(), layer_info))
         })
         .await??;
@@ -417,13 +411,9 @@ impl<'a> RepositoryEditor<'a> {
             return self.os_image_dir(variant, &path).await;
         }
 
-        let mut file = File::open(&path).await.map_err(|source| {
-            ErrorKind::OpenFile { source, path: path.clone() }
-        })?;
+        let mut file = try_path!(File::open(&path).await, OpenFile, path);
         let mut buf = [0; 4096];
-        let n = file.read(&mut buf).await.map_err(|source| {
-            ErrorKind::ReadFile { source, path: path.clone() }
-        })?;
+        let n = try_path!(file.read(&mut buf).await, ReadFile, path);
         if n == 0 {
             // we're not going to try to guess an empty file
             return Err(ErrorKind::GuessArtifact { path }.into());
@@ -751,17 +741,17 @@ impl CabooseData {
     where
         F: FnOnce(&Caboose) -> Result<KnownArtifactTags, ReadCabooseError>,
     {
-        let tags = tag_fn(caboose).map_err(|source| {
-            ErrorKind::ReadCaboose { source, path: path.to_owned() }
-        })?;
-        let name = tufaceous_artifact::hubris::read_name(caboose).map_err(
-            |source| ErrorKind::ReadCaboose { source, path: path.to_owned() },
-        )?;
-        let version = tufaceous_artifact::hubris::read_version(caboose)
-            .map_err(|source| ErrorKind::ReadCaboose {
-                source,
-                path: path.to_owned(),
-            })?;
+        let tags = try_path!(tag_fn(caboose), ReadCaboose, path);
+        let name = try_path!(
+            tufaceous_artifact::hubris::read_name(caboose),
+            ReadCaboose,
+            path
+        );
+        let version = try_path!(
+            tufaceous_artifact::hubris::read_version(caboose),
+            ReadCaboose,
+            path
+        );
         Ok(Self {
             tags,
             name: name.to_owned(),

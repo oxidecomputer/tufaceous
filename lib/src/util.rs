@@ -17,6 +17,7 @@ use tufaceous_brand_metadata::Metadata;
 
 use crate::error::Error;
 use crate::error::ErrorKind;
+use crate::error::try_path;
 
 pub(crate) async fn read_zone_layer_info<R: Read + Send + 'static>(
     reader: R,
@@ -33,10 +34,8 @@ pub(crate) async fn read_zone_layer_info<R: Read + Send + 'static>(
 }
 
 pub(crate) async fn read_dir(path: Utf8PathBuf) -> Result<ReadDir, Error> {
-    match tokio::fs::read_dir(&path).await {
-        Ok(inner) => Ok(ReadDir { inner, path }),
-        Err(source) => Err(ErrorKind::ReadDir { source, path }.into()),
-    }
+    let inner = try_path!(tokio::fs::read_dir(&path).await, ReadDir, path);
+    Ok(ReadDir { inner, path })
 }
 
 pub(crate) struct ReadDir {
@@ -55,7 +54,7 @@ impl Stream for ReadDir {
             result
                 .and_then(|option| option.map(DirEntry::new).transpose())
                 .map_err(|source| {
-                    ErrorKind::ReadDir { source, path: self.path.clone() }
+                    ErrorKind::ReadDir { source, path: Some(self.path.clone()) }
                         .into()
                 })
                 .transpose()

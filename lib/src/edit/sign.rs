@@ -25,6 +25,7 @@ use crate::edit::source::Target;
 use crate::edit::source::TargetSource;
 use crate::error::Error;
 use crate::error::ErrorKind;
+use crate::error::try_path;
 use crate::zip_writer::ZipWriter;
 
 pub(crate) const DEFAULT_VALIDITY: Duration =
@@ -134,9 +135,11 @@ impl<'a> UnsignedRepository<'a> {
         // root role, which is mildly silly; we need to write the root out to a
         // temporary directory so it can read it back in again.
         let root_path = tempdir.path().join("root.json");
-        tokio::fs::write(&root_path, &root).await.map_err(|source| {
-            ErrorKind::WriteFile { source, path: root_path.clone() }
-        })?;
+        try_path!(
+            tokio::fs::write(&root_path, &root).await,
+            WriteFile,
+            root_path
+        );
         let mut editor =
             tough::editor::RepositoryEditor::new(&root_path).await?;
         editor

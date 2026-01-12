@@ -160,10 +160,9 @@ pub(crate) async fn from_loaded(
                         .map(Vec::with_capacity)
                         .unwrap_or_default();
                     let image = tokio::task::spawn_blocking(move || {
-                        reader
-                            .read_to_end(&mut vec)
-                            .map(|_| vec)
-                            .map_err(ErrorKind::ReadTempFile)
+                        reader.read_to_end(&mut vec).map(|_| vec).map_err(
+                            |source| ErrorKind::ReadFile { source, path: None },
+                        )
                     })
                     .await??;
                     let caboose = RawHubrisArchive::from_vec(image)
@@ -296,9 +295,9 @@ impl UnpackedArtifact {
                 buf.resize(buf.capacity(), 0);
                 let file = self.file.clone();
                 let mut buf = tokio::task::spawn_blocking(move || {
-                    let n = file
-                        .read_at(&mut buf, bytes_read)
-                        .map_err(ErrorKind::ReadTempFile)?;
+                    let n = file.read_at(&mut buf, bytes_read).map_err(
+                        |source| ErrorKind::ReadFile { source, path: None },
+                    )?;
                     buf.truncate(n);
                     Ok::<_, Error>(buf)
                 })
@@ -318,7 +317,9 @@ impl UnpackedArtifact {
                         std::io::ErrorKind::InvalidData,
                         msg,
                     );
-                    return Err(ErrorKind::ReadTempFile(source).into());
+                    return Err(
+                        ErrorKind::ReadFile { source, path: None }.into()
+                    );
                 }
                 hasher.update(&bytes);
                 bytes_read += u64::try_from(bytes.len()).unwrap();
@@ -380,8 +381,9 @@ impl CompositeArtifact {
                     }
                 })? && n > 0
                 {
-                    file.write_all(&buf[..n])
-                        .map_err(ErrorKind::WriteTempFile)?;
+                    file.write_all(&buf[..n]).map_err(|source| {
+                        ErrorKind::WriteFile { source, path: None }
+                    })?;
                     hasher.update(&buf[..n]);
                     length += u64::try_from(n).unwrap();
                 }

@@ -84,25 +84,20 @@ pub enum ErrorKind {
         archive_path: Option<Utf8PathBuf>,
     },
 
-    #[error("failed to open file {path}")]
-    OpenFile { source: std::io::Error, path: Utf8PathBuf },
-    #[error("failed to read from file {path}")]
-    ReadFile { source: std::io::Error, path: Utf8PathBuf },
-    #[error("failed to write to file {path}")]
-    WriteFile { source: std::io::Error, path: Utf8PathBuf },
-    #[error("failed to seek in file {path}")]
-    SeekFile { source: std::io::Error, path: Utf8PathBuf },
-    #[error("failed to read directory {path}")]
-    ReadDir { source: std::io::Error, path: Utf8PathBuf },
-
-    #[error("failed to create temporary file")]
-    CreateTempFile(#[source] std::io::Error),
-    #[error("failed to read from temporary file")]
-    ReadTempFile(#[source] std::io::Error),
-    #[error("failed to write to temporary file")]
-    WriteTempFile(#[source] std::io::Error),
     #[error("failed to create temporary directory")]
     CreateTempDir(#[source] std::io::Error),
+    #[error("failed to create temporary file")]
+    CreateTempFile(#[source] std::io::Error),
+    #[error("failed to open file{path}", path = SpacePath(path))]
+    OpenFile { source: std::io::Error, path: Option<Utf8PathBuf> },
+    #[error("failed to read directory{path}", path = SpacePath(path))]
+    ReadDir { source: std::io::Error, path: Option<Utf8PathBuf> },
+    #[error("failed to read from file{path}", path = SpacePath(path))]
+    ReadFile { source: std::io::Error, path: Option<Utf8PathBuf> },
+    #[error("failed to seek in file{path}", path = SpacePath(path))]
+    SeekFile { source: std::io::Error, path: Option<Utf8PathBuf> },
+    #[error("failed to write to file{path}", path = SpacePath(path))]
+    WriteFile { source: std::io::Error, path: Option<Utf8PathBuf> },
 
     #[error("failed to read hubris archive {path}")]
     ReadHubrisArchive { source: hubtools::Error, path: Utf8PathBuf },
@@ -190,6 +185,21 @@ impl Debug for DebugByteString<'_> {
     }
 }
 
+macro_rules! try_path {
+    ($result:expr, $kind:ident, $path:expr) => {
+        match $result {
+            Ok(value) => value,
+            Err(source) => {
+                return Err(
+                    ErrorKind::$kind { source, path: $path.into() }.into()
+                )
+            }
+        }
+    };
+}
+
+pub(crate) use try_path;
+
 #[cfg(test)]
 mod tests {
     use std::error::Error as _;
@@ -202,7 +212,7 @@ mod tests {
     fn error_display_chain_doesnt_repeat() {
         let err = Error::from(ErrorKind::OpenFile {
             source: std::io::Error::from(std::io::ErrorKind::NotFound),
-            path: "/nowhere/in/particular".into(),
+            path: Some("/nowhere/in/particular".into()),
         });
         let mut chain = err.to_string();
         let mut source = err.source();

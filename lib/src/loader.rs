@@ -7,6 +7,8 @@ use std::fmt::Debug;
 use camino::Utf8PathBuf;
 use futures_util::TryStreamExt;
 use slog::Logger;
+pub use tough::ExpirationEnforcement;
+pub use tough::Limits;
 use url::Url;
 
 use crate::Repository;
@@ -31,8 +33,8 @@ pub enum TrustStoreBehavior {
 
 #[derive(Debug, Clone, Default)]
 pub struct RepositoryLoader {
-    expiration_enforcement: tough::ExpirationEnforcement,
-    limits: tough::Limits,
+    expiration_enforcement: ExpirationEnforcement,
+    limits: Limits,
     metadata_base_url: Option<Url>,
     targets_base_url: Option<Url>,
     trust_roots: Vec<Vec<u8>>,
@@ -51,13 +53,13 @@ impl RepositoryLoader {
     /// Set whether metadata expiration times are enforced.
     pub fn expiration_enforcement(
         self,
-        expiration_enforcement: tough::ExpirationEnforcement,
+        expiration_enforcement: ExpirationEnforcement,
     ) -> Self {
         Self { expiration_enforcement, ..self }
     }
 
     /// Set limits used while fetching repository metadata.
-    pub fn limits(self, limits: tough::Limits) -> Self {
+    pub fn limits(self, limits: Limits) -> Self {
         Self { limits, ..self }
     }
 
@@ -124,13 +126,27 @@ impl RepositoryLoader {
         self.zip_base_urls().load(transport, log).await
     }
 
-    /// Load a Tufaceous-generated ZIP archive from a file.
-    pub async fn load_zip_file(
+    /// Load a Tufaceous-generated ZIP archive from a file path.
+    pub async fn load_zip_path(
         self,
         archive_path: Utf8PathBuf,
         log: &Logger,
     ) -> Result<Repository, Error> {
-        let transport = ZipTransport::from_file(archive_path, log).await?;
+        let transport = ZipTransport::from_path(archive_path, log).await?;
+        self.zip_base_urls().load(transport, log).await
+    }
+
+    /// Load a Tufaceous-generated ZIP archive from an opened file.
+    ///
+    /// `archive_path` is used in errors, if available.
+    pub async fn load_zip_file(
+        self,
+        file: std::fs::File,
+        archive_path: Option<Utf8PathBuf>,
+        log: &Logger,
+    ) -> Result<Repository, Error> {
+        let transport =
+            ZipTransport::from_file(file, archive_path, log).await?;
         self.zip_base_urls().load(transport, log).await
     }
 

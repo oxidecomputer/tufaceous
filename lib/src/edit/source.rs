@@ -24,6 +24,7 @@ use tufaceous_artifact::ArtifactHash;
 use crate::Repository;
 use crate::error::Error;
 use crate::error::ErrorKind;
+use crate::error::try_path;
 
 #[derive(Debug)]
 pub(crate) struct Target<'a> {
@@ -96,9 +97,7 @@ pub(crate) struct FileSource {
 
 impl FileSource {
     pub(crate) async fn open(path: Utf8PathBuf) -> Result<Self, Error> {
-        let file = File::open(&path).await.map_err(|source| {
-            ErrorKind::OpenFile { source, path: path.clone() }
-        })?;
+        let file = try_path!(File::open(&path).await, OpenFile, path);
         Ok(Self::from_file(file, path))
     }
 
@@ -180,18 +179,15 @@ impl FileSource {
         &mut self,
     ) -> impl Stream<Item = Result<Bytes, Error>> {
         stream::once(async {
-            if let Err(source) = self.file.rewind().await {
-                return Err(Error::from(ErrorKind::SeekFile {
-                    source,
-                    path: self.path.clone(),
-                }));
-            }
-            Ok(ReaderStream::new(&mut self.file)
-                .map_err(|source| ErrorKind::ReadFile {
-                    source,
-                    path: self.path.clone(),
-                })
-                .err_into::<Error>())
+            try_path!(self.file.rewind().await, SeekFile, self.path.clone());
+            Ok::<_, Error>(
+                ReaderStream::new(&mut self.file)
+                    .map_err(|source| ErrorKind::ReadFile {
+                        source,
+                        path: Some(self.path.clone()),
+                    })
+                    .err_into::<Error>(),
+            )
         })
         .try_flatten()
     }

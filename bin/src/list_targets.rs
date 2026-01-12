@@ -21,7 +21,7 @@ impl Args {
         let repo = RepositoryLoader::new()
             .expiration_enforcement(ExpirationEnforcement::Unsafe)
             .trust_store_behavior(TrustStoreBehavior::UnsafeBlindFaith)
-            .load_zip_file(self.repo.clone(), &crate::LOG)
+            .load_zip_path(self.repo.clone(), &crate::LOG)
             .await?;
         let target_names = repo.targets().keys().collect::<BTreeSet<_>>();
         for target_name in target_names {

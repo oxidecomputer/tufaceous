@@ -37,7 +37,7 @@ impl Args {
         let repo = RepositoryLoader::new()
             .expiration_enforcement(ExpirationEnforcement::Unsafe)
             .trust_store_behavior(TrustStoreBehavior::UnsafeBlindFaith)
-            .load_zip_file(self.repo.clone(), &crate::LOG)
+            .load_zip_path(self.repo.clone(), &crate::LOG)
             .await?;
         let mut editor = RepositoryEditor::from_repo(&repo)?
             .generate_installinator_document(!self.no_installinator_document);
