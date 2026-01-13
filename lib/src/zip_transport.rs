@@ -413,19 +413,17 @@ pub enum ZipTransportError {
 impl ZipTransportError {
     fn upgrade(self, url: Url) -> TransportError {
         let kind = match &self {
+            ZipTransportError::FileNotFound => TransportErrorKind::FileNotFound,
+
             ZipTransportError::Io(_)
             | ZipTransportError::Join(_)
-            | ZipTransportError::Zip(_) => TransportErrorKind::Other,
-
-            ZipTransportError::UrlJoin { .. }
+            | ZipTransportError::UrlJoin { .. }
+            | ZipTransportError::Zip(_)
             | ZipTransportError::CompressionMethod(_)
             | ZipTransportError::Duplicate
-            | ZipTransportError::FileNotFound
             | ZipTransportError::IsADirectory
             | ZipTransportError::SymlinkTraversalLimit
-            | ZipTransportError::SymlinkUtf8(_) => {
-                TransportErrorKind::FileNotFound
-            }
+            | ZipTransportError::SymlinkUtf8(_) => TransportErrorKind::Other,
         };
         TransportError::new_with_cause(kind, url, self)
     }
