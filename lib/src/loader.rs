@@ -4,9 +4,15 @@
 
 use std::fmt::Debug;
 
+use bytes::Bytes;
 use camino::Utf8PathBuf;
+use futures_util::Stream;
 use futures_util::TryStreamExt;
+use futures_util::pin_mut;
+use sha2::Digest;
+use sha2::Sha256;
 use slog::Logger;
+use tokio::io::AsyncWriteExt;
 pub use tough::ExpirationEnforcement;
 pub use tough::Limits;
 use url::Url;
@@ -15,6 +21,7 @@ use crate::Repository;
 use crate::ZipTransport;
 use crate::error::Error;
 use crate::error::ErrorKind;
+use crate::error::try_path;
 
 /// Controls how repository trust is established.
 ///
@@ -33,6 +40,7 @@ pub enum TrustStoreBehavior {
 
 #[derive(Debug, Clone, Default)]
 pub struct RepositoryLoader {
+    compute_archive_sha256: bool,
     expiration_enforcement: ExpirationEnforcement,
     limits: Limits,
     metadata_base_url: Option<Url>,
@@ -48,6 +56,15 @@ impl RepositoryLoader {
     /// This is the same as `Repository::loader()`.
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Set whether to compute and store the SHA256 digest of the archive, if an
+    /// archive is used to load the repository.
+    ///
+    /// Only affects [`Self::load_zip_buffer`], [`Self::load_zip_path`],
+    /// [`Self::load_zip_file`], and [`Self::load_zip_stream`].
+    pub fn compute_archive_sha256(self, compute_archive_sha256: bool) -> Self {
+        Self { compute_archive_sha256, ..self }
     }
 
     /// Set whether metadata expiration times are enforced.
@@ -122,8 +139,19 @@ impl RepositoryLoader {
     where
         T: AsRef<[u8]> + Debug + Send + Sync + 'static,
     {
+        let (data, sha256) = if self.compute_archive_sha256 {
+            tokio::task::spawn_blocking(move || {
+                let digest = Sha256::digest(&data).into();
+                (data, Some(digest))
+            })
+            .await?
+        } else {
+            (data, None)
+        };
         let transport = ZipTransport::from_slice(data, log)?;
-        self.zip_base_urls().load(transport, log).await
+        let mut repo = self.zip_base_urls().load(transport, log).await?;
+        repo.archive_sha256 = sha256;
+        Ok(repo)
     }
 
     /// Load a Tufaceous-generated ZIP archive from a file path.
@@ -132,8 +160,12 @@ impl RepositoryLoader {
         archive_path: Utf8PathBuf,
         log: &Logger,
     ) -> Result<Repository, Error> {
-        let transport = ZipTransport::from_path(archive_path, log).await?;
-        self.zip_base_urls().load(transport, log).await
+        let file = try_path!(
+            tokio::fs::File::open(&archive_path).await,
+            OpenFile,
+            archive_path
+        );
+        self.load_zip_file(file.into_std().await, Some(archive_path), log).await
     }
 
     /// Load a Tufaceous-generated ZIP archive from an opened file.
@@ -141,13 +173,80 @@ impl RepositoryLoader {
     /// `archive_path` is used in errors, if available.
     pub async fn load_zip_file(
         self,
-        file: std::fs::File,
+        mut file: std::fs::File,
         archive_path: Option<Utf8PathBuf>,
         log: &Logger,
     ) -> Result<Repository, Error> {
+        let (file, sha256) = if self.compute_archive_sha256 {
+            let path = archive_path.clone();
+            tokio::task::spawn_blocking(move || {
+                let mut hasher = Sha256::new();
+                try_path!(
+                    std::io::copy(&mut file, &mut hasher),
+                    ReadFile,
+                    path
+                );
+                Ok::<_, Error>((file, Some(hasher.finalize().into())))
+            })
+            .await??
+        } else {
+            (file, None)
+        };
+
         let transport =
-            ZipTransport::from_file(file, archive_path, log).await?;
-        self.zip_base_urls().load(transport, log).await
+            ZipTransport::from_file(file, archive_path.clone(), log).await?;
+        let mut repo = self.zip_base_urls().load(transport, log).await?;
+        repo.archive_path = archive_path;
+        repo.archive_sha256 = sha256;
+        Ok(repo)
+    }
+
+    /// Load a Tufaceous-generated ZIP archive from a stream.
+    ///
+    /// This writes the contents of the stream to a temporary file. You can
+    /// optionally provide a maximum number of bytes that will be written. If
+    /// this is not provided, you should ensure something else is limiting the
+    /// size of this stream (such as an HTTP body length limit).
+    pub async fn load_zip_stream<E>(
+        self,
+        stream: impl Stream<Item = Result<Bytes, E>>,
+        limit: Option<u64>,
+        log: &Logger,
+    ) -> Result<Repository, Error>
+    where
+        E: std::error::Error + Send + Sync + 'static,
+    {
+        pin_mut!(stream);
+        let file =
+            camino_tempfile::tempfile().map_err(ErrorKind::CreateTempFile)?;
+        let mut file = tokio::fs::File::from(file);
+        let mut hasher = self.compute_archive_sha256.then(Sha256::new);
+        let mut bytes_read = limit.map(|_| 0u64);
+        while let Some(chunk) = stream
+            .try_next()
+            .await
+            .map_err(|source| ErrorKind::ReadStream(Box::new(source)))?
+        {
+            if let Some(limit) = limit
+                && let Some(bytes_read) = bytes_read.as_mut()
+            {
+                *bytes_read = u64::try_from(chunk.len())
+                    .ok()
+                    .and_then(|len| bytes_read.checked_add(len))
+                    .ok_or(ErrorKind::StreamLimit { limit })?;
+                if *bytes_read > limit {
+                    return Err(ErrorKind::StreamLimit { limit }.into());
+                }
+            }
+            if let Some(hasher) = hasher.as_mut() {
+                hasher.update(&chunk);
+            }
+            try_path!(file.write_all(&chunk).await, WriteFile, None);
+        }
+        let mut repo =
+            self.load_zip_file(file.into_std().await, None, log).await?;
+        repo.archive_sha256 = hasher.map(|hasher| hasher.finalize().into());
+        Ok(repo)
     }
 
     /// Load a repository from the configured metadata and targets base URLs
@@ -208,6 +307,8 @@ impl RepositoryLoader {
                         repo,
                         log,
                         trust_root,
+                        None,
+                        None,
                         self.v1_compatibility,
                     )
                     .await;

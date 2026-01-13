@@ -271,6 +271,8 @@ pub(crate) async fn from_loaded(
         inner: repo,
         system_version,
         trust_root,
+        archive_path: None,
+        archive_sha256: None,
         artifacts: Artifacts::new(artifacts),
         metadata: BTreeMap::new(),
         v1_unpacked: Some(Unpacked { entries }),

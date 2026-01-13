@@ -98,6 +98,10 @@ pub enum ErrorKind {
     SeekFile { source: std::io::Error, path: Option<Utf8PathBuf> },
     #[error("failed to write to file{path}", path = SpacePath(path))]
     WriteFile { source: std::io::Error, path: Option<Utf8PathBuf> },
+    #[error("failed to read stream")]
+    ReadStream(#[source] Box<dyn std::error::Error + Send + Sync + 'static>),
+    #[error("stream exceeded length limit ({limit})")]
+    StreamLimit { limit: u64 },
 
     #[error("failed to read hubris archive {path}")]
     ReadHubrisArchive { source: hubtools::Error, path: Utf8PathBuf },

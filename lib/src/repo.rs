@@ -9,6 +9,8 @@ use std::collections::HashMap;
 use std::pin::Pin;
 
 use bytes::Bytes;
+use camino::Utf8Path;
+use camino::Utf8PathBuf;
 use futures_util::Stream;
 use futures_util::TryStreamExt;
 use semver::Version;
@@ -34,6 +36,8 @@ pub struct Repository {
     inner: tough::Repository,
     system_version: Version,
     trust_root: Vec<u8>,
+    pub(crate) archive_path: Option<Utf8PathBuf>,
+    pub(crate) archive_sha256: Option<[u8; 32]>,
     artifacts: Artifacts,
     metadata: BTreeMap<String, serde_json::Value>,
     v1_unpacked: Option<v1::Unpacked>,
@@ -48,6 +52,8 @@ impl Repository {
         repo: tough::Repository,
         log: &Logger,
         trust_root: Vec<u8>,
+        archive_path: Option<Utf8PathBuf>,
+        archive_sha256: Option<[u8; 32]>,
         v1_compatibility: bool,
     ) -> Result<Self, Error> {
         let Some(ArtifactsSchema { system_version, artifacts, metadata }) =
@@ -76,6 +82,8 @@ impl Repository {
         Ok(Repository {
             inner: repo,
             trust_root,
+            archive_path,
+            archive_sha256,
             system_version,
             artifacts,
             metadata,
@@ -89,6 +97,22 @@ impl Repository {
 
     pub fn trust_root(&self) -> &[u8] {
         &self.trust_root
+    }
+
+    /// Returns the path to the loaded archive, if there is one.
+    ///
+    /// Set when [`RepositoryLoader::load_zip_file`] or
+    /// [`RepositoryLoader::load_zip_path`] are used.
+    pub fn archive_path(&self) -> Option<&Utf8Path> {
+        self.archive_path.as_deref()
+    }
+
+    /// Returns the SHA256 digest of the loaded archive, if there is one.
+    ///
+    /// Set when [`RepositoryLoader::compute_archive_sha256`] is set to `true`
+    /// and one of the archive loading methods is used.
+    pub fn archive_sha256(&self) -> Option<&[u8; 32]> {
+        self.archive_sha256.as_ref()
     }
 
     pub fn targets(&self) -> &HashMap<TargetName, Target> {

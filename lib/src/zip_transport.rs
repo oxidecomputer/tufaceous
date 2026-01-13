@@ -38,7 +38,6 @@ use url::Url;
 
 use crate::error::Error;
 use crate::error::ErrorKind;
-use crate::error::try_path;
 
 const MAX_SYMLINK_TARGET_LEN: usize = 1024;
 const MAX_SYMLINK_TRAVERSAL: usize = 8;
@@ -96,18 +95,6 @@ impl<T: AsRef<[u8]> + Debug + Send + Sync + 'static> ZipTransport<Cursor<T>> {
 }
 
 impl ZipTransport<FileReader> {
-    pub async fn from_path(
-        archive_path: Utf8PathBuf,
-        log: &Logger,
-    ) -> Result<Self, Error> {
-        let file = try_path!(
-            tokio::fs::File::open(&archive_path).await,
-            OpenFile,
-            archive_path
-        );
-        Self::from_file(file.into_std().await, Some(archive_path), log).await
-    }
-
     pub async fn from_file(
         file: File,
         archive_path: Option<Utf8PathBuf>,

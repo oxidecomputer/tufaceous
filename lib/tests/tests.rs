@@ -2,8 +2,14 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+use std::convert::Infallible;
+use std::io::Write;
+
+use bytes::BufMut;
+use bytes::BytesMut;
 use chrono::Utc;
 use futures_util::TryStreamExt;
+use futures_util::stream;
 use semver::Version;
 use tufaceous::RepositoryLoader;
 use tufaceous::TrustStoreBehavior;
@@ -89,5 +95,49 @@ async fn empty_artifact() -> Result<(), Error> {
         .try_concat()
         .await?;
     assert!(data.is_empty());
+    Ok(())
+}
+
+#[tokio::test]
+async fn compute_archive_sha256() -> Result<(), Error> {
+    let log = slog::Logger::root(slog::Discard, slog::o!());
+    let zip = RepositoryEditor::fake(VERSION)?
+        .finish()
+        .await?
+        .generate_root()
+        .sign()
+        .await?
+        .write_zip(BytesMut::new().writer(), Utc::now())
+        .await?
+        .into_inner()
+        .freeze();
+    for should_compute in [false, true] {
+        let repo = RepositoryLoader::new()
+            .compute_archive_sha256(should_compute)
+            .trust_store_behavior(TrustStoreBehavior::UnsafeBlindFaith)
+            .load_zip_buffer(zip.clone(), &log)
+            .await?;
+        assert_eq!(repo.archive_sha256().is_some(), should_compute);
+
+        let mut file = camino_tempfile::tempfile().unwrap();
+        file.write_all(&zip).unwrap();
+        let repo = RepositoryLoader::new()
+            .compute_archive_sha256(should_compute)
+            .trust_store_behavior(TrustStoreBehavior::UnsafeBlindFaith)
+            .load_zip_file(file, None, &log)
+            .await?;
+        assert_eq!(repo.archive_sha256().is_some(), should_compute);
+
+        let repo = RepositoryLoader::new()
+            .compute_archive_sha256(should_compute)
+            .trust_store_behavior(TrustStoreBehavior::UnsafeBlindFaith)
+            .load_zip_stream(
+                stream::once(async { Ok::<_, Infallible>(zip.clone()) }),
+                None,
+                &log,
+            )
+            .await?;
+        assert_eq!(repo.archive_sha256().is_some(), should_compute);
+    }
     Ok(())
 }
