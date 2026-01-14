@@ -97,6 +97,15 @@ impl Display for Sign {
     }
 }
 
+impl<T> From<T> for Sign
+where
+    Option<String>: From<T>,
+{
+    fn from(sign: T) -> Self {
+        Self(sign.into())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::collections::HashSet;
