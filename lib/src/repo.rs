@@ -48,6 +48,49 @@ impl Repository {
         RepositoryLoader::new()
     }
 
+    /// Generate and load a fake repository.
+    ///
+    /// This is shorthand for:
+    ///
+    /// ```rust
+    /// # tokio_test::block_on(async {
+    /// # let system_version = const { semver::Version::new(1, 0, 0) };
+    /// # let log = slog::Logger::root(slog::Discard, slog::o!());
+    /// # let log = &log;
+    /// let zip = tufaceous::edit::RepositoryEditor::fake(system_version)?
+    ///     .finish()
+    ///     .await?
+    ///     .generate_root()
+    ///     .sign()
+    ///     .await?
+    ///     .write_zip(Vec::new(), chrono::Utc::now())
+    ///     .await?;
+    /// # Ok::<_, tufaceous::error::Error>(
+    /// tufaceous::RepositoryLoader::new()
+    ///     .trust_store_behavior(tufaceous::TrustStoreBehavior::UnsafeBlindFaith)
+    ///     .load_zip_buffer(zip, log)
+    ///     .await?
+    /// # )
+    /// # }).unwrap();
+    /// ```
+    pub async fn fake(
+        system_version: Version,
+        log: &Logger,
+    ) -> Result<Self, Error> {
+        let zip = crate::edit::RepositoryEditor::fake(system_version)?
+            .finish()
+            .await?
+            .generate_root()
+            .sign()
+            .await?
+            .write_zip(Vec::new(), chrono::Utc::now())
+            .await?;
+        RepositoryLoader::new()
+            .trust_store_behavior(crate::TrustStoreBehavior::UnsafeBlindFaith)
+            .load_zip_buffer(zip, log)
+            .await
+    }
+
     pub(crate) async fn from_loaded(
         repo: tough::Repository,
         log: &Logger,
