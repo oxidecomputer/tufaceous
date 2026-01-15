@@ -15,6 +15,8 @@ use crate::sign::SignOptions;
 pub struct Args {
     artifacts: Vec<Utf8PathBuf>,
     #[clap(long)]
+    fake: bool,
+    #[clap(long)]
     no_installinator_document: bool,
     #[clap(short = 'o', long)]
     output: Utf8PathBuf,
@@ -26,7 +28,12 @@ pub struct Args {
 
 impl Args {
     pub async fn run(self) -> Result<()> {
-        let mut editor = RepositoryEditor::new(self.version)
+        let mut editor = if self.fake {
+            RepositoryEditor::fake(self.version)?
+        } else {
+            RepositoryEditor::new(self.version)
+        };
+        editor = editor
             .generate_installinator_document(!self.no_installinator_document);
         for path in self.artifacts {
             editor = editor.guess_artifact(path).await?;

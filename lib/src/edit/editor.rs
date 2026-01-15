@@ -5,20 +5,29 @@
 use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::collections::HashSet;
-use std::io::Read;
+use std::path::Path;
 
+use bytes::BufMut;
+use bytes::BytesMut;
 use camino::Utf8Path;
 use camino::Utf8PathBuf;
 use flate2::read::GzDecoder;
 use futures_util::FutureExt;
 use futures_util::TryFutureExt;
+use futures_util::TryStreamExt;
 use hubtools::Caboose;
+use hubtools::CabooseBuilder;
+use hubtools::HubrisArchiveBuilder;
 use rats_corim::Corim;
+use rats_corim::CorimBuilder;
 use semver::Version;
+use sha2::Digest;
+use sha2::Sha256;
 use tokio::fs::File;
 use tokio::io::AsyncReadExt;
 use tokio::task::JoinSet;
 use tufaceous_artifact::ArtifactVersion;
+use tufaceous_artifact::ArtifactVersionError;
 use tufaceous_artifact::InstallinatorArtifact;
 use tufaceous_artifact::InstallinatorDocument;
 use tufaceous_artifact::KnownArtifactTags;
@@ -47,9 +56,14 @@ use crate::schema::ArtifactsSchema;
 const KIB: usize = 1024;
 const MIB: usize = 1024 * KIB;
 
+const COSMO_PHASE_1_PATH: &str = "cosmo.rom";
+const GIMLET_PHASE_1_PATH: &str = "gimlet.rom";
+const PHASE_2_PATH: &str = "zfs.img";
+
 #[derive(Debug)]
 pub struct RepositoryEditor<'a> {
     system_version: Version,
+    artifact_version: Result<ArtifactVersion, ArtifactVersionError>,
     generate_installinator_document: bool,
     targets: HashMap<String, Vec<TargetSource<'a>>>,
     artifacts: HashMap<String, HashSet<ArtifactSchema>>,
@@ -60,6 +74,7 @@ impl<'a> RepositoryEditor<'a> {
     /// Create an empty repository editor.
     pub fn new(system_version: Version) -> Self {
         Self {
+            artifact_version: ArtifactVersion::new(system_version.to_string()),
             system_version,
             generate_installinator_document: true,
             targets: HashMap::new(),
@@ -90,29 +105,58 @@ impl<'a> RepositoryEditor<'a> {
         self,
         path: Utf8PathBuf,
     ) -> Result<Self, Error> {
-        self.measurement_corpus_inner(FileSource::open(path).await?, None).await
+        let source = FileSource::open(path).await?;
+        self.measurement_corpus_file(source, None).await
     }
 
-    async fn measurement_corpus_inner(
-        mut self,
+    async fn measurement_corpus_file(
+        self,
         mut source: FileSource,
         corim: Option<Corim>,
     ) -> Result<Self, Error> {
         let Corim { id, .. } = match corim {
             Some(corim) => corim,
             None => {
-                let vec = source.read_to_end().await?;
+                let v = source.read_to_end().await?;
                 try_path!(
-                    ciborium::from_reader(vec.as_slice()),
+                    ciborium::from_reader(v.as_slice()),
                     Corim,
-                    source.path
+                    &source.path
                 )
             }
         };
         let sha256 = source.sha256().await?;
+        self.measurement_corpus_inner(source.into(), &id, &sha256.0)
+    }
+
+    pub fn fake_measurement_corpus(self, hashes: usize) -> Result<Self, Error> {
+        let mut builder = CorimBuilder::new();
+        builder.vendor("fake-vendor".to_string());
+        builder.id("fake-measurement-id".to_string());
+        builder.tag_id("fake-tag-id".to_string());
+        for i in 0..hashes {
+            builder.add_hash(format!("layer{i}"), 10, vec![0; 32]);
+        }
+        let corim = builder.build().unwrap();
+
+        let mut writer = BytesMut::new().writer();
+        ciborium::into_writer(&corim, &mut writer).unwrap();
+        let bytes = writer.into_inner().freeze();
+        let sha256 = Sha256::digest(&bytes);
+        let source = BytesSource(bytes).into();
+
+        self.measurement_corpus_inner(source, &corim.id, &sha256)
+    }
+
+    fn measurement_corpus_inner(
+        mut self,
+        source: TargetSource<'a>,
+        corim_id: &str,
+        sha256: &[u8],
+    ) -> Result<Self, Error> {
         let target_name =
-            format!("measurements/{id}-{}.cbor", hex::encode(sha256));
-        let version = ArtifactVersion::new(self.system_version.to_string())?;
+            format!("measurements/{corim_id}-{}.cbor", hex::encode(sha256));
+        let version = self.artifact_version.clone()?;
         let tags = KnownArtifactTags::MeasurementCorpus {};
         self.insert_artifact(target_name, version, tags, source);
         Ok(self)
@@ -142,88 +186,149 @@ impl<'a> RepositoryEditor<'a> {
     ///
     /// `output_dir` is a path to the output directory for `helios-build image`
     /// (the `-o` argument). This directory contains `cosmo.rom`, `gimlet.rom`,
-    /// `zfs.img`, and `os.tar.gz`. Metadata stored in `os.tar.gz` is copied
-    /// into the repository.
+    /// and `zfs.img`.
     pub async fn os_image_dir(
-        mut self,
+        self,
         variant: OsVariant,
         output_dir: &Utf8Path,
     ) -> Result<Self, Error> {
+        let cosmo_phase_1 =
+            FileSource::open(output_dir.join(COSMO_PHASE_1_PATH)).await?.into();
+        let gimlet_phase_1 =
+            FileSource::open(output_dir.join(GIMLET_PHASE_1_PATH))
+                .await?
+                .into();
+        let phase_2 =
+            FileSource::open(output_dir.join(PHASE_2_PATH)).await?.into();
+
+        // If `os.tar.gz` is present, read the `image/*.txt` files from it
+        // as extra sources. Stop once we get to `zfs.img`, which comes after
+        // the additional metadata. (If a GzDecoder was seekable we could
+        // conceivably skip past any files we don't want to read, but alas.)
+        // https://github.com/oxidecomputer/helios/blob/f145457f6ccb13a139b8d93408b9b4de5db57bd6/tools/helios-build/src/main.rs#L1881-L1885
+        let tarball_path = output_dir.join("os.tar.gz");
+        let mut extra_targets = match tokio::fs::File::open(&tarball_path).await
+        {
+            Ok(file) => {
+                let file = file.into_std().await;
+                tokio::task::spawn_blocking(move || {
+                    read_os_tarball_metadata_blocking(file, tarball_path)
+                })
+                .await??
+            }
+            Err(source) if source.kind() == std::io::ErrorKind::NotFound => {
+                // We might be reading from an unpacked Tufaceous archive; look
+                // for any `*.txt` files and include them.
+                let mut extra_targets = HashMap::new();
+                let mut read_dir =
+                    crate::util::read_dir(output_dir.into()).await?;
+                while let Some(entry) = read_dir.try_next().await? {
+                    if entry.path().extension() != Some("txt") {
+                        continue;
+                    }
+                    let file_name = Utf8Path::new(entry.file_name()).to_owned();
+                    let source = FileSource::open(entry.into_path()).await?;
+                    extra_targets.insert(file_name, source.into());
+                }
+                extra_targets
+            }
+            Err(source) => {
+                return Err(ErrorKind::OpenFile {
+                    source,
+                    path: Some(tarball_path),
+                }
+                .into());
+            }
+        };
+        for path in ["unix.z", "cpio.z"] {
+            let source = FileSource::open(output_dir.join(path)).await?;
+            extra_targets.insert(path.into(), source.into());
+        }
+
+        self.os_image_inner(OsImageSources {
+            variant,
+            cosmo_phase_1,
+            gimlet_phase_1,
+            phase_2,
+            extra_targets,
+        })
+    }
+
+    pub fn fake_os_image(self, variant: OsVariant) -> Result<Self, Error> {
+        let version = &self.system_version;
+        let cosmo_phase_1 = FakeSource::new(
+            format!("cosmo host phase 1 image version {version}\n"),
+            MIB,
+        )
+        .into();
+        let gimlet_phase_1 = FakeSource::new(
+            format!("gimlet host phase 1 image version {version}\n"),
+            MIB,
+        )
+        .into();
+        let phase_2 = FakeSource::new(
+            format!("host phase 2 image version {version}\n"),
+            4 * MIB,
+        )
+        .into();
+
+        let mut extra_targets: HashMap<Utf8PathBuf, _> = HashMap::new();
+        extra_targets.insert(
+            "unix.z".into(),
+            FakeSource::new(format!("unix.z version {version}\n"), 64 * KIB)
+                .into(),
+        );
+        extra_targets.insert(
+            "cpio.z".into(),
+            FakeSource::new(format!("cpio.z version {version}\n"), 256 * KIB)
+                .into(),
+        );
+
+        self.os_image_inner(OsImageSources {
+            variant,
+            cosmo_phase_1,
+            gimlet_phase_1,
+            phase_2,
+            extra_targets,
+        })
+    }
+
+    fn os_image_inner(
+        mut self,
+        sources: OsImageSources<'a>,
+    ) -> Result<Self, Error> {
+        let variant = sources.variant;
         let base = Utf8PathBuf::from(format!("os-{variant}"));
-        let version = ArtifactVersion::new(self.system_version.to_string())?;
+        let version = self.artifact_version.clone()?;
 
         self.insert_artifact(
-            base.join("image/cosmo.rom").into(),
+            base.join("image").join(COSMO_PHASE_1_PATH).into(),
             version.clone(),
             KnownArtifactTags::OsPhase1 { variant, board: OsBoard::Cosmo },
-            FileSource::open(output_dir.join("cosmo.rom")).await?,
+            sources.cosmo_phase_1,
         );
         self.insert_artifact(
-            base.join("image/gimlet.rom").into(),
+            base.join("image").join(GIMLET_PHASE_1_PATH).into(),
             version.clone(),
             KnownArtifactTags::OsPhase1 { variant, board: OsBoard::Gimlet },
-            FileSource::open(output_dir.join("gimlet.rom")).await?,
+            sources.gimlet_phase_1,
         );
         self.insert_artifact(
-            base.join("image/zfs.img").into(),
+            base.join("image").join(PHASE_2_PATH).into(),
             version,
             KnownArtifactTags::OsPhase2 { variant },
-            FileSource::open(output_dir.join("zfs.img")).await?,
+            sources.phase_2,
         );
-        for path in ["cpio.z", "unix.z"] {
-            let source = FileSource::open(output_dir.join(path)).await?;
+        for (file_name, source) in sources.extra_targets {
             self.targets
-                .entry(base.join("image").join(path).into())
+                .entry(base.join(file_name).into())
                 .or_default()
-                .push(TargetSource::File(source));
+                .push(source);
         }
-
-        let tarball_path = output_dir.join("os.tar.gz");
-        let metadata_sources = tokio::task::spawn_blocking(move || {
-            let mut sources = Vec::new();
-            let file = try_path!(
-                std::fs::File::open(&tarball_path),
-                OpenFile,
-                tarball_path
-            );
-            let mut archive = tar::Archive::new(GzDecoder::new(file));
-            for entry in try_path!(archive.entries(), ReadFile, tarball_path) {
-                let mut entry = try_path!(entry, ReadFile, tarball_path);
-                if entry.header().entry_type() != tar::EntryType::Regular {
-                    continue;
-                }
-                let path = try_path!(
-                    entry.path().and_then(|path| {
-                        Utf8PathBuf::try_from(path.into_owned())
-                            .map_err(|error| error.into_io_error())
-                    }),
-                    ReadFile,
-                    tarball_path
-                );
-                if path == "image/zfs.img" {
-                    break;
-                }
-                let mut vec = Vec::new();
-                try_path!(entry.read_to_end(&mut vec), ReadFile, tarball_path);
-                sources.push((path, vec));
-            }
-            Ok::<_, Error>(sources)
-        })
-        .await??;
-        for (path, source) in metadata_sources {
-            self.targets
-                .entry(base.join(path).into())
-                .or_default()
-                .push(TargetSource::Bytes(BytesSource(source.into())));
-        }
-
         Ok(self)
     }
 
     async fn guess_os_image(path: &Utf8Path) -> Option<OsVariant> {
-        if !path.join("os.tar.gz").exists() {
-            return None;
-        }
         let mut file = File::open(path.join("zfs.img")).await.ok()?;
         // Read the header block from the image and guess whether it's a
         // recovery image based on the image name.
@@ -278,12 +383,51 @@ impl<'a> RepositoryEditor<'a> {
         let mut source = FileSource::open(path.clone()).await?;
         let caboose = source.read_hubris_caboose().await?;
         let data = CabooseData::new(&caboose, tag_fn, &path)?;
-        Ok(self.hubris_archive_inner(source, data))
+        Ok(self.hubris_archive_inner(source.into(), data))
+    }
+
+    pub fn fake_rot_archive(
+        self,
+        board: String,
+        sign: Sign,
+        slot: RotSlot,
+    ) -> Result<Self, Error> {
+        let data = CabooseData {
+            name: board.clone(),
+            version: self.artifact_version.clone()?,
+            tags: KnownArtifactTags::Rot { board, sign, slot },
+        };
+        let source = data.generate_fake_archive()?;
+        Ok(self.hubris_archive_inner(source.into(), data))
+    }
+
+    pub fn fake_rot_bootloader_archive(
+        self,
+        board: String,
+        sign: Sign,
+    ) -> Result<Self, Error> {
+        let data = CabooseData {
+            name: board.clone(),
+            version: self.artifact_version.clone()?,
+            tags: KnownArtifactTags::RotBootloader { board, sign },
+        };
+        let source = data.generate_fake_archive()?;
+        Ok(self.hubris_archive_inner(source.into(), data))
+    }
+
+    pub fn fake_sp_archive(self, board: String) -> Result<Self, Error> {
+        let data = CabooseData {
+            name: board.clone(),
+            version: self.artifact_version.clone()?,
+            tags: KnownArtifactTags::Sp { board },
+        };
+        let source = data.generate_fake_archive()?;
+        Ok(self.hubris_archive_inner(source.into(), data))
     }
 
     fn hubris_archive_inner(
         mut self,
-        source: FileSource,
+        source: TargetSource<'a>,
         CabooseData { tags, name, version }: CabooseData,
     ) -> Self {
         let target_name = match &tags {
@@ -302,10 +446,7 @@ impl<'a> RepositoryEditor<'a> {
                     // never be used in an actual rack. The current thinking is
                     // that they will eventually no longer need to be in the TUF
                     // repo. Add these as an extra target, not an artifact.
-                    self.targets
-                        .entry(target_name)
-                        .or_default()
-                        .push(TargetSource::File(source));
+                    self.targets.entry(target_name).or_default().push(source);
                     return self;
                 }
                 target_name
@@ -318,12 +459,11 @@ impl<'a> RepositoryEditor<'a> {
 
     async fn guess_hubris_archive(
         file_start: &[u8],
-        path: &Utf8Path,
-    ) -> Option<(FileSource, CabooseData)> {
+        source: &mut FileSource,
+    ) -> Option<CabooseData> {
         if !file_start.starts_with(b"PK\x03\x04") {
             return None;
         }
-        let mut source = FileSource::open(path.to_owned()).await.ok()?;
         let archive = source.read_hubris_archive().await.ok()?;
         let caboose = archive.read_caboose().ok()?;
         // HACK: We are reading the `image-name` file in the archive, which
@@ -331,34 +471,37 @@ impl<'a> RepositoryEditor<'a> {
         // an SP image, and nonexistent if it's an ROT bootloader image. This
         // seems fragile. Ideally this can be in the caboose someday (see
         // sprot-release#74).
-        let data = match archive.image_name().as_deref() {
+        match archive.image_name().as_deref() {
             Ok("a") => CabooseData::new(
                 &caboose,
                 |caboose| {
                     KnownArtifactTags::from_rot_caboose(caboose, RotSlot::A)
                 },
-                path,
-            ),
+                &source.path,
+            )
+            .ok(),
             Ok("b") => CabooseData::new(
                 &caboose,
                 |caboose| {
                     KnownArtifactTags::from_rot_caboose(caboose, RotSlot::B)
                 },
-                path,
-            ),
+                &source.path,
+            )
+            .ok(),
             Ok("default") => CabooseData::new(
                 &caboose,
                 KnownArtifactTags::from_sp_caboose,
-                path,
-            ),
+                &source.path,
+            )
+            .ok(),
             Err(hubtools::Error::MissingFile(_, _)) => CabooseData::new(
                 &caboose,
                 KnownArtifactTags::from_rot_bootloader_caboose,
-                path,
-            ),
-            _ => return None,
-        };
-        Some((source, data.ok()?))
+                &source.path,
+            )
+            .ok(),
+            _ => None,
+        }
     }
 
     pub async fn zone_image(self, path: Utf8PathBuf) -> Result<Self, Error> {
@@ -376,12 +519,20 @@ impl<'a> RepositoryEditor<'a> {
         })
         .await??;
         let source = FileSource::from_file(file.into(), cloned_path);
-        Ok(self.zone_image_inner(source, layer_info))
+        Ok(self.zone_image_inner(source.into(), layer_info))
+    }
+
+    pub fn fake_zone_image(self, name: String) -> Result<Self, Error> {
+        let version = self.artifact_version.clone()?;
+        let source =
+            FakeSource::new(format!("zone {name} version {version}\n"), MIB);
+        Ok(self
+            .zone_image_inner(source.into(), LayerInfo { pkg: name, version }))
     }
 
     fn zone_image_inner(
         mut self,
-        source: FileSource,
+        source: TargetSource<'a>,
         LayerInfo { pkg, version }: LayerInfo,
     ) -> Self {
         let target_name = format!("zones/{pkg}.tar.gz");
@@ -419,21 +570,19 @@ impl<'a> RepositoryEditor<'a> {
             return Err(ErrorKind::GuessArtifact { path }.into());
         }
         let buf = &buf[..n];
-        let source = FileSource::from_file(file, path.clone());
+        let mut source = FileSource::from_file(file, path.clone());
 
         let (likely_corim, corim) = Self::guess_measurement_corpus(buf);
         if likely_corim {
-            return self.measurement_corpus_inner(source, corim).await;
+            return self.measurement_corpus_file(source, corim).await;
         }
 
-        if let Some((source, data)) =
-            Self::guess_hubris_archive(buf, &path).await
-        {
-            return Ok(self.hubris_archive_inner(source, data));
+        if let Some(data) = Self::guess_hubris_archive(buf, &mut source).await {
+            return Ok(self.hubris_archive_inner(source.into(), data));
         }
 
         if let Some(layer_info) = Self::guess_zone_image(buf) {
-            return Ok(self.zone_image_inner(source, layer_info));
+            return Ok(self.zone_image_inner(source.into(), layer_info));
         }
 
         Err(ErrorKind::GuessArtifact { path }.into())
@@ -444,12 +593,9 @@ impl<'a> RepositoryEditor<'a> {
         target_name: String,
         version: ArtifactVersion,
         tags: KnownArtifactTags,
-        source: FileSource,
+        source: TargetSource<'a>,
     ) {
-        self.targets
-            .entry(target_name.clone())
-            .or_default()
-            .push(TargetSource::File(source));
+        self.targets.entry(target_name.clone()).or_default().push(source);
         self.artifacts.entry(target_name.clone()).or_default().insert(
             ArtifactSchema { target_name, version, tags: tags.to_tags() },
         );
@@ -469,7 +615,7 @@ impl<'a> RepositoryEditor<'a> {
         self.targets
             .entry(target_name.clone())
             .or_default()
-            .push(TargetSource::File(FileSource::open(path).await?));
+            .push(FileSource::open(path).await?.into());
         Ok(self)
     }
 
@@ -479,6 +625,8 @@ impl<'a> RepositoryEditor<'a> {
         self
     }
 
+    /// Manually adds a fake artifact. Don't use this if building a real
+    /// repository; use one of the other `fake_*` methods instead.
     pub fn fake_artifact(
         mut self,
         target_name: String,
@@ -498,67 +646,28 @@ impl<'a> RepositoryEditor<'a> {
     }
 
     pub fn fake(system_version: Version) -> Result<Self, Error> {
-        let version = ArtifactVersion::new(system_version.to_string())?;
         let mut editor = Self::new(system_version);
 
-        for hash in ["123abc", "def456"] {
-            editor = editor.fake_artifact(
-                format!("measurements/corim-fake-{version}-{hash}.cbor"),
-                version.clone(),
-                KnownArtifactTags::MeasurementCorpus {},
-                4 * KIB,
-            );
+        for hashes in [4, 16] {
+            editor = editor.fake_measurement_corpus(hashes)?;
         }
         for variant in [OsVariant::Host, OsVariant::Recovery] {
-            for board in [OsBoard::Gimlet, OsBoard::Cosmo] {
-                editor = editor.fake_artifact(
-                    format!("os-{variant}/{board}.rom"),
-                    version.clone(),
-                    KnownArtifactTags::OsPhase1 { variant, board },
-                    MIB,
-                );
-            }
-            editor = editor.fake_artifact(
-                format!("os-{variant}/zfs.img"),
-                version.clone(),
-                KnownArtifactTags::OsPhase2 { variant },
-                4 * MIB,
-            );
+            editor = editor.fake_os_image(variant)?;
         }
         for slot in [RotSlot::A, RotSlot::B] {
-            editor = editor.fake_artifact(
-                format!("rot/fake-unsigned-{version}-slot-{slot}.zip"),
-                version.clone(),
-                KnownArtifactTags::Rot {
-                    board: "fake".into(),
-                    sign: Sign::UNSIGNED,
-                    slot,
-                },
-                256 * KIB,
-            );
+            editor = editor.fake_rot_archive(
+                "fake-rot".into(),
+                Sign::UNSIGNED,
+                slot,
+            )?;
         }
-        editor = editor.fake_artifact(
-            format!("rot-bootloader/fake-unsigned-{version}.zip"),
-            version.clone(),
-            KnownArtifactTags::RotBootloader {
-                board: "fake".into(),
-                sign: Sign::UNSIGNED,
-            },
-            64 * KIB,
-        );
-        editor = editor.fake_artifact(
-            format!("sp/fake-{version}.zip"),
-            version.clone(),
-            KnownArtifactTags::Sp { board: "fake".into() },
-            MIB,
-        );
+        editor = editor
+            .fake_rot_bootloader_archive("fake-rot".into(), Sign::UNSIGNED)?;
+        for board in ["fake-gimlet", "fake-cosmo", "fake-sidecar", "fake-psc"] {
+            editor = editor.fake_sp_archive(board.into())?;
+        }
         for name in ["zone1", "zone2"] {
-            editor = editor.fake_artifact(
-                format!("zones/{name}.tar.gz"),
-                version.clone(),
-                KnownArtifactTags::Zone { name: name.into() },
-                MIB,
-            );
+            editor = editor.fake_zone_image(name.into())?;
         }
 
         Ok(editor)
@@ -592,12 +701,13 @@ impl<'a> RepositoryEditor<'a> {
                 continue;
             }
             self.targets.entry(target_name.raw().to_owned()).or_default().push(
-                TargetSource::Repository(RepositorySource {
+                RepositorySource {
                     repo,
                     target_name: target_name.raw().to_owned(),
                     length: target.length,
                     sha256: target.hashes.sha256.to_vec(),
-                }),
+                }
+                .into(),
             );
         }
         for artifact in repo.artifacts() {
@@ -671,8 +781,7 @@ impl<'a> RepositoryEditor<'a> {
         }
 
         if self.generate_installinator_document {
-            let version =
-                ArtifactVersion::new(self.system_version.to_string())?;
+            let version = self.artifact_version.clone()?;
             let target_name = format!("installinator_document-{version}.json");
             let artifact = ArtifactSchema {
                 target_name: target_name.clone(),
@@ -726,6 +835,60 @@ impl<'a> RepositoryEditor<'a> {
 }
 
 #[derive(Debug)]
+struct OsImageSources<'a> {
+    variant: OsVariant,
+    cosmo_phase_1: TargetSource<'a>,
+    gimlet_phase_1: TargetSource<'a>,
+    phase_2: TargetSource<'a>,
+    extra_targets: HashMap<Utf8PathBuf, TargetSource<'a>>,
+}
+
+fn read_os_tarball_metadata_blocking(
+    file: std::fs::File,
+    tarball_path: Utf8PathBuf,
+) -> Result<HashMap<Utf8PathBuf, TargetSource<'static>>, Error> {
+    let mut metadata = HashMap::new();
+    let mut archive = tar::Archive::new(GzDecoder::new(file));
+    for entry in try_path!(archive.entries(), ReadFile, tarball_path) {
+        let mut entry = try_path!(entry, ReadFile, tarball_path);
+        if entry.header().entry_type() != tar::EntryType::Regular {
+            continue;
+        }
+        let path = try_path!(entry.path(), ReadFile, tarball_path);
+        let Some(parent) = path.parent() else { continue };
+        if parent != "image" {
+            continue;
+        };
+        let Some(extension) = path.extension() else { continue };
+        if extension != "txt" {
+            continue;
+        }
+        let file_name = Path::new(
+            path.file_name()
+                .expect("a path with an extension must have a file name"),
+        );
+        if file_name == "zfs.img" {
+            break;
+        }
+        let file_name = try_path!(
+            Utf8PathBuf::try_from(file_name.to_owned())
+                .map_err(|error| error.into_io_error()),
+            ReadFile,
+            tarball_path
+        );
+        let mut writer = BytesMut::new().writer();
+        try_path!(
+            std::io::copy(&mut entry, &mut writer),
+            ReadFile,
+            tarball_path
+        );
+        let source = BytesSource(writer.into_inner().freeze());
+        metadata.insert(file_name.to_owned(), source.into());
+    }
+    Ok(metadata)
+}
+
+#[derive(Debug)]
 struct CabooseData {
     tags: KnownArtifactTags,
     name: String,
@@ -757,6 +920,36 @@ impl CabooseData {
             name: name.to_owned(),
             version: ArtifactVersion::new(version)?,
         })
+    }
+
+    fn generate_fake_archive(&self) -> Result<BytesSource, Error> {
+        let (kind, board, sign) = match &self.tags {
+            KnownArtifactTags::Rot { board, sign, .. } => {
+                ("rot", board, sign.0.as_ref())
+            }
+            KnownArtifactTags::RotBootloader { board, sign } => {
+                ("rot-bootloader", board, sign.0.as_ref())
+            }
+            KnownArtifactTags::Sp { board } => ("sp", board, None),
+            _ => panic!("generate_fake_archive called with non-hubris tags"),
+        };
+
+        let mut builder = CabooseBuilder::default()
+            .git_commit(format!("this-is-a-fake-{kind}"))
+            .board(board)
+            .name(board)
+            .version(self.version.to_string());
+        if let Some(sign) = sign {
+            builder = builder.sign(sign);
+        }
+        let caboose = builder.build();
+
+        let mut builder = HubrisArchiveBuilder::with_fake_image();
+        builder.write_caboose(caboose.as_slice()).unwrap();
+        let vec = builder
+            .build_to_vec()
+            .map_err(ErrorKind::GenerateFakeHubrisArchive)?;
+        Ok(BytesSource(vec.into()))
     }
 }
 

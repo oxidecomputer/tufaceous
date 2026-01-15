@@ -181,9 +181,8 @@ impl<'a> UnsignedRepository<'a> {
         while let Some(entry) = read_dir.try_next().await? {
             // This is opening a file within the tempdir that is about to be
             // deleted. This is expected to be fine.
-            let source = TargetSource::File(
-                FileSource::open(entry.path().to_owned()).await?,
-            );
+            let source =
+                FileSource::open(entry.path().to_owned()).await?.into();
             sources.insert(
                 (FilePrefix::Metadata, entry.file_name().into()),
                 source,

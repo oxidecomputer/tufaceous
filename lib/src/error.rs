@@ -110,6 +110,8 @@ pub enum ErrorKind {
         source: tufaceous_artifact::hubris::ReadCabooseError,
         path: Utf8PathBuf,
     },
+    #[error("failed to generate fake hubris archive")]
+    GenerateFakeHubrisArchive(#[source] hubtools::Error),
 
     #[error("unspecified failure when generating ed25519 key")]
     Ed25519Generate,

@@ -73,6 +73,10 @@ impl DirEntry {
         Ok(Self { path })
     }
 
+    pub(crate) fn into_path(self) -> Utf8PathBuf {
+        self.path
+    }
+
     pub(crate) fn path(&self) -> &Utf8Path {
         &self.path
     }

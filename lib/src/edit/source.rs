@@ -67,6 +67,30 @@ impl TargetSource<'_> {
     }
 }
 
+impl From<BytesSource> for TargetSource<'_> {
+    fn from(source: BytesSource) -> Self {
+        TargetSource::Bytes(source)
+    }
+}
+
+impl From<FileSource> for TargetSource<'_> {
+    fn from(source: FileSource) -> Self {
+        TargetSource::File(source)
+    }
+}
+
+impl<'a> From<RepositorySource<'a>> for TargetSource<'a> {
+    fn from(source: RepositorySource<'a>) -> Self {
+        TargetSource::Repository(source)
+    }
+}
+
+impl From<FakeSource> for TargetSource<'_> {
+    fn from(source: FakeSource) -> Self {
+        TargetSource::Fake(source)
+    }
+}
+
 #[derive(Debug, Clone)]
 pub(crate) struct BytesSource(pub(crate) Bytes);
 
@@ -83,7 +107,7 @@ impl BytesSource {
         Target {
             length: self.0.len().try_into().unwrap(),
             sha256: Sha256::digest(&self.0).to_vec(),
-            source: TargetSource::Bytes(self),
+            source: self.into(),
         }
     }
 }
@@ -112,11 +136,7 @@ impl FileSource {
             Some(inner) => inner,
             None => self.read_impl(None).await?,
         };
-        Ok(Target {
-            length,
-            sha256: sha256.0.to_vec(),
-            source: TargetSource::File(self),
-        })
+        Ok(Target { length, sha256: sha256.0.to_vec(), source: self.into() })
     }
 
     async fn read_impl(
@@ -206,7 +226,7 @@ impl<'a> RepositorySource<'a> {
         Target {
             length: self.length,
             sha256: self.sha256.clone(),
-            source: TargetSource::Repository(self),
+            source: self.into(),
         }
     }
 
@@ -243,7 +263,7 @@ impl FakeSource {
         Target {
             length: self.length.try_into().unwrap(),
             sha256: self.sha256().await.0.to_vec(),
-            source: TargetSource::Fake(self),
+            source: self.into(),
         }
     }
 
