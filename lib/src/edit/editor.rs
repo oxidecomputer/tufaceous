@@ -137,10 +137,13 @@ impl<'a> RepositoryEditor<'a> {
         for i in 0..hashes {
             builder.add_hash(format!("layer{i}"), 10, vec![0; 32]);
         }
-        let corim = builder.build().unwrap();
+        let corim = builder
+            .build()
+            .map_err(ErrorKind::GenerateFakeMeasurementCorpus)?;
 
         let mut writer = BytesMut::new().writer();
-        ciborium::into_writer(&corim, &mut writer).unwrap();
+        ciborium::into_writer(&corim, &mut writer)
+            .map_err(ErrorKind::SerializeFakeMeasurementCorpus)?;
         let bytes = writer.into_inner().freeze();
         let sha256 = Sha256::digest(&bytes);
         let source = BytesSource(bytes).into();
@@ -945,7 +948,9 @@ impl CabooseData {
         let caboose = builder.build();
 
         let mut builder = HubrisArchiveBuilder::with_fake_image();
-        builder.write_caboose(caboose.as_slice()).unwrap();
+        builder
+            .write_caboose(caboose.as_slice())
+            .map_err(ErrorKind::GenerateFakeHubrisArchive)?;
         let vec = builder
             .build_to_vec()
             .map_err(ErrorKind::GenerateFakeHubrisArchive)?;

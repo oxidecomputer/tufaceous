@@ -112,6 +112,12 @@ pub enum ErrorKind {
     },
     #[error("failed to generate fake hubris archive")]
     GenerateFakeHubrisArchive(#[source] hubtools::Error),
+    #[error("failed to generate fake measurement corpus")]
+    GenerateFakeMeasurementCorpus(#[source] rats_corim::Error),
+    #[error("failed to serialize fake measurement corpus")]
+    SerializeFakeMeasurementCorpus(
+        #[source] ciborium::ser::Error<std::io::Error>,
+    ),
 
     #[error("unspecified failure when generating ed25519 key")]
     Ed25519Generate,
