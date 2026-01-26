@@ -73,6 +73,18 @@ impl Artifacts {
         self.inner.get(&Some(tags)).map(BTreeSet::iter).unwrap_or_default()
     }
 
+    pub fn filter_tags(
+        &self,
+        mut predicate: impl FnMut(&KnownArtifactTags) -> bool,
+    ) -> impl Iterator<Item = &Artifact> {
+        self.inner
+            .iter()
+            .filter_map(move |(tags, artifacts)| {
+                predicate(tags.as_ref()?).then_some(artifacts)
+            })
+            .flatten()
+    }
+
     pub fn iter(&self) -> Iter<'_> {
         Iter { inner: self.inner.values().flatten() }
     }
