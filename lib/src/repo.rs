@@ -103,10 +103,19 @@ impl Repository {
             read_target_json(&repo, ArtifactsSchema::TARGET_NAME).await?
         else {
             if v1_compatibility
-                && let Some(repo) =
-                    v1::from_loaded(repo, log, trust_root).await?
+                && let Some((system_version, artifacts, v1_unpacked)) =
+                    v1::from_loaded(&repo, log).await?
             {
-                return Ok(repo);
+                return Ok(Repository {
+                    inner: repo,
+                    trust_root,
+                    archive_path,
+                    archive_sha256,
+                    system_version,
+                    artifacts,
+                    metadata: BTreeMap::new(),
+                    v1_unpacked: Some(v1_unpacked),
+                });
             }
 
             return Err(ErrorKind::TargetNotFound {

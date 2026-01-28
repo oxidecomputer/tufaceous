@@ -39,6 +39,7 @@ pub enum TrustStoreBehavior {
 }
 
 #[derive(Debug, Clone, Default)]
+#[must_use]
 pub struct RepositoryLoader {
     compute_archive_sha256: bool,
     expiration_enforcement: ExpirationEnforcement,
@@ -126,8 +127,16 @@ impl RepositoryLoader {
     }
 
     fn zip_base_urls(self) -> Self {
-        self.metadata_base_url("zip:///repo/metadata/".parse().unwrap())
-            .targets_base_url("zip:///repo/targets/".parse().unwrap())
+        self.metadata_base_url(
+            "zip:///repo/metadata/"
+                .parse()
+                .expect("`zip:///repo/metadata/` is a valid URL"),
+        )
+        .targets_base_url(
+            "zip:///repo/targets/"
+                .parse()
+                .expect("`zip:///repo/targets/` is a valid URL"),
+        )
     }
 
     /// Load a Tufaceous-generated ZIP archive from an owned buffer.

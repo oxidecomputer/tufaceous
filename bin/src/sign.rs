@@ -5,10 +5,11 @@
 use anyhow::Result;
 use camino::Utf8PathBuf;
 use clap::Parser;
-use fs_err::tokio as fs;
 use tough::key_source::LocalKeySource;
 use tufaceous::edit::SignedRepository;
 use tufaceous::edit::UnsignedRepository;
+use tufaceous::error::Error;
+use tufaceous::error::ErrorKind;
 
 #[derive(Debug, Parser)]
 #[cfg_attr(test, derive(PartialEq))]
@@ -30,7 +31,16 @@ impl SignOptions {
             unsigned = unsigned.generate_root();
         }
         if let Some(path) = self.root {
-            let root = fs::read(path).await?;
+            let root = match tokio::fs::read(&path).await {
+                Ok(root) => root,
+                Err(source) => {
+                    return Err(Error::from(ErrorKind::ReadFile {
+                        source,
+                        path: Some(path),
+                    })
+                    .into());
+                }
+            };
             unsigned = unsigned.root(root);
         }
         for path in self.key {

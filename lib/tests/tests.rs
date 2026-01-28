@@ -72,7 +72,7 @@ async fn empty_artifact() -> Result<(), Error> {
         .fake_artifact(
             "empty.img".to_owned(),
             "1.0.0".parse().unwrap(),
-            tufaceous_artifact::KnownArtifactTags::InstallinatorDocument {},
+            &tufaceous_artifact::KnownArtifactTags::InstallinatorDocument,
             0,
         )
         .finish()

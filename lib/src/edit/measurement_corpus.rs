@@ -29,16 +29,11 @@ impl Input<TargetSource<'static>> {
         corim: Option<Corim>,
         version: ArtifactVersion,
     ) -> Result<Self, Error> {
-        let Corim { id, .. } = match corim {
-            Some(corim) => corim,
-            None => {
-                let v = source.read_to_end().await?;
-                try_path!(
-                    ciborium::from_reader(v.as_slice()),
-                    Corim,
-                    &source.path
-                )
-            }
+        let Corim { id, .. } = if let Some(corim) = corim {
+            corim
+        } else {
+            let v = source.read_to_end().await?;
+            try_path!(ciborium::from_reader(v.as_slice()), Corim, &source.path)
         };
         let sha256 = source.sha256().await?;
         Ok(Self::MeasurementCorpus {

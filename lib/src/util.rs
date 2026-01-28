@@ -67,6 +67,7 @@ pub(crate) struct DirEntry {
 }
 
 impl DirEntry {
+    #[expect(clippy::needless_pass_by_value)]
     fn new(inner: tokio::fs::DirEntry) -> Result<Self, std::io::Error> {
         let path =
             inner.path().try_into().map_err(FromPathBufError::into_io_error)?;
@@ -84,6 +85,6 @@ impl DirEntry {
     pub(crate) fn file_name(&self) -> &str {
         self.path
             .file_name()
-            .expect("path created through DirEntry must have a filename")
+            .expect("path created through DirEntry must have a file name")
     }
 }

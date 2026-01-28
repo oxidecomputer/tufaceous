@@ -59,7 +59,7 @@ impl Input<TargetSource<'static>> {
             ControlFlow::Break(input) => return Ok(input),
             ControlFlow::Continue(guess_input) => guess_input,
         };
-        match Self::guess_zone_image(guess_input).await? {
+        match Self::guess_zone_image(guess_input)? {
             ControlFlow::Break(input) => Ok(input),
             ControlFlow::Continue(_) => {
                 Err(ErrorKind::GuessArtifact { path }.into())

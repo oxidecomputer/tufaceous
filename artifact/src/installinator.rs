@@ -81,7 +81,7 @@ impl InstallinatorArtifactKind {
 /// Historically this was called `ArtifactHashId` and consists of two
 /// strings: `kind` and `hash`. It was developed before the present system
 /// of tags representing an artifact kind but remains in use for any
-/// Installinator-related interfaces (namely Wicket and MUPdate overrides).
+/// Installinator-related interfaces (namely Wicket and mupdate overrides).
 ///
 /// This schema is stored to disk and should not change.
 #[derive(

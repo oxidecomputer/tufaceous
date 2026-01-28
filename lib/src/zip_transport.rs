@@ -39,7 +39,7 @@ use url::Url;
 use crate::error::Error;
 use crate::error::ErrorKind;
 
-const MAX_SYMLINK_TARGET_LEN: usize = 1024;
+const MAX_SYMLINK_TARGET_LEN: usize = 1024 - 1;
 const MAX_SYMLINK_TRAVERSAL: usize = 8;
 
 /// Implementation of [`tough::Transport`] that operates on a Zip archive.
@@ -278,10 +278,15 @@ impl<T: ReaderAt + Debug + Send + Sync + 'static> ZipTransport<T> {
     ) -> Result<Url, ZipTransportError> {
         let target = tokio::task::spawn_blocking(move || {
             let mut reader = self.reader_blocking(entry_data)?;
-            let mut v = vec![0; MAX_SYMLINK_TARGET_LEN];
+            let mut v = vec![0; MAX_SYMLINK_TARGET_LEN + 1];
             let len =
-                std::io::copy(&mut reader, &mut Cursor::new(v.as_mut_slice()))?;
-            v.truncate(len.try_into().unwrap());
+                std::io::copy(&mut reader, &mut Cursor::new(v.as_mut_slice()))?
+                    .try_into()
+                    .expect("MAX_SYMLINK_TARGET_LEN <= usize::MAX");
+            if v.len() > MAX_SYMLINK_TARGET_LEN {
+                return Err(ZipTransportError::SymlinkTargetLengthLimit);
+            }
+            v.truncate(len);
             String::from_utf8(v).map_err(|source| {
                 ZipTransportError::SymlinkUtf8(source.utf8_error())
             })
@@ -391,6 +396,8 @@ pub enum ZipTransportError {
     FileNotFound,
     #[error("is a directory")]
     IsADirectory,
+    #[error("symlink target name exceeded byte limit")]
+    SymlinkTargetLengthLimit,
     #[error("reached symlink traversal limit")]
     SymlinkTraversalLimit,
     #[error("symlink target is not valid UTF-8")]
@@ -409,6 +416,7 @@ impl ZipTransportError {
             | ZipTransportError::CompressionMethod(_)
             | ZipTransportError::Duplicate
             | ZipTransportError::IsADirectory
+            | ZipTransportError::SymlinkTargetLengthLimit
             | ZipTransportError::SymlinkTraversalLimit
             | ZipTransportError::SymlinkUtf8(_) => TransportErrorKind::Other,
         };
@@ -429,7 +437,7 @@ fn path_to_url(path: ZipFilePath<RawPath<'_>>, log: &Logger) -> Option<Url> {
         .ok()
         .and_then(|path| {
             Url::parse("zip:///")
-                .unwrap()
+                .expect("`zip:///` is a valid URL")
                 .join(path.as_str())
                 .inspect_err(|err| {
                     warn!(

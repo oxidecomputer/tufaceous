@@ -21,6 +21,7 @@ use crate::GIMLET_PHASE_1_PATH;
 use crate::PHASE_2_PATH;
 use crate::edit::KIB;
 use crate::edit::MIB;
+use crate::edit::OXIDE_BOOT_MAGIC;
 use crate::edit::input::Input;
 use crate::edit::source::BytesSource;
 use crate::edit::source::FileSource;
@@ -108,7 +109,7 @@ impl Input<TargetSource<'static>> {
         // recovery image based on the image name.
         let mut buf = [0; 4096];
         file.read_exact(&mut buf).await.ok()?;
-        if !buf.starts_with(&0x1DEB0075_u32.to_le_bytes()) {
+        if !buf.starts_with(&OXIDE_BOOT_MAGIC) {
             return None;
         }
         // see https://github.com/oxidecomputer/boot-image-tools/blob/main/src/diskimage.rs
@@ -142,7 +143,7 @@ fn read_os_tarball_metadata_blocking(
         let Some(parent) = path.parent() else { continue };
         if parent != "image" {
             continue;
-        };
+        }
         let Some(extension) = path.extension() else { continue };
         if extension != "txt" {
             continue;
@@ -156,7 +157,7 @@ fn read_os_tarball_metadata_blocking(
         }
         let file_name = try_path!(
             Utf8PathBuf::try_from(file_name.to_owned())
-                .map_err(|error| error.into_io_error()),
+                .map_err(camino::FromPathBufError::into_io_error),
             ReadFile,
             tarball_path
         );

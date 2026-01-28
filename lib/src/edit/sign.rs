@@ -20,6 +20,7 @@ use tough::schema::Root;
 use tough::schema::Signed;
 
 use crate::edit::Ed25519Key;
+use crate::edit::OXIDE_BOOT_MAGIC;
 use crate::edit::source::FileSource;
 use crate::edit::source::Target;
 use crate::edit::source::TargetSource;
@@ -32,6 +33,7 @@ pub(crate) const DEFAULT_VALIDITY: Duration =
     Duration::from_secs(60 * 60 * 24 * 7 /* 1 week */);
 
 #[derive(Debug)]
+#[must_use]
 pub struct UnsignedRepository<'a> {
     targets: BTreeMap<String, Target<'a>>,
     root: Option<Vec<u8>>,
@@ -263,7 +265,7 @@ impl SignedRepository<'_> {
             }
         }
         writer.finish().await.map_err(|source| {
-            let archive_path = archive_path.map(|p| p.to_owned());
+            let archive_path = archive_path.map(Utf8Path::to_owned);
             ErrorKind::WriteZip { source, archive_path }.into()
         })
     }
@@ -291,7 +293,7 @@ fn deflate_heuristic(buf: &[u8]) -> Compression {
         // ZIP archive, e.g. hubris archive. not necessarily compressed based on
         // this heuristic alone but in our case it's very likely.
         Compression::none()
-    } else if buf.starts_with(&0x1DEB0075_u32.to_le_bytes()) {
+    } else if buf.starts_with(&OXIDE_BOOT_MAGIC) {
         // oxide phase 2 OS image. images are zlib-compressed after the header
         // if the least-significant bit of the flags starting at byte 8 is set:
         if buf.get(8).is_some_and(|b| *b & 0x1 == 0x1) {

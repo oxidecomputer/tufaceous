@@ -4,6 +4,7 @@
 
 use std::io::Write;
 
+use anyhow::Context;
 use anyhow::Result;
 use camino::Utf8PathBuf;
 use clap::Parser;
@@ -28,7 +29,7 @@ impl Args {
         let mut stream = repo.read_target(&self.target_name).await?;
         let mut stdout = std::io::stdout().lock();
         while let Some(bytes) = stream.try_next().await? {
-            stdout.write_all(&bytes)?;
+            stdout.write_all(&bytes).context("failed to write to stdout")?;
         }
         Ok(())
     }

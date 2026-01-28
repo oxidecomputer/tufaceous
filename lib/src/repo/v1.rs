@@ -2,7 +2,6 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::io::BufRead;
 use std::io::Read;
@@ -19,6 +18,7 @@ use futures_util::Stream;
 use futures_util::TryStreamExt;
 use futures_util::pin_mut;
 use futures_util::stream;
+use hubtools::Caboose;
 use hubtools::RawHubrisArchive;
 use rawzip::FileReader;
 use rawzip::RangeReader;
@@ -41,13 +41,14 @@ use tufaceous_artifact::OsPhase2Tags;
 use tufaceous_artifact::OsVariant;
 use tufaceous_artifact::RotSlot;
 use tufaceous_artifact::ZoneTags;
+use tufaceous_artifact::hubris::ReadCabooseError;
 
 use crate::COSMO_PHASE_1_PATH;
 use crate::GIMLET_PHASE_1_PATH;
 use crate::PHASE_2_PATH;
-use crate::Repository;
 use crate::error::Error;
 use crate::error::ErrorKind;
+use crate::error::try_path;
 use crate::repo::read_target;
 use crate::repo::read_target_json;
 use crate::repo::read_target_vec;
@@ -59,230 +60,108 @@ pub(crate) struct Unpacked {
 }
 
 pub(crate) async fn from_loaded(
-    repo: tough::Repository,
+    repo: &tough::Repository,
     log: &Logger,
-    trust_root: Vec<u8>,
-) -> Result<Option<Repository>, Error> {
+) -> Result<Option<(Version, Artifacts, Unpacked)>, Error> {
     let Some(V1ArtifactsSchema { system_version, artifacts: v1_artifacts }) =
-        read_target_json(&repo, V1ArtifactsSchema::TARGET_NAME).await?
+        read_target_json(repo, V1ArtifactsSchema::TARGET_NAME).await?
     else {
         return Ok(None);
     };
 
     let mut artifacts = Artifacts::default();
-    let mut entries = HashMap::new();
-    for artifact in v1_artifacts {
-        let kind = match artifact.kind {
+    let mut unpacked = Unpacked { entries: HashMap::new() };
+    for V1Artifact { version, kind, target } in v1_artifacts {
+        let Some((hash, length)) = sha256_length(repo, log, &target) else {
+            continue;
+        };
+        let kind = match kind {
             V1ArtifactKind::Known(kind) => kind,
             V1ArtifactKind::Unknown(kind) => {
                 warn!(
                     log,
                     "skipping artifact";
-                    "target_name" => &artifact.target,
+                    "target_name" => &target,
                     "error" => "unknown v1 kind",
                     "kind" => kind,
                 );
                 continue;
             }
         };
-        let Some((hash, length)) = sha256_length(&repo, log, &artifact.target)
-        else {
-            continue;
-        };
-
-        match kind {
+        let tags = match kind {
             V1KnownArtifactKind::GimletSp
             | V1KnownArtifactKind::PscSp
             | V1KnownArtifactKind::SwitchSp => {
-                let Some(image) =
-                    read_target_vec(&repo, &artifact.target).await?
-                else {
-                    continue;
-                };
-                let caboose = RawHubrisArchive::from_vec(image)
-                    .and_then(|image| image.read_caboose())
-                    .map_err(|source| ErrorKind::ReadHubrisArchive {
-                        source,
-                        path: artifact.target.clone().into(),
-                    })?;
-                let tags = KnownArtifactTags::from_sp_caboose(&caboose)
-                    .map_err(|source| ErrorKind::ReadCaboose {
-                        source,
-                        path: artifact.target.clone().into(),
-                    })?;
-                artifacts.insert(Artifact {
-                    target_name: artifact.target,
-                    version: artifact.version,
-                    tags: tags.to_tags(),
-                    hash,
-                    length,
-                });
+                let image = read_target_vec(repo, &target).await?;
+                let Some(image) = image else { continue };
+                caboose_tags(
+                    image,
+                    &target,
+                    KnownArtifactTags::from_sp_caboose,
+                )?
             }
             V1KnownArtifactKind::GimletRotBootloader
             | V1KnownArtifactKind::PscRotBootloader
             | V1KnownArtifactKind::SwitchRotBootloader => {
-                let Some(image) =
-                    read_target_vec(&repo, &artifact.target).await?
-                else {
-                    continue;
-                };
-                let caboose = RawHubrisArchive::from_vec(image)
-                    .and_then(|image| image.read_caboose())
-                    .map_err(|source| ErrorKind::ReadHubrisArchive {
-                        source,
-                        path: artifact.target.clone().into(),
-                    })?;
-                let tags =
-                    KnownArtifactTags::from_rot_bootloader_caboose(&caboose)
-                        .map_err(|source| ErrorKind::ReadCaboose {
-                            source,
-                            path: artifact.target.clone().into(),
-                        })?;
-                artifacts.insert(Artifact {
-                    target_name: artifact.target,
-                    version: artifact.version,
-                    tags: tags.to_tags(),
-                    hash,
-                    length,
-                });
+                let image = read_target_vec(repo, &target).await?;
+                let Some(image) = image else { continue };
+                caboose_tags(
+                    image,
+                    &target,
+                    KnownArtifactTags::from_rot_bootloader_caboose,
+                )?
             }
-
             V1KnownArtifactKind::GimletRot
             | V1KnownArtifactKind::PscRot
             | V1KnownArtifactKind::SwitchRot => {
-                let target = artifact.target.clone();
-                let unpacked =
-                    CompositeArtifact::unpack(&repo, &target).await?;
-                for (tar_path, inner) in unpacked.entries {
-                    let UnpackedArtifact { file, hash, length } = inner;
-                    let slot = match tar_path.as_ref() {
-                        "archive-a.zip" => RotSlot::A,
-                        "archive-b.zip" => RotSlot::B,
-                        _ => continue,
-                    };
-                    let mut reader = RangeReader::new(file.clone(), 0..length);
-                    let mut vec = length
-                        .try_into()
-                        .map(Vec::with_capacity)
-                        .unwrap_or_default();
-                    let image = tokio::task::spawn_blocking(move || {
-                        reader.read_to_end(&mut vec).map(|_| vec).map_err(
-                            |source| ErrorKind::ReadFile { source, path: None },
-                        )
-                    })
-                    .await??;
-                    let caboose = RawHubrisArchive::from_vec(image)
-                        .and_then(|image| image.read_caboose())
-                        .map_err(|source| ErrorKind::ReadHubrisArchive {
-                            source,
-                            path: target.clone().into(),
-                        })?;
-                    let tags =
-                        KnownArtifactTags::from_rot_caboose(&caboose, slot)
-                            .map_err(|source| ErrorKind::ReadCaboose {
-                                source,
-                                path: target.clone().into(),
-                            })?;
-                    let target_name = format!("{}/{tar_path}", artifact.target);
-                    entries.insert(
-                        target_name.clone(),
-                        UnpackedArtifact { file, hash, length },
-                    );
-                    artifacts.insert(Artifact {
-                        target_name,
-                        version: artifact.version.clone(),
-                        tags: tags.to_tags(),
-                        hash,
-                        length,
-                    });
-                }
+                CompositeArtifact::unpack(repo, target)
+                    .await?
+                    .read_rot(&mut artifacts, &mut unpacked, version)
+                    .await?;
+                continue;
             }
 
             V1KnownArtifactKind::Host => {
-                unpack_os(
-                    CompositeArtifact::unpack(&repo, &artifact.target).await?,
-                    &mut entries,
+                CompositeArtifact::unpack(repo, target).await?.read_os_image(
                     &mut artifacts,
-                    &artifact,
+                    &mut unpacked,
                     OsVariant::Host,
+                    &version,
                 );
+                continue;
             }
             V1KnownArtifactKind::Trampoline => {
-                unpack_os(
-                    CompositeArtifact::unpack(&repo, &artifact.target).await?,
-                    &mut entries,
+                CompositeArtifact::unpack(repo, target).await?.read_os_image(
                     &mut artifacts,
-                    &artifact,
+                    &mut unpacked,
                     OsVariant::Recovery,
+                    &version,
                 );
+                continue;
             }
 
             V1KnownArtifactKind::InstallinatorDocument => {
-                artifacts.insert(Artifact {
-                    target_name: artifact.target,
-                    version: artifact.version,
-                    tags: KnownArtifactTags::InstallinatorDocument {}.to_tags(),
-                    hash,
-                    length,
-                });
+                KnownArtifactTags::InstallinatorDocument
             }
 
             V1KnownArtifactKind::ControlPlane => {
-                let unpacked =
-                    CompositeArtifact::unpack(&repo, &artifact.target).await?;
-                for (tar_path, inner) in unpacked.entries {
-                    let UnpackedArtifact { file, hash, length } = inner;
-                    if tar_path.starts_with("zones/") {
-                        let path = tar_path.to_string();
-                        let (file, layer_info) =
-                            crate::util::read_zone_layer_info(
-                                RangeReader::new(file, 0..length),
-                                path.into(),
-                            )
-                            .await?;
-                        let file = file.into_inner();
-                        let target_name =
-                            format!("{}/{tar_path}", artifact.target);
-                        entries.insert(
-                            target_name.clone(),
-                            UnpackedArtifact { file, hash, length },
-                        );
-                        artifacts.insert(Artifact {
-                            target_name,
-                            version: layer_info.version,
-                            tags: KnownArtifactTags::Zone(ZoneTags {
-                                zone_name: layer_info.pkg,
-                            })
-                            .to_tags(),
-                            hash,
-                            length,
-                        });
-                    }
-                }
+                CompositeArtifact::unpack(repo, target)
+                    .await?
+                    .read_control_plane(&mut artifacts, &mut unpacked)
+                    .await?;
+                continue;
             }
 
             V1KnownArtifactKind::MeasurementCorpus => {
-                artifacts.insert(Artifact {
-                    target_name: artifact.target,
-                    version: artifact.version,
-                    tags: KnownArtifactTags::MeasurementCorpus {}.to_tags(),
-                    hash,
-                    length,
-                });
+                KnownArtifactTags::MeasurementCorpus
             }
-        }
-    }
+        };
 
-    Ok(Some(Repository {
-        inner: repo,
-        system_version,
-        trust_root,
-        archive_path: None,
-        archive_sha256: None,
-        artifacts: Artifacts::new(artifacts),
-        metadata: BTreeMap::new(),
-        v1_unpacked: Some(Unpacked { entries }),
-    }))
+        let target_name = target;
+        let tags = tags.to_tags();
+        artifacts.insert(Artifact { target_name, version, tags, hash, length });
+    }
+    Ok(Some((system_version, artifacts, unpacked)))
 }
 
 #[derive(Debug, Clone)]
@@ -330,32 +209,46 @@ impl UnpackedArtifact {
                     );
                 }
                 hasher.update(&bytes);
-                bytes_read += u64::try_from(bytes.len()).unwrap();
+                bytes_read +=
+                    u64::try_from(bytes.len()).expect("usize fits in u64");
                 Ok(Some((bytes, (buf, hasher, bytes_read))))
             },
         )
     }
 }
 
+fn caboose_tags(
+    image: Vec<u8>,
+    target_name: &str,
+    f: impl FnOnce(&Caboose) -> Result<KnownArtifactTags, ReadCabooseError>,
+) -> Result<KnownArtifactTags, Error> {
+    let caboose = try_path!(
+        RawHubrisArchive::from_vec(image)
+            .and_then(|image| image.read_caboose()),
+        ReadHubrisArchive,
+        target_name
+    );
+    Ok(try_path!(f(&caboose), ReadCaboose, target_name))
+}
+
 #[derive(Debug)]
 struct CompositeArtifact {
     entries: HashMap<Utf8PathBuf, UnpackedArtifact>,
+    original_target_name: String,
 }
 
 impl CompositeArtifact {
     async fn unpack(
         repo: &tough::Repository,
-        target_name: &str,
+        target_name: String,
     ) -> Result<Self, Error> {
         let stream =
-            read_target(repo, target_name).await?.ok_or_else(|| {
-                ErrorKind::TargetNotFound {
-                    target_name: target_name.to_owned(),
-                }
+            read_target(repo, &target_name).await?.ok_or_else(|| {
+                ErrorKind::TargetNotFound { target_name: target_name.clone() }
             })?;
         pin_mut!(stream);
         let (tx, rx) = mpsc::channel(1);
-        let target_name = target_name.to_owned();
+        let target_name = target_name.clone();
         let task = tokio::task::spawn_blocking(move || {
             let mut archive =
                 tar::Archive::new(GzDecoder::new(MpscReader::new(rx)));
@@ -393,56 +286,138 @@ impl CompositeArtifact {
                         ErrorKind::WriteFile { source, path: None }
                     })?;
                     hasher.update(&buf[..n]);
-                    length += u64::try_from(n).unwrap();
+                    length += u64::try_from(n).expect("usize fits in u64");
                 }
                 let file = Arc::new(file.into());
                 let hash = ArtifactHash(hasher.finalize().into());
                 entries.insert(path, UnpackedArtifact { file, hash, length });
             }
-            Ok(Self { entries })
+            Ok(Self { entries, original_target_name: target_name })
         });
         while let Some(item) = stream.try_next().await? {
             let Ok(()) = tx.send(item).await else { break };
         }
         task.await?
     }
-}
 
-fn unpack_os(
-    unpacked: CompositeArtifact,
-    entries: &mut HashMap<String, UnpackedArtifact>,
-    artifacts: &mut Artifacts,
-    artifact: &V1Artifact,
-    os_variant: OsVariant,
-) {
-    for (tar_path, inner) in unpacked.entries {
-        let tags = match tar_path.as_str().strip_prefix("image/") {
-            Some(COSMO_PHASE_1_PATH) => {
+    async fn read_rot(
+        mut self,
+        artifacts: &mut Artifacts,
+        unpacked: &mut Unpacked,
+        version: ArtifactVersion,
+    ) -> Result<(), Error> {
+        for slot in [RotSlot::A, RotSlot::B] {
+            let path = Utf8PathBuf::from(format!("archive-{slot}.zip"));
+            let Some(UnpackedArtifact { file, hash, length }) =
+                self.entries.remove(&path)
+            else {
+                continue;
+            };
+
+            let mut reader = RangeReader::new(file.clone(), 0..length);
+            let image = tokio::task::spawn_blocking(move || {
+                let capacity = usize::try_from(length).unwrap_or_default();
+                let mut vec = Vec::with_capacity(capacity);
+                reader.read_to_end(&mut vec).map(|_| vec).map_err(|source| {
+                    ErrorKind::ReadFile { source, path: None }
+                })
+            })
+            .await??;
+
+            let target_name = format!("{}/{path}", self.original_target_name);
+            let tags = caboose_tags(image, &target_name, |caboose| {
+                KnownArtifactTags::from_rot_caboose(caboose, slot)
+            })?;
+            artifacts.insert(Artifact {
+                target_name: target_name.clone(),
+                version: version.clone(),
+                tags: tags.to_tags(),
+                hash,
+                length,
+            });
+            unpacked
+                .entries
+                .insert(target_name, UnpackedArtifact { file, hash, length });
+        }
+        Ok(())
+    }
+
+    fn read_os_image(
+        mut self,
+        artifacts: &mut Artifacts,
+        unpacked: &mut Unpacked,
+        os_variant: OsVariant,
+        version: &ArtifactVersion,
+    ) {
+        for (file_name, tags) in [
+            (
+                COSMO_PHASE_1_PATH,
                 KnownArtifactTags::OsPhase1(OsPhase1Tags {
                     os_variant,
                     os_board: OsBoard::Cosmo,
-                })
-            }
-            Some(GIMLET_PHASE_1_PATH) => {
+                }),
+            ),
+            (
+                GIMLET_PHASE_1_PATH,
                 KnownArtifactTags::OsPhase1(OsPhase1Tags {
                     os_variant,
                     os_board: OsBoard::Gimlet,
+                }),
+            ),
+            (
+                PHASE_2_PATH,
+                KnownArtifactTags::OsPhase2(OsPhase2Tags { os_variant }),
+            ),
+        ] {
+            let path = Utf8PathBuf::from(format!("image/{file_name}"));
+            let Some(entry) = self.entries.remove(&path) else {
+                continue;
+            };
+            let target_name = format!("{}/{path}", self.original_target_name);
+            artifacts.insert(Artifact {
+                target_name: target_name.clone(),
+                version: version.clone(),
+                tags: tags.to_tags(),
+                hash: entry.hash,
+                length: entry.length,
+            });
+            unpacked.entries.insert(target_name, entry);
+        }
+    }
+
+    async fn read_control_plane(
+        self,
+        artifacts: &mut Artifacts,
+        unpacked: &mut Unpacked,
+    ) -> Result<(), Error> {
+        for (tar_path, UnpackedArtifact { file, hash, length }) in self.entries
+        {
+            if !tar_path.starts_with("zones") {
+                continue;
+            }
+            let target_name =
+                format!("{}/{tar_path}", self.original_target_name);
+            let (file, layer_info) = crate::util::read_zone_layer_info(
+                RangeReader::new(file, 0..length),
+                target_name.clone().into(),
+            )
+            .await?;
+            let file = file.into_inner();
+            artifacts.insert(Artifact {
+                target_name: target_name.clone(),
+                version: layer_info.version,
+                tags: KnownArtifactTags::Zone(ZoneTags {
+                    zone_name: layer_info.pkg,
                 })
-            }
-            Some(PHASE_2_PATH) => {
-                KnownArtifactTags::OsPhase2(OsPhase2Tags { os_variant })
-            }
-            _ => continue,
-        };
-        let target_name = format!("{}/{tar_path}", artifact.target);
-        artifacts.insert(Artifact {
-            target_name: target_name.clone(),
-            version: artifact.version.clone(),
-            tags: tags.to_tags(),
-            hash: inner.hash,
-            length: inner.length,
-        });
-        entries.insert(target_name, inner);
+                .to_tags(),
+                hash,
+                length,
+            });
+            unpacked
+                .entries
+                .insert(target_name, UnpackedArtifact { file, hash, length });
+        }
+        Ok(())
     }
 }
 

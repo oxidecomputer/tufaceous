@@ -27,7 +27,6 @@ clap = { version = "4.5.31", features = ["cargo", "derive", "wrap_help"] }
 daft = { version = "0.1.1", features = ["derive"] }
 expectorate = "1.1.0"
 flate2 = "1.0.35"
-fs-err = "3.2.0"
 futures-util = "0.3.31"
 hex = "0.4.3"
 hubtools = { git = "https://github.com/oxidecomputer/hubtools.git", branch = "main" }
@@ -58,6 +57,9 @@ tufaceous-brand-metadata.path = "brand-metadata"
 url = "2.5.4"
 
 [workspace.lints.clippy]
+pedantic = { level = "warn", priority = -1 }
+must-use-candidate = "allow"
+missing-errors-doc = "allow"
 
 [profile.dev.package.flate2]
 opt-level = 3

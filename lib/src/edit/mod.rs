@@ -21,5 +21,7 @@ pub use key::*;
 pub use root::*;
 pub use sign::*;
 
-const KIB: usize = 1024;
-const MIB: usize = 1024 * KIB;
+const KIB: u64 = 1024;
+const MIB: u64 = 1024 * KIB;
+#[expect(clippy::unreadable_literal)]
+const OXIDE_BOOT_MAGIC: [u8; 4] = 0x1DEB0075_u32.to_le_bytes();

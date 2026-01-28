@@ -28,20 +28,14 @@ use crate::error::try_path;
 
 impl Input<TargetSource<'static>> {
     pub(crate) async fn zone_image(path: Utf8PathBuf) -> Result<Self, Error> {
-        let cloned_path = path.clone();
-        let (file, layer_info) = tokio::task::spawn_blocking(move || {
-            let file = try_path!(std::fs::File::open(&path), ReadFile, path);
-            let mut archive = tar::Archive::new(GzDecoder::new(file));
-            let layer_info = try_path!(
-                Metadata::read_from_tar(&mut archive)
-                    .and_then(|metadata| metadata.layer_info().cloned()),
-                ReadZoneOxideJson,
-                path
-            );
-            Ok::<_, Error>((archive.into_inner().into_inner(), layer_info))
-        })
-        .await??;
-        let source = FileSource::from_file(file.into(), cloned_path);
+        let file =
+            try_path!(tokio::fs::File::open(&path).await, OpenFile, path);
+        let (file, layer_info) = crate::util::read_zone_layer_info(
+            file.into_std().await,
+            path.clone(),
+        )
+        .await?;
+        let source = FileSource::from_file(file.into(), path);
         Ok(Self::Zone {
             source: source.into(),
             tags: ZoneTags { zone_name: layer_info.pkg },
@@ -49,7 +43,8 @@ impl Input<TargetSource<'static>> {
         })
     }
 
-    pub(crate) async fn guess_zone_image(input: GuessInput) -> GuessResult {
+    #[expect(clippy::unnecessary_wraps)]
+    pub(crate) fn guess_zone_image(input: GuessInput) -> GuessResult {
         // `oxide.json` is the first file of a zone image and is relatively
         // small, so it should be contained entirely within the first 4K of the
         // compressed tarball.

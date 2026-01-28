@@ -56,6 +56,7 @@ impl Metadata {
         Metadata { v: "1".into(), t: archive_type }
     }
 
+    #[expect(clippy::missing_panics_doc)]
     pub fn append_to_tar<T: Write>(
         &self,
         a: &mut tar::Builder<T>,
@@ -72,7 +73,7 @@ impl Metadata {
         h.set_gid(0);
         h.set_path("oxide.json")?;
         h.set_mode(0o444);
-        h.set_size(b.len().try_into().unwrap());
+        h.set_size(b.len().try_into().expect("usize fits in u64"));
         h.set_mtime(mtime);
         h.set_cksum();
 

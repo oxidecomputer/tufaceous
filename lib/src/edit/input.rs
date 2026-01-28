@@ -207,7 +207,7 @@ impl Output<BytesSource> {
             version: data.version,
             tags: data.tags.to_tags(),
             hash: ArtifactHash(hasher.finalize().into()),
-            length: self.source.length().try_into().unwrap(),
+            length: self.source.length(),
         })
     }
 }

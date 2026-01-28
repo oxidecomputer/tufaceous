@@ -38,6 +38,7 @@ use crate::schema::ArtifactSchema;
 use crate::schema::ArtifactsSchema;
 
 #[derive(Debug)]
+#[must_use]
 pub struct RepositoryEditor<'a> {
     system_version: Version,
     artifact_version: Result<ArtifactVersion, ArtifactVersionError>,
@@ -244,8 +245,8 @@ impl<'a> RepositoryEditor<'a> {
         mut self,
         target_name: String,
         version: ArtifactVersion,
-        tags: KnownArtifactTags,
-        length: usize,
+        tags: &KnownArtifactTags,
+        length: u64,
     ) -> Self {
         let prefix = format!("{target_name}\n{version}\n{tags:?}\n");
         self.targets
@@ -267,16 +268,12 @@ impl<'a> RepositoryEditor<'a> {
         Ok(editor)
     }
 
-    pub async fn metadata(
-        mut self,
-        key: String,
-        value: serde_json::Value,
-    ) -> Self {
+    pub fn metadata(mut self, key: String, value: serde_json::Value) -> Self {
         self.metadata.insert(key, value);
         self
     }
 
-    pub async fn remove_metadata(mut self, key: &str) -> Self {
+    pub fn remove_metadata(mut self, key: &str) -> Self {
         self.metadata.remove(key);
         self
     }

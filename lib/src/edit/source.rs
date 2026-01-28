@@ -6,7 +6,6 @@ use std::convert::Infallible;
 use std::pin::Pin;
 
 use bytes::Bytes;
-use bytes::BytesMut;
 use camino::Utf8PathBuf;
 use futures_util::Stream;
 use futures_util::StreamExt;
@@ -85,7 +84,7 @@ impl<'a> From<RepositorySource<'a>> for TargetSource<'a> {
 #[derive(Debug, Clone)]
 pub(crate) struct BytesSource {
     bytes: Bytes,
-    fake_length: Option<usize>,
+    fake_length: Option<u64>,
     sha256: Option<ArtifactHash>,
 }
 
@@ -102,29 +101,30 @@ impl BytesSource {
         Ok(Self { bytes: s.into(), fake_length: None, sha256: None })
     }
 
-    pub(crate) fn fake_padded(prefix: impl Into<Bytes>, length: usize) -> Self {
+    pub(crate) fn fake_padded(prefix: impl Into<Bytes>, length: u64) -> Self {
         Self { bytes: prefix.into(), fake_length: Some(length), sha256: None }
     }
 
     pub(crate) fn iter_bytes(&self) -> impl Iterator<Item = Bytes> + 'static {
-        const CHUNK_SIZE: usize = 8192;
-
         let mut bytes = self.bytes.clone();
         let mut remaining = match self.fake_length {
             Some(length) => {
-                bytes.truncate(length);
-                length - bytes.len()
+                if let Ok(length) = usize::try_from(length) {
+                    bytes.truncate(length);
+                }
+                length - u64::try_from(bytes.len()).expect("usize fits in u64")
             }
             None => 0,
         };
-        let zero = BytesMut::zeroed(remaining.min(CHUNK_SIZE)).freeze();
         std::iter::once(bytes).chain(std::iter::from_fn(move || {
-            if remaining > 0 {
-                let slice = zero.slice(..remaining.min(CHUNK_SIZE));
-                remaining = remaining.saturating_sub(slice.len());
-                Some(slice)
-            } else {
+            static ZERO: &[u8] = &[0; 8192];
+            if remaining == 0 {
                 None
+            } else {
+                let end = remaining.min(8192);
+                remaining -= end;
+                let end = usize::try_from(end).expect("8192 <= usize::MAX");
+                Some(Bytes::from_static(&ZERO[..end]))
             }
         }))
     }
@@ -135,8 +135,10 @@ impl BytesSource {
         stream::iter(self.iter_bytes().map(Ok))
     }
 
-    pub(crate) fn length(&self) -> usize {
-        self.fake_length.unwrap_or_else(|| self.bytes.len())
+    pub(crate) fn length(&self) -> u64 {
+        self.fake_length.unwrap_or_else(|| {
+            self.bytes.len().try_into().expect("usize fits in u64")
+        })
     }
 
     async fn sha256(&mut self) -> ArtifactHash {
@@ -153,11 +155,7 @@ impl BytesSource {
 
     pub(crate) async fn into_target(mut self) -> Target<'static> {
         Target {
-            length: self
-                .fake_length
-                .unwrap_or(self.bytes.len())
-                .try_into()
-                .unwrap(),
+            length: self.length(),
             sha256: self.sha256().await.0.to_vec(),
             source: self.into(),
         }
@@ -200,10 +198,11 @@ impl FileSource {
             .try_fold(
                 (0u64, Sha256::new()),
                 |(mut length, mut hasher), bytes| {
-                    length += u64::try_from(bytes.len()).unwrap();
+                    length +=
+                        u64::try_from(bytes.len()).expect("usize fits in u64");
                     hasher.update(&bytes);
                     if let Some(vec) = vec.as_mut() {
-                        vec.extend_from_slice(&bytes)
+                        vec.extend_from_slice(&bytes);
                     }
                     std::future::ready(Ok((length, hasher)))
                 },
