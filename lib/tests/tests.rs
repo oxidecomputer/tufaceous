@@ -4,6 +4,8 @@
 
 use std::convert::Infallible;
 use std::io::Write;
+use std::num::NonZero;
+use std::sync::Arc;
 
 use bytes::BufMut;
 use bytes::BytesMut;
@@ -40,6 +42,42 @@ async fn it_works() -> Result<(), Error> {
             .try_concat()
             .await?;
     }
+    Ok(())
+}
+
+#[tokio::test]
+async fn verify_targets() -> Result<(), Error> {
+    let log = slog::Logger::root(slog::Discard, slog::o!());
+    let mut zip = RepositoryEditor::fake(VERSION)?
+        .finish()
+        .await?
+        .generate_root()
+        .sign()
+        .await?
+        .write_zip(Vec::new(), Utc::now())
+        .await?;
+    let repo = RepositoryLoader::new()
+        .trust_store_behavior(TrustStoreBehavior::UnsafeBlindFaith)
+        .load_zip_buffer(zip.clone(), &log)
+        .await?;
+    let repo = Arc::new(repo);
+    let parallelism =
+        std::thread::available_parallelism().unwrap_or(NonZero::<usize>::MIN);
+    repo.verify_targets(parallelism).await?;
+
+    // Now intentionally fuck up the archive, and ensure verification fails.
+    let pos = memchr::memmem::find(&zip, b"hubris")
+        .expect("b\"hubris\" not found in archive");
+    zip[pos] = b'H'; // flip! that! bit!
+    let repo = RepositoryLoader::new()
+        .trust_store_behavior(TrustStoreBehavior::UnsafeBlindFaith)
+        .load_zip_buffer(zip.clone(), &log)
+        .await?;
+    let repo = Arc::new(repo);
+    let err = repo.verify_targets(parallelism).await.unwrap_err();
+    // This error ultimately comes from `rawzip`'s CRC-32 checking.
+    assert!(err.to_string().contains("Invalid checksum"));
+
     Ok(())
 }
 

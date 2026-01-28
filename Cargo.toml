@@ -30,6 +30,7 @@ flate2 = "1.0.35"
 futures-util = "0.3.31"
 hex = "0.4.3"
 hubtools = { git = "https://github.com/oxidecomputer/hubtools.git", branch = "main" }
+memchr = "2.7.4"
 proptest = "1.5.0"
 rats-corim = { git = "https://github.com/oxidecomputer/rats-corim.git", branch = "main" }
 rawzip = "0.4.2"

@@ -2843,6 +2843,7 @@ dependencies = [
  "futures-util",
  "hex",
  "hubtools",
+ "memchr",
  "rats-corim",
  "rawzip",
  "semver",

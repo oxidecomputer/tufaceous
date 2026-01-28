@@ -6,7 +6,9 @@ mod v1;
 
 use std::collections::BTreeMap;
 use std::collections::HashMap;
+use std::num::NonZero;
 use std::pin::Pin;
+use std::sync::Arc;
 
 use bytes::Bytes;
 use camino::Utf8Path;
@@ -17,6 +19,9 @@ use semver::Version;
 use serde::de::DeserializeOwned;
 use slog::Logger;
 use slog::warn;
+use tokio::sync::Semaphore;
+use tokio::sync::TryAcquireError;
+use tokio::task::JoinSet;
 use tough::TargetName;
 use tough::schema::Hashes;
 use tough::schema::Target;
@@ -186,10 +191,11 @@ impl Repository {
     pub async fn read_target<'a>(
         &'a self,
         target: &str,
-    ) -> Result<impl Stream<Item = Result<Bytes, Error>> + use<'a>, Error> {
+    ) -> Result<impl Stream<Item = Result<Bytes, Error>> + Send + use<'a>, Error>
+    {
         if let Some(stream) = read_target(&self.inner, target).await? {
             return Ok(Box::pin(stream)
-                as Pin<Box<dyn Stream<Item = Result<Bytes, Error>>>>);
+                as Pin<Box<dyn Stream<Item = Result<Bytes, Error>> + Send>>);
         }
 
         if let Some(unpacked) = &self.v1_unpacked
@@ -199,6 +205,71 @@ impl Repository {
         }
 
         Err(ErrorKind::TargetNotFound { target_name: target.to_owned() }.into())
+    }
+
+    /// Reads all targets in the repository and verifies they have the correct
+    /// length and checksum.
+    ///
+    /// The repository must be wrapped in [`Arc`] to call this method.
+    ///
+    /// This method is *not* necessary to safely read the repository. All
+    /// streams returned from [`Repository::read_target`] and read completely
+    /// are verified to have the same correct length and checksum.
+    ///
+    /// However, this verification is useful to complete before using contents
+    /// for any operations if you have the entire repository available locally.
+    /// In the past, Tufaceous archives were used by completely unpacking the
+    /// archive, which verified the contents against the CRC-32 checksums in the
+    /// ZIP archive; this caught binaries that were corrupted in transit between
+    /// CI and destination hardware.
+    ///
+    /// `parallelism` controls how many targets are read at a time. Consider
+    /// using [`std::thread::available_parallelism`], or [`NonZero::<usize>::MIN`]
+    /// as a fallback or if you do not want parallelism.
+    #[expect(clippy::missing_panics_doc)]
+    pub async fn verify_targets(
+        self: &Arc<Self>,
+        parallelism: NonZero<usize>,
+    ) -> Result<(), Error> {
+        // This is a reimplementation of `parallel-task-set` from Omicron,
+        // and could potentially be replaced with that if it's published to
+        // crates.io.
+        let semaphore = Arc::new(Semaphore::new(parallelism.get()));
+        let mut set: JoinSet<Result<(), Error>> = JoinSet::new();
+
+        for target_name in self.targets().keys() {
+            let target = target_name.raw().to_owned();
+            let permit = match Arc::clone(&semaphore).try_acquire_owned() {
+                Ok(permit) => permit,
+                Err(TryAcquireError::Closed) => {
+                    unreachable!("we never close the semaphore")
+                }
+                Err(TryAcquireError::NoPermits) => {
+                    if let Some(result) = set.join_next().await {
+                        result??;
+                    }
+                    Arc::clone(&semaphore)
+                        .acquire_owned()
+                        .await
+                        .expect("we never close the semaphore")
+                }
+            };
+            let this = Arc::clone(self);
+            set.spawn(async move {
+                let _permit = permit;
+                let mut stream = this.read_target(&target).await?;
+                // Read the stream to the end. There's no need to do anything
+                // with the data; the underlying stream performs verification.
+                while stream.try_next().await?.is_some() {}
+                Ok(())
+            });
+        }
+
+        while let Some(result) = set.join_next().await {
+            result??;
+        }
+
+        Ok(())
     }
 }
 
