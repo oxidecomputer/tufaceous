@@ -3,6 +3,7 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use std::borrow::Cow;
+use std::collections::BTreeSet;
 
 use serde::Deserialize;
 use serde::Serialize;
@@ -18,20 +19,22 @@ use crate::ArtifactHash;
 /// There are no backwards compatibility constraints for this document. The
 /// version of Installinator that processes this document is the same as the
 /// version of tufaceous that creates it.
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
 pub struct InstallinatorDocument {
-    pub artifacts: Vec<InstallinatorArtifact>,
+    pub artifacts: BTreeSet<InstallinatorArtifact>,
 }
 
 /// Describes an artifact available to Installinator.
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(
+    Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Deserialize, Serialize,
+)]
 pub struct InstallinatorArtifact {
-    /// A file name without directory separators; not necessarily the target
-    /// name.
-    pub file_name: String,
     #[serde(flatten)]
     pub kind: InstallinatorArtifactKind,
     pub sha256: ArtifactHash,
+    /// A file name without directory separators; not necessarily the target
+    /// name.
+    pub file_name: String,
 }
 
 impl InstallinatorArtifact {
@@ -44,13 +47,15 @@ impl InstallinatorArtifact {
 }
 
 /// The artifact kind for an Installinator artifact.
-#[derive(Debug, Clone, Deserialize, Serialize)]
-#[serde(tag = "kind", rename_all = "kebab-case")]
+#[derive(
+    Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Deserialize, Serialize,
+)]
+#[serde(tag = "kind", rename_all = "snake_case")]
 pub enum InstallinatorArtifactKind {
-    /// A measurement corpus.
-    MeasurementCorpus,
     /// The host phase 2 artifact.
     HostPhase2,
+    /// A measurement corpus.
+    MeasurementCorpus,
     /// A control plane zone artifact.
     Zone { zone_name: String },
 }

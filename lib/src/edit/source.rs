@@ -6,6 +6,7 @@ use std::convert::Infallible;
 use std::pin::Pin;
 
 use bytes::Bytes;
+use bytes::BytesMut;
 use camino::Utf8PathBuf;
 use futures_util::Stream;
 use futures_util::StreamExt;
@@ -38,14 +39,13 @@ pub(crate) enum TargetSource<'a> {
     Bytes(BytesSource),
     File(FileSource),
     Repository(RepositorySource<'a>),
-    Fake(FakeSource),
 }
 
 impl TargetSource<'_> {
     pub(crate) fn cost(&self) -> usize {
         match self {
-            TargetSource::Bytes(_) => 0,
-            TargetSource::Fake(_) => 1,
+            TargetSource::Bytes(BytesSource { fake_length: None, .. }) => 0,
+            TargetSource::Bytes(_) => 1,
             TargetSource::File(_) => 2,
             TargetSource::Repository(_) => 3,
         }
@@ -55,14 +55,11 @@ impl TargetSource<'_> {
         &mut self,
     ) -> Pin<Box<dyn Stream<Item = Result<Bytes, Error>> + '_>> {
         match self {
-            TargetSource::Bytes(BytesSource(bytes)) => {
-                Box::pin(stream::once(std::future::ready(Ok(bytes.clone()))))
+            TargetSource::Bytes(source) => {
+                Box::pin(source.stream().err_into::<Error>())
             }
             TargetSource::File(source) => Box::pin(source.stream()),
             TargetSource::Repository(source) => Box::pin(source.stream()),
-            TargetSource::Fake(source) => {
-                Box::pin(source.stream().err_into::<Error>())
-            }
         }
     }
 }
@@ -85,28 +82,83 @@ impl<'a> From<RepositorySource<'a>> for TargetSource<'a> {
     }
 }
 
-impl From<FakeSource> for TargetSource<'_> {
-    fn from(source: FakeSource) -> Self {
-        TargetSource::Fake(source)
-    }
+#[derive(Debug, Clone)]
+pub(crate) struct BytesSource {
+    bytes: Bytes,
+    fake_length: Option<usize>,
+    sha256: Option<ArtifactHash>,
 }
 
-#[derive(Debug, Clone)]
-pub(crate) struct BytesSource(pub(crate) Bytes);
-
 impl BytesSource {
+    pub(crate) fn new(bytes: impl Into<Bytes>) -> Self {
+        Self { bytes: bytes.into(), fake_length: None, sha256: None }
+    }
+
     pub(crate) fn json<T: Serialize>(
         data: &T,
     ) -> Result<Self, serde_json::Error> {
         let mut s = serde_json::to_string_pretty(data)?;
         s.push('\n');
-        Ok(Self(s.into()))
+        Ok(Self { bytes: s.into(), fake_length: None, sha256: None })
     }
 
-    pub(crate) fn into_target(self) -> Target<'static> {
+    pub(crate) fn fake_padded(prefix: impl Into<Bytes>, length: usize) -> Self {
+        Self { bytes: prefix.into(), fake_length: Some(length), sha256: None }
+    }
+
+    pub(crate) fn iter_bytes(&self) -> impl Iterator<Item = Bytes> + 'static {
+        const CHUNK_SIZE: usize = 8192;
+
+        let mut bytes = self.bytes.clone();
+        let mut remaining = match self.fake_length {
+            Some(length) => {
+                bytes.truncate(length);
+                length - bytes.len()
+            }
+            None => 0,
+        };
+        let zero = BytesMut::zeroed(remaining.min(CHUNK_SIZE)).freeze();
+        std::iter::once(bytes).chain(std::iter::from_fn(move || {
+            if remaining > 0 {
+                let slice = zero.slice(..remaining.min(CHUNK_SIZE));
+                remaining = remaining.saturating_sub(slice.len());
+                Some(slice)
+            } else {
+                None
+            }
+        }))
+    }
+
+    pub(crate) fn stream(
+        &self,
+    ) -> impl Stream<Item = Result<Bytes, Infallible>> + 'static {
+        stream::iter(self.iter_bytes().map(Ok))
+    }
+
+    pub(crate) fn length(&self) -> usize {
+        self.fake_length.unwrap_or_else(|| self.bytes.len())
+    }
+
+    async fn sha256(&mut self) -> ArtifactHash {
+        if let Some(sha256) = self.sha256 {
+            return sha256;
+        }
+        let mut stream = self.stream();
+        let mut hasher = Sha256::new();
+        while let Some(Ok(bytes)) = stream.next().await {
+            hasher.update(&bytes);
+        }
+        *self.sha256.insert(ArtifactHash(hasher.finalize().into()))
+    }
+
+    pub(crate) async fn into_target(mut self) -> Target<'static> {
         Target {
-            length: self.0.len().try_into().unwrap(),
-            sha256: Sha256::digest(&self.0).to_vec(),
+            length: self
+                .fake_length
+                .unwrap_or(self.bytes.len())
+                .try_into()
+                .unwrap(),
+            sha256: self.sha256().await.0.to_vec(),
             source: self.into(),
         }
     }
@@ -114,7 +166,7 @@ impl BytesSource {
 
 #[derive(Debug)]
 pub(crate) struct FileSource {
-    file: File,
+    file: Box<File>,
     pub(crate) path: Utf8PathBuf,
     length_sha256: Option<(u64, ArtifactHash)>,
 }
@@ -126,7 +178,7 @@ impl FileSource {
     }
 
     pub(crate) fn from_file(file: File, path: Utf8PathBuf) -> Self {
-        Self { file, path, length_sha256: None }
+        Self { file: Box::new(file), path, length_sha256: None }
     }
 
     pub(crate) async fn into_target(
@@ -232,60 +284,5 @@ impl<'a> RepositorySource<'a> {
 
     pub(crate) fn stream(&self) -> impl Stream<Item = Result<Bytes, Error>> {
         stream::once(self.repo.read_target(&self.target_name)).try_flatten()
-    }
-}
-
-#[derive(Debug)]
-pub(crate) struct FakeSource {
-    prefix: Bytes,
-    length: usize,
-    sha256: Option<ArtifactHash>,
-}
-
-impl FakeSource {
-    pub(crate) fn new(prefix: String, length: usize) -> Self {
-        Self { prefix: prefix.into(), length, sha256: None }
-    }
-
-    async fn sha256(&mut self) -> ArtifactHash {
-        if let Some(sha256) = self.sha256 {
-            return sha256;
-        }
-        let mut stream = self.stream();
-        let mut hasher = Sha256::new();
-        while let Some(Ok(bytes)) = stream.next().await {
-            hasher.update(&bytes);
-        }
-        *self.sha256.insert(ArtifactHash(hasher.finalize().into()))
-    }
-
-    pub(crate) async fn into_target(mut self) -> Target<'static> {
-        Target {
-            length: self.length.try_into().unwrap(),
-            sha256: self.sha256().await.0.to_vec(),
-            source: self.into(),
-        }
-    }
-
-    pub(crate) fn stream(
-        &self,
-    ) -> impl Stream<Item = Result<Bytes, Infallible>> + 'static {
-        const ZERO: Bytes = Bytes::from_static(&[0; 8192]);
-
-        let mut prefix = self.prefix.clone();
-        prefix.truncate(self.length);
-        let suffix = stream::unfold(
-            self.length.saturating_sub(prefix.len()),
-            |remaining| {
-                std::future::ready(if remaining == 0 {
-                    None
-                } else if remaining < ZERO.len() {
-                    Some((Ok(ZERO.slice(..remaining)), 0))
-                } else {
-                    Some((Ok(ZERO), remaining - ZERO.len()))
-                })
-            },
-        );
-        stream::once(std::future::ready(Ok(prefix))).chain(suffix)
     }
 }

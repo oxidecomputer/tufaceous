@@ -28,3 +28,9 @@ pub(crate) struct ArtifactSchema {
     pub(crate) version: ArtifactVersion,
     pub(crate) tags: BTreeMap<String, String>,
 }
+
+impl AsRef<ArtifactSchema> for ArtifactSchema {
+    fn as_ref(&self) -> &ArtifactSchema {
+        self
+    }
+}

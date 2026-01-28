@@ -36,9 +36,15 @@ use tufaceous_artifact::ArtifactVersion;
 use tufaceous_artifact::Artifacts;
 use tufaceous_artifact::KnownArtifactTags;
 use tufaceous_artifact::OsBoard;
+use tufaceous_artifact::OsPhase1Tags;
+use tufaceous_artifact::OsPhase2Tags;
 use tufaceous_artifact::OsVariant;
 use tufaceous_artifact::RotSlot;
+use tufaceous_artifact::ZoneTags;
 
+use crate::COSMO_PHASE_1_PATH;
+use crate::GIMLET_PHASE_1_PATH;
+use crate::PHASE_2_PATH;
 use crate::Repository;
 use crate::error::Error;
 use crate::error::ErrorKind;
@@ -244,9 +250,9 @@ pub(crate) async fn from_loaded(
                         artifacts.insert(Artifact {
                             target_name,
                             version: layer_info.version,
-                            tags: KnownArtifactTags::Zone {
-                                name: layer_info.pkg,
-                            }
+                            tags: KnownArtifactTags::Zone(ZoneTags {
+                                zone_name: layer_info.pkg,
+                            })
                             .to_tags(),
                             hash,
                             length,
@@ -407,17 +413,25 @@ fn unpack_os(
     entries: &mut HashMap<String, UnpackedArtifact>,
     artifacts: &mut Artifacts,
     artifact: &V1Artifact,
-    variant: OsVariant,
+    os_variant: OsVariant,
 ) {
     for (tar_path, inner) in unpacked.entries {
-        let tags = match tar_path.as_ref() {
-            "image/cosmo.rom" => {
-                KnownArtifactTags::OsPhase1 { variant, board: OsBoard::Cosmo }
+        let tags = match tar_path.as_str().strip_prefix("image/") {
+            Some(COSMO_PHASE_1_PATH) => {
+                KnownArtifactTags::OsPhase1(OsPhase1Tags {
+                    os_variant,
+                    os_board: OsBoard::Cosmo,
+                })
             }
-            "image/gimlet.rom" => {
-                KnownArtifactTags::OsPhase1 { variant, board: OsBoard::Gimlet }
+            Some(GIMLET_PHASE_1_PATH) => {
+                KnownArtifactTags::OsPhase1(OsPhase1Tags {
+                    os_variant,
+                    os_board: OsBoard::Gimlet,
+                })
             }
-            "image/zfs.img" => KnownArtifactTags::OsPhase2 { variant },
+            Some(PHASE_2_PATH) => {
+                KnownArtifactTags::OsPhase2(OsPhase2Tags { os_variant })
+            }
             _ => continue,
         };
         let target_name = format!("{}/{tar_path}", artifact.target);

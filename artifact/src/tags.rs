@@ -16,65 +16,33 @@ use crate::Sign;
     Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Deserialize, Serialize,
 )]
 #[cfg_attr(any(test, feature = "proptest"), derive(test_strategy::Arbitrary))]
-#[serde(tag = "kind", rename_all = "kebab-case")]
+#[serde(tag = "kind", rename_all = "snake_case")]
 pub enum KnownArtifactTags {
     /// JSON document describing the artifacts Installinator is responsible for
     /// writing during mupdate and sled recovery.
-    InstallinatorDocument {},
+    InstallinatorDocument,
 
     /// CORIM manifest for remote attestation.
-    MeasurementCorpus {},
+    MeasurementCorpus,
 
     /// Phase 1 OS image, written to flash. Differs based on the target board.
-    OsPhase1 { variant: OsVariant, board: OsBoard },
+    OsPhase1(OsPhase1Tags),
 
     /// Phase 2 OS image, a ZFS pool with an Oxide-specific header written to
     /// M.2 storage. Common across all target boards.
-    OsPhase2 { variant: OsVariant },
+    OsPhase2(OsPhase2Tags),
 
     /// Hubris archive for a Root of Trust image.
-    Rot {
-        /// The `BORD` field in the caboose (such as `oxide-rot-1`).
-        board: String,
-        /// The `SIGN` field in the caboose. This is the Root Key Table Hash
-        /// (RKTH).
-        ///
-        /// For unsigned images this will not be present; this will generally
-        /// never occur in release repos but can be useful on hardware that has
-        /// not fully made it through manufacturing yet.
-        #[serde(skip_serializing_if = "Sign::is_unsigned")]
-        sign: Sign,
-        /// ROT images are compiled for two different locations in flash; this
-        /// identifies which slot this image belongs to.
-        slot: RotSlot,
-    },
+    Rot(RotTags),
 
     /// Hubris archive for a Root of Trust bootloader.
-    RotBootloader {
-        /// The `BORD` field in the caboose (such as `oxide-rot-1`).
-        board: String,
-        /// The `SIGN` field in the caboose. This is the Root Key Table Hash
-        /// (RKTH).
-        ///
-        /// For unsigned images this will not be present; this will generally
-        /// never occur in release repos but can be useful on hardware that has
-        /// not fully made it through manufacturing yet.
-        #[serde(skip_serializing_if = "Sign::is_unsigned")]
-        sign: Sign,
-    },
+    RotBootloader(RotBootloaderTags),
 
     /// Hubris archive for a Service Processor image.
-    Sp {
-        /// The `BORD` field in the caboose (such as `gimlet-d` or `cosmo-b`).
-        board: String,
-    },
+    Sp(SpTags),
 
     /// Tarball of a Helios zone image.
-    Zone {
-        /// The zone name, as self-identified in the tarball's `oxide.json`
-        /// file. This may differ from the filename on disk.
-        name: String,
-    },
+    Zone(ZoneTags),
 }
 
 impl KnownArtifactTags {
@@ -103,15 +71,15 @@ impl KnownArtifactTags {
 
     pub fn to_installinator(&self) -> Option<InstallinatorArtifactKind> {
         match self {
-            KnownArtifactTags::MeasurementCorpus {} => {
+            KnownArtifactTags::MeasurementCorpus => {
                 Some(InstallinatorArtifactKind::MeasurementCorpus)
             }
-            KnownArtifactTags::OsPhase2 { variant: OsVariant::Host } => {
-                Some(InstallinatorArtifactKind::HostPhase2)
-            }
-            KnownArtifactTags::Zone { name } => {
+            KnownArtifactTags::OsPhase2(OsPhase2Tags {
+                os_variant: OsVariant::Host,
+            }) => Some(InstallinatorArtifactKind::HostPhase2),
+            KnownArtifactTags::Zone(ZoneTags { zone_name }) => {
                 Some(InstallinatorArtifactKind::Zone {
-                    zone_name: name.clone(),
+                    zone_name: zone_name.clone(),
                 })
             }
             _ => None,
@@ -129,6 +97,35 @@ macro_rules! display_serialize {
     };
 }
 
+#[derive(
+    Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Deserialize, Serialize,
+)]
+#[cfg_attr(any(test, feature = "proptest"), derive(test_strategy::Arbitrary))]
+pub struct OsPhase1Tags {
+    pub os_variant: OsVariant,
+    pub os_board: OsBoard,
+}
+
+impl From<OsPhase1Tags> for KnownArtifactTags {
+    fn from(tags: OsPhase1Tags) -> Self {
+        KnownArtifactTags::OsPhase1(tags)
+    }
+}
+
+#[derive(
+    Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Deserialize, Serialize,
+)]
+#[cfg_attr(any(test, feature = "proptest"), derive(test_strategy::Arbitrary))]
+pub struct OsPhase2Tags {
+    pub os_variant: OsVariant,
+}
+
+impl From<OsPhase2Tags> for KnownArtifactTags {
+    fn from(tags: OsPhase2Tags) -> Self {
+        KnownArtifactTags::OsPhase2(tags)
+    }
+}
+
 /// OS variant artifact tag (host or recovery).
 #[derive(
     Debug,
@@ -143,7 +140,7 @@ macro_rules! display_serialize {
     Serialize,
 )]
 #[cfg_attr(any(test, feature = "proptest"), derive(test_strategy::Arbitrary))]
-#[serde(rename_all = "kebab-case")]
+#[serde(rename_all = "snake_case")]
 pub enum OsVariant {
     Host,
     Recovery,
@@ -164,12 +161,38 @@ display_serialize!(OsVariant);
     Serialize,
 )]
 #[cfg_attr(any(test, feature = "proptest"), derive(test_strategy::Arbitrary))]
-#[serde(rename_all = "kebab-case")]
+#[serde(rename_all = "snake_case")]
 pub enum OsBoard {
     Gimlet,
     Cosmo,
 }
 display_serialize!(OsBoard);
+
+#[derive(
+    Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Deserialize, Serialize,
+)]
+#[cfg_attr(any(test, feature = "proptest"), derive(test_strategy::Arbitrary))]
+pub struct RotTags {
+    /// The `BORD` field in the caboose (such as `oxide-rot-1`).
+    pub rot_board: String,
+    /// The `SIGN` field in the caboose. This is the Root Key Table Hash
+    /// (RKTH).
+    ///
+    /// For unsigned images this will not be present; this will generally
+    /// never occur in release repos but can be useful on hardware that has
+    /// not fully made it through manufacturing yet.
+    #[serde(skip_serializing_if = "Sign::is_unsigned")]
+    pub rot_sign: Sign,
+    /// ROT images are compiled for two different locations in flash; this
+    /// identifies which slot this image belongs to.
+    pub rot_slot: RotSlot,
+}
+
+impl From<RotTags> for KnownArtifactTags {
+    fn from(tags: RotTags) -> Self {
+        KnownArtifactTags::Rot(tags)
+    }
+}
 
 /// ROT slot artifact tag (A or B).
 #[derive(
@@ -185,12 +208,66 @@ display_serialize!(OsBoard);
     Serialize,
 )]
 #[cfg_attr(any(test, feature = "proptest"), derive(test_strategy::Arbitrary))]
-#[serde(rename_all = "kebab-case")]
+#[serde(rename_all = "snake_case")]
 pub enum RotSlot {
     A,
     B,
 }
 display_serialize!(RotSlot);
+
+#[derive(
+    Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Deserialize, Serialize,
+)]
+#[cfg_attr(any(test, feature = "proptest"), derive(test_strategy::Arbitrary))]
+pub struct RotBootloaderTags {
+    /// The `BORD` field in the caboose (such as `oxide-rot-1`).
+    pub rot_board: String,
+    /// The `SIGN` field in the caboose. This is the Root Key Table Hash
+    /// (RKTH).
+    ///
+    /// For unsigned images this will not be present; this will generally
+    /// never occur in release repos but can be useful on hardware that has
+    /// not fully made it through manufacturing yet.
+    #[serde(skip_serializing_if = "Sign::is_unsigned")]
+    pub rot_sign: Sign,
+}
+
+impl From<RotBootloaderTags> for KnownArtifactTags {
+    fn from(tags: RotBootloaderTags) -> Self {
+        KnownArtifactTags::RotBootloader(tags)
+    }
+}
+
+#[derive(
+    Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Deserialize, Serialize,
+)]
+#[cfg_attr(any(test, feature = "proptest"), derive(test_strategy::Arbitrary))]
+pub struct SpTags {
+    /// The `BORD` field in the caboose (such as `oxide-rot-1`).
+    pub sp_board: String,
+}
+
+impl From<SpTags> for KnownArtifactTags {
+    fn from(tags: SpTags) -> Self {
+        KnownArtifactTags::Sp(tags)
+    }
+}
+
+#[derive(
+    Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Deserialize, Serialize,
+)]
+#[cfg_attr(any(test, feature = "proptest"), derive(test_strategy::Arbitrary))]
+pub struct ZoneTags {
+    /// The zone name, as self-identified in the tarball's `oxide.json`
+    /// file. This may differ from the filename on disk.
+    pub zone_name: String,
+}
+
+impl From<ZoneTags> for KnownArtifactTags {
+    fn from(tags: ZoneTags) -> Self {
+        KnownArtifactTags::Zone(tags)
+    }
+}
 
 #[cfg(test)]
 mod tests {

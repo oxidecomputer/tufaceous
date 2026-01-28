@@ -14,3 +14,7 @@ mod zip_writer;
 pub use loader::*;
 pub use repo::*;
 pub use zip_transport::*;
+
+pub(crate) const COSMO_PHASE_1_PATH: &str = "cosmo.rom";
+pub(crate) const GIMLET_PHASE_1_PATH: &str = "gimlet.rom";
+pub(crate) const PHASE_2_PATH: &str = "zfs.img";

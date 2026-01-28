@@ -118,6 +118,8 @@ pub enum ErrorKind {
     SerializeFakeMeasurementCorpus(
         #[source] ciborium::ser::Error<std::io::Error>,
     ),
+    #[error("failed to generate fake zone image")]
+    GenerateFakeZoneImage(#[source] std::io::Error),
 
     #[error("unspecified failure when generating ed25519 key")]
     Ed25519Generate,

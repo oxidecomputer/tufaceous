@@ -112,6 +112,16 @@ impl Metadata {
         }
     }
 
+    pub fn into_layer_info(self) -> Result<LayerInfo> {
+        match self.t {
+            ArchiveType::Layer(info) => Ok(info),
+            _ => Err(Error::new(
+                ErrorKind::InvalidData,
+                "archive is not the \"layer\" type",
+            )),
+        }
+    }
+
     pub fn is_baseline(&self) -> bool {
         matches!(&self.t, ArchiveType::Baseline)
     }

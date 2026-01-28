@@ -8,34 +8,59 @@ use hubtools::Caboose;
 use hubtools::CabooseError;
 
 use crate::KnownArtifactTags;
+use crate::RotBootloaderTags;
 use crate::RotSlot;
+use crate::RotTags;
 use crate::Sign;
+use crate::SpTags;
+
+impl RotTags {
+    pub fn from_caboose(
+        caboose: &Caboose,
+        slot: RotSlot,
+    ) -> Result<Self, ReadCabooseError> {
+        Ok(Self {
+            rot_board: read_board(caboose)?,
+            rot_sign: Sign(read_sign(caboose)?),
+            rot_slot: slot,
+        })
+    }
+}
+
+impl RotBootloaderTags {
+    pub fn from_caboose(caboose: &Caboose) -> Result<Self, ReadCabooseError> {
+        Ok(Self {
+            rot_board: read_board(caboose)?,
+            rot_sign: Sign(read_sign(caboose)?),
+        })
+    }
+}
+
+impl SpTags {
+    pub fn from_caboose(caboose: &Caboose) -> Result<Self, ReadCabooseError> {
+        Ok(Self { sp_board: read_board(caboose)? })
+    }
+}
 
 impl KnownArtifactTags {
     pub fn from_rot_caboose(
         caboose: &Caboose,
         slot: RotSlot,
     ) -> Result<Self, ReadCabooseError> {
-        Ok(KnownArtifactTags::Rot {
-            board: read_board(caboose)?,
-            sign: Sign(read_sign(caboose)?),
-            slot,
-        })
+        RotTags::from_caboose(caboose, slot).map(KnownArtifactTags::Rot)
     }
 
     pub fn from_rot_bootloader_caboose(
         caboose: &Caboose,
     ) -> Result<Self, ReadCabooseError> {
-        Ok(KnownArtifactTags::RotBootloader {
-            board: read_board(caboose)?,
-            sign: Sign(read_sign(caboose)?),
-        })
+        RotBootloaderTags::from_caboose(caboose)
+            .map(KnownArtifactTags::RotBootloader)
     }
 
     pub fn from_sp_caboose(
         caboose: &Caboose,
     ) -> Result<Self, ReadCabooseError> {
-        Ok(KnownArtifactTags::Sp { board: read_board(caboose)? })
+        SpTags::from_caboose(caboose).map(KnownArtifactTags::Sp)
     }
 }
 

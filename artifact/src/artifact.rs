@@ -6,6 +6,7 @@ use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::collections::btree_map::IntoValues;
 use std::collections::btree_map::Values;
+use std::fmt::Display;
 use std::iter::Flatten;
 
 use serde::Deserialize;
@@ -29,6 +30,26 @@ pub struct Artifact {
 impl Artifact {
     pub fn known_tags(&self) -> Option<KnownArtifactTags> {
         KnownArtifactTags::from_tags(&self.tags).ok()
+    }
+
+    pub fn display_tags(&self) -> DisplayTags<'_> {
+        DisplayTags(&self.tags)
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct DisplayTags<'a>(&'a BTreeMap<String, String>);
+
+impl Display for DisplayTags<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let mut comma = "";
+        let kind = self.0.get_key_value("kind").into_iter();
+        let remainder = self.0.iter().filter(|(k, _)| *k != "kind");
+        for (key, value) in kind.chain(remainder) {
+            write!(f, "{comma}{key}={value}")?;
+            comma = ",";
+        }
+        Ok(())
     }
 }
 
