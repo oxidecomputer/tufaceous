@@ -43,9 +43,8 @@ impl Args {
             .generate_installinator_document(!self.no_installinator_document);
 
         // always remove an existing installinator document
-        for artifact in repo
-            .artifacts()
-            .get_all(KnownArtifactTags::InstallinatorDocument {})
+        for artifact in
+            repo.artifacts().get_all(KnownArtifactTags::InstallinatorDocument)
         {
             editor = editor.remove_target(&artifact.target_name);
         }

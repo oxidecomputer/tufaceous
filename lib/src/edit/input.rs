@@ -73,7 +73,7 @@ impl<Source> Input<Source> {
                     "measurements/{corim_id}-{}.cbor",
                     hex::encode(sha256)
                 );
-                let tags = KnownArtifactTags::MeasurementCorpus {};
+                let tags = KnownArtifactTags::MeasurementCorpus;
                 vec![Output::new(target_name, version, tags, source)]
             }
             Input::OsImages {
