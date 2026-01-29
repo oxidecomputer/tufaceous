@@ -7,7 +7,6 @@ use std::fmt::Debug;
 use std::fs::File;
 use std::io::Cursor;
 use std::io::Read;
-use std::pin::Pin;
 use std::sync::Arc;
 
 use bytes::Bytes;
@@ -33,6 +32,7 @@ use tokio::sync::mpsc;
 use tough::Transport;
 use tough::TransportError;
 use tough::TransportErrorKind;
+use tough::TransportStream;
 use tough::async_trait;
 use url::Url;
 
@@ -307,10 +307,7 @@ impl<T: ReaderAt + Debug + Send + Sync + 'static> Transport
     async fn fetch(
         &self,
         original_url: Url,
-    ) -> Result<
-        Pin<Box<dyn Stream<Item = Result<Bytes, TransportError>> + Send>>,
-        TransportError,
-    > {
+    ) -> Result<TransportStream, TransportError> {
         let mut url = original_url.clone();
         if url.scheme() != "zip" {
             return Err(TransportError::new(

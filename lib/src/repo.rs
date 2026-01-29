@@ -35,6 +35,9 @@ use crate::error::ErrorKind;
 use crate::schema::ArtifactSchema;
 use crate::schema::ArtifactsSchema;
 
+pub type TargetStream<'a> =
+    Pin<Box<dyn Stream<Item = Result<Bytes, Error>> + Send + Sync + 'a>>;
+
 /// A loaded TUF repository.
 #[derive(Debug, Clone)]
 pub struct Repository {
@@ -191,11 +194,9 @@ impl Repository {
     pub async fn read_target<'a>(
         &'a self,
         target: &str,
-    ) -> Result<impl Stream<Item = Result<Bytes, Error>> + Send + use<'a>, Error>
-    {
+    ) -> Result<TargetStream<'a>, Error> {
         if let Some(stream) = read_target(&self.inner, target).await? {
-            return Ok(Box::pin(stream)
-                as Pin<Box<dyn Stream<Item = Result<Bytes, Error>> + Send>>);
+            return Ok(Box::pin(stream));
         }
 
         if let Some(unpacked) = &self.v1_unpacked
