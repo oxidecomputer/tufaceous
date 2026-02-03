@@ -151,6 +151,8 @@ pub enum ErrorKind {
     Ed25519Generate,
     #[error("failed to calculate TUF key ID")]
     KeyId(#[source] tough::schema::Error),
+    #[error("role verification failed")]
+    RoleVerify(#[source] tough::schema::Error),
 
     #[error("metadata base URL unset")]
     MetadataBaseUrlUnset,
@@ -233,6 +235,7 @@ impl ErrorKind {
             | ErrorKind::GenerateFakeZoneImage(_)
             | ErrorKind::Ed25519Generate
             | ErrorKind::KeyId(_)
+            | ErrorKind::RoleVerify(_)
             | ErrorKind::Corim { .. }
             | ErrorKind::GuessArtifact { .. }
             | ErrorKind::TargetNameCollision { .. }

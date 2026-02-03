@@ -28,6 +28,8 @@ use tough::schema::Target;
 use tufaceous_artifact::Artifact;
 use tufaceous_artifact::ArtifactHash;
 use tufaceous_artifact::Artifacts;
+use tufaceous_artifact::GetError;
+use tufaceous_artifact::KnownArtifactTags;
 
 use crate::RepositoryLoader;
 use crate::error::Error;
@@ -208,45 +210,35 @@ impl Repository {
         Err(ErrorKind::TargetNotFound { target_name: target.to_owned() }.into())
     }
 
-    /// Returns an [`ArtifactHandle`] that can be used to read `artifact`.
+    /// Returns an [`ArtifactHandle`] for the one (and only one) artifact
+    /// matching `tags` that can be used to stream the artifact.
     ///
-    /// This simply clones `artifact` and `self` and keeps them together in a
-    /// struct as a convenience.
-    ///
-    /// The repository must be wrapped in [`Arc`] to call this method.
+    /// An artifact handle simply clones `artifact` and `self` and keeps them
+    /// together in a struct as a convenience. The repository must be wrapped in
+    /// [`Arc`] to call this method.
     ///
     /// # Errors
     ///
-    /// Returns an error if `artifact` is not found in this repository.
-    pub fn artifact_handle(
+    /// Returns an error if there is not exactly one artifact matching `tags`.
+    pub fn get_handle(
         self: &Arc<Self>,
-        artifact: &Artifact,
-    ) -> Result<ArtifactHandle, Error> {
-        if self.artifacts.contains(artifact) {
-            Ok(ArtifactHandle {
-                artifact: artifact.clone(),
-                repo: Arc::clone(self),
-            })
-        } else {
-            Err(ErrorKind::TargetNotFound {
-                target_name: artifact.target_name.clone(),
-            }
-            .into())
-        }
+        tags: KnownArtifactTags,
+    ) -> Result<ArtifactHandle, GetError> {
+        let artifact = self.artifacts.get(tags)?.clone();
+        Ok(ArtifactHandle { artifact, repo: Arc::clone(self) })
     }
 
     /// Returns an iterator of [`ArtifactHandle`]s for every artifact
     /// in the repository.
     ///
     /// An artifact handle simply clones `artifact` and `self` and keeps them
-    /// together in a struct as a convenience.
-    ///
-    /// The repository must be wrapped in [`Arc`] to call this method.
+    /// together in a struct as a convenience. The repository must be wrapped in
+    /// [`Arc`] to call this method.
     pub fn handles(self: &Arc<Self>) -> impl Iterator<Item = ArtifactHandle> {
-        self.artifacts.iter().map(|artifact| ArtifactHandle {
-            artifact: artifact.clone(),
-            repo: Arc::clone(self),
-        })
+        self.artifacts
+            .iter()
+            .cloned()
+            .map(|artifact| ArtifactHandle { artifact, repo: Arc::clone(self) })
     }
 
     /// Reads all targets in the repository and verifies they have the correct

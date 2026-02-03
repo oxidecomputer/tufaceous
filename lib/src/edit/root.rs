@@ -8,21 +8,42 @@ use std::num::NonZero;
 use aws_lc_rs::rand::SystemRandom;
 use chrono::DateTime;
 use chrono::Utc;
+use serde::Deserialize;
+use serde::Serialize;
 use tough::editor::signed::SignedRole;
 use tough::key_source::KeySource;
+use tough::schema;
 use tough::schema::KeyHolder;
 use tough::schema::RoleKeys;
 use tough::schema::RoleType;
-use tough::schema::Root;
+use tough::schema::Signed;
 
 use crate::error::Error;
 use crate::error::ErrorKind;
 
-pub async fn generate_root(
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(transparent)]
+pub struct Root(Signed<schema::Root>);
+
+impl Root {
+    pub async fn generate(
+        keys: &[Box<dyn KeySource>],
+        expires: DateTime<Utc>,
+    ) -> Result<Self, Error> {
+        Ok(Self(generate_root(keys, expires).await?.signed().clone()))
+    }
+
+    pub fn verify_self_signed(&self) -> Result<(), Error> {
+        self.0.signed.verify_role(&self.0).map_err(ErrorKind::RoleVerify)?;
+        Ok(())
+    }
+}
+
+pub(crate) async fn generate_root(
     keys: &[Box<dyn KeySource>],
     expires: DateTime<Utc>,
-) -> Result<SignedRole<Root>, Error> {
-    let mut root = Root {
+) -> Result<SignedRole<schema::Root>, Error> {
+    let mut root = schema::Root {
         spec_version: "1.0.0".into(),
         consistent_snapshot: false,
         version: NonZero::<u64>::MIN,
@@ -59,4 +80,19 @@ pub async fn generate_root(
         &SystemRandom::new(),
     )
     .await?)
+}
+
+#[cfg(test)]
+mod tests {
+    use chrono::Utc;
+
+    use crate::edit::Ed25519Key;
+    use crate::edit::Root;
+
+    #[tokio::test]
+    async fn generate_verify() {
+        let key = Ed25519Key::generate().unwrap();
+        let root = Root::generate(&[Box::new(key)], Utc::now()).await.unwrap();
+        root.verify_self_signed().unwrap();
+    }
 }
