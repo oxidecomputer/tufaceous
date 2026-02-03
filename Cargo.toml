@@ -20,7 +20,7 @@ async-trait = "0.1.86"
 aws-lc-rs = "1.12.4"
 base64 = "0.22.1"
 buf-list = "1.0.3"
-bytes = "1.10.0"
+bytes = "1.11.1"
 camino = { version = "1.1.9", features = ["serde1"] }
 camino-tempfile = "1.1.1"
 chrono = { version = "0.4.40", default-features = false, features = ["std"] }
