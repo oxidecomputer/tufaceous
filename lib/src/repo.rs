@@ -208,6 +208,47 @@ impl Repository {
         Err(ErrorKind::TargetNotFound { target_name: target.to_owned() }.into())
     }
 
+    /// Returns an [`ArtifactHandle`] that can be used to read `artifact`.
+    ///
+    /// This simply clones `artifact` and `self` and keeps them together in a
+    /// struct as a convenience.
+    ///
+    /// The repository must be wrapped in [`Arc`] to call this method.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if `artifact` is not found in this repository.
+    pub fn artifact_handle(
+        self: &Arc<Self>,
+        artifact: &Artifact,
+    ) -> Result<ArtifactHandle, Error> {
+        if self.artifacts.contains(artifact) {
+            Ok(ArtifactHandle {
+                artifact: artifact.clone(),
+                repo: Arc::clone(self),
+            })
+        } else {
+            Err(ErrorKind::TargetNotFound {
+                target_name: artifact.target_name.clone(),
+            }
+            .into())
+        }
+    }
+
+    /// Returns an iterator of [`ArtifactHandle`]s for every artifact
+    /// in the repository.
+    ///
+    /// An artifact handle simply clones `artifact` and `self` and keeps them
+    /// together in a struct as a convenience.
+    ///
+    /// The repository must be wrapped in [`Arc`] to call this method.
+    pub fn handles(self: &Arc<Self>) -> impl Iterator<Item = ArtifactHandle> {
+        self.artifacts.iter().map(|artifact| ArtifactHandle {
+            artifact: artifact.clone(),
+            repo: Arc::clone(self),
+        })
+    }
+
     /// Reads all targets in the repository and verifies they have the correct
     /// length and checksum.
     ///
@@ -271,6 +312,26 @@ impl Repository {
         }
 
         Ok(())
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct ArtifactHandle {
+    artifact: Artifact,
+    repo: Arc<Repository>,
+}
+
+impl ArtifactHandle {
+    pub fn artifact(&self) -> &Artifact {
+        &self.artifact
+    }
+
+    pub fn into_artifact(self) -> Artifact {
+        self.artifact
+    }
+
+    pub async fn stream(&self) -> Result<TargetStream<'_>, Error> {
+        self.repo.read_target(&self.artifact.target_name).await
     }
 }
 

@@ -28,6 +28,11 @@ pub struct Artifact {
 }
 
 impl Artifact {
+    /// Clones this artifact's `version` and `tags` into an [`ArtifactId`].
+    pub fn id(&self) -> ArtifactId {
+        ArtifactId { version: self.version.clone(), tags: self.tags.clone() }
+    }
+
     pub fn known_tags(&self) -> Option<KnownArtifactTags> {
         KnownArtifactTags::from_tags(&self.tags).ok()
     }
@@ -50,6 +55,29 @@ impl Display for DisplayTags<'_> {
             comma = ",";
         }
         Ok(())
+    }
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[cfg_attr(any(test, feature = "schemars"), derive(schemars::JsonSchema))]
+pub struct ArtifactId {
+    pub version: ArtifactVersion,
+    pub tags: BTreeMap<String, String>,
+}
+
+impl ArtifactId {
+    pub fn known_tags(&self) -> Option<KnownArtifactTags> {
+        KnownArtifactTags::from_tags(&self.tags).ok()
+    }
+
+    pub fn display_tags(&self) -> DisplayTags<'_> {
+        DisplayTags(&self.tags)
+    }
+}
+
+impl From<Artifact> for ArtifactId {
+    fn from(artifact: Artifact) -> Self {
+        ArtifactId { version: artifact.version, tags: artifact.tags }
     }
 }
 
@@ -92,6 +120,12 @@ impl Artifacts {
         tags: KnownArtifactTags,
     ) -> impl Iterator<Item = &Artifact> {
         self.inner.get(&Some(tags)).map(BTreeSet::iter).unwrap_or_default()
+    }
+
+    pub fn contains(&self, artifact: &Artifact) -> bool {
+        self.inner
+            .get(&artifact.known_tags())
+            .is_some_and(|set| set.contains(artifact))
     }
 
     pub fn filter_tags(
