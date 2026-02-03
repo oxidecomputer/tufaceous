@@ -3,16 +3,42 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use std::convert::Infallible;
+use std::error::Error as _;
 use std::fmt;
 use std::fmt::Debug;
 use std::fmt::Display;
+use std::ops::Deref;
 use std::ops::Range;
 
+use crate::ZipTransportError;
 use camino::Utf8PathBuf;
+use tough::TransportErrorKind;
+
+macro_rules! try_path {
+    ($result:expr, $kind:ident, $path:expr) => {
+        match $result {
+            Ok(value) => value,
+            Err(source) => {
+                return Err(
+                    ErrorKind::$kind { source, path: $path.into() }.into()
+                )
+            }
+        }
+    };
+}
+pub(crate) use try_path;
 
 #[derive(Debug, thiserror::Error)]
 #[error(transparent)]
 pub struct Error(pub Box<ErrorKind>);
+
+impl Deref for Error {
+    type Target = ErrorKind;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
 
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
@@ -22,7 +48,7 @@ pub enum ErrorKind {
     #[error(transparent)]
     Join(#[from] tokio::task::JoinError),
     #[error(transparent)]
-    Tough(#[from] tough::error::Error),
+    Tough(tough::error::Error),
     #[error("error while manipulating key")]
     ToughKey(#[source] Box<dyn std::error::Error + Send + Sync + 'static>),
 
@@ -164,9 +190,131 @@ pub enum ErrorKind {
     ImportV1Repo,
 }
 
+impl ErrorKind {
+    /// Returns `true` if the error is due to a problem loading or reading
+    /// a repository, where retrying the operation with the same input would
+    /// result in the same error.
+    ///
+    /// Note that errors that can return `true` here can also happen during
+    /// other operations, such as editing or signing repositories.
+    pub fn is_repository_error(&self) -> bool {
+        match self {
+            ErrorKind::ZipEntryCount { .. }
+            | ErrorKind::ZipOverlappingRanges { .. }
+            | ErrorKind::ZipPathMismatch { .. }
+            | ErrorKind::ZipRangeOverrun { .. }
+            | ErrorKind::StreamLimit { .. }
+            | ErrorKind::ReadHubrisArchive { .. }
+            | ErrorKind::ReadCaboose { .. }
+            | ErrorKind::MetadataBaseUrlUnset
+            | ErrorKind::TargetsBaseUrlUnset
+            | ErrorKind::UrlJoin { .. }
+            | ErrorKind::NoTrustRoots
+            | ErrorKind::TargetNotFound { .. }
+            | ErrorKind::ParseTargetJson { .. }
+            | ErrorKind::ArtifactVersion(_)
+            | ErrorKind::ReadCompositeArtifact { .. }
+            | ErrorKind::ReadZoneOxideJson { .. } => true,
+
+            ErrorKind::Join(_)
+            | ErrorKind::ToughKey(_)
+            | ErrorKind::WriteZip { .. }
+            | ErrorKind::CreateTempDir(_)
+            | ErrorKind::CreateTempFile(_)
+            | ErrorKind::OpenFile { .. }
+            | ErrorKind::ReadDir { .. }
+            | ErrorKind::ReadFile { .. }
+            | ErrorKind::SeekFile { .. }
+            | ErrorKind::WriteFile { .. }
+            | ErrorKind::ReadStream(_)
+            | ErrorKind::GenerateFakeHubrisArchive(_)
+            | ErrorKind::GenerateFakeMeasurementCorpus(_)
+            | ErrorKind::SerializeFakeMeasurementCorpus(_)
+            | ErrorKind::GenerateFakeZoneImage(_)
+            | ErrorKind::Ed25519Generate
+            | ErrorKind::KeyId(_)
+            | ErrorKind::Corim { .. }
+            | ErrorKind::GuessArtifact { .. }
+            | ErrorKind::TargetNameCollision { .. }
+            | ErrorKind::SerializeArtifacts(_)
+            | ErrorKind::SerializeInstallinator(_)
+            | ErrorKind::NoSigningRoot
+            | ErrorKind::ParseSigningRoot(_)
+            | ErrorKind::ImportV1Repo => false,
+
+            ErrorKind::Fetch(error) => {
+                // A transport error might be due to a broken repository (e.g.
+                // HTTP Not Found, ZIP CRC mismatch), but it might also be due
+                // to a retryable problem (e.g. HTTP timeout). We will try and
+                // classify errors we can introspect but otherwise we'll return
+                // false.
+                match error.kind() {
+                    TransportErrorKind::UnsupportedUrlScheme
+                    | TransportErrorKind::FileNotFound => return true,
+                    _ => {}
+                }
+                if let Some(source) = error.source().and_then(|source| {
+                    source.downcast_ref::<ZipTransportError>()
+                }) {
+                    return match source {
+                        ZipTransportError::UrlJoin { .. }
+                        | ZipTransportError::CompressionMethod(_)
+                        | ZipTransportError::Duplicate
+                        | ZipTransportError::FileNotFound
+                        | ZipTransportError::IsADirectory
+                        | ZipTransportError::SymlinkTargetLengthLimit
+                        | ZipTransportError::SymlinkTraversalLimit
+                        | ZipTransportError::SymlinkUtf8(_) => true,
+
+                        ZipTransportError::Io(_)
+                        | ZipTransportError::Join(_) => false,
+
+                        ZipTransportError::Zip(source) => {
+                            // All of rawzip's errors are related to broken zip
+                            // files, except for IO errors.
+                            !matches!(source.kind(), rawzip::ErrorKind::IO(_))
+                        }
+                    };
+                }
+                false
+            }
+
+            ErrorKind::Tough(error) => {
+                // tough's errors are... tough to classify. We have a pretty
+                // simple heuristic: if any error in the source chain is
+                // `std::io::Error`, return false. Otherwise, return true.
+                for source in std::iter::successors(error.source(), |source| {
+                    (*source).source()
+                }) {
+                    if source.downcast_ref::<std::io::Error>().is_some() {
+                        return false;
+                    }
+                }
+                true
+            }
+
+            ErrorKind::ReadZip { source, .. } => {
+                // All of rawzip's errors are related to broken zip files,
+                // except for IO errors.
+                !matches!(source.kind(), rawzip::ErrorKind::IO(_))
+            }
+        }
+    }
+}
+
 impl<T: Into<ErrorKind>> From<T> for Error {
     fn from(kind: T) -> Self {
         Error(Box::new(kind.into()))
+    }
+}
+
+impl From<tough::error::Error> for ErrorKind {
+    fn from(error: tough::error::Error) -> Self {
+        if let tough::error::Error::Transport { source, .. } = error {
+            ErrorKind::Fetch(source)
+        } else {
+            ErrorKind::Tough(error)
+        }
     }
 }
 
@@ -198,21 +346,6 @@ impl Debug for DebugByteString<'_> {
         }
     }
 }
-
-macro_rules! try_path {
-    ($result:expr, $kind:ident, $path:expr) => {
-        match $result {
-            Ok(value) => value,
-            Err(source) => {
-                return Err(
-                    ErrorKind::$kind { source, path: $path.into() }.into()
-                )
-            }
-        }
-    };
-}
-
-pub(crate) use try_path;
 
 #[cfg(test)]
 mod tests {
