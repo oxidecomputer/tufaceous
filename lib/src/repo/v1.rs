@@ -172,30 +172,31 @@ pub(crate) struct UnpackedArtifact {
 }
 
 impl UnpackedArtifact {
-    pub(crate) fn stream(&self) -> impl Stream<Item = Result<Bytes, Error>> {
+    pub(crate) fn stream(
+        self,
+    ) -> impl Stream<Item = Result<Bytes, Error>> + 'static {
         stream::try_unfold(
-            (BytesMut::new(), Sha256::new(), 0),
-            async |(mut buf, mut hasher, mut bytes_read)| {
+            (self, BytesMut::new(), Sha256::new(), 0),
+            async |(this, mut buf, mut hasher, mut bytes_read)| {
                 if buf.capacity() == 0 {
                     buf.reserve(8192);
                 }
                 buf.resize(buf.capacity(), 0);
-                let file = self.file.clone();
-                let mut buf = tokio::task::spawn_blocking(move || {
-                    let n = file.read_at(&mut buf, bytes_read).map_err(
+                let (this, mut buf) = tokio::task::spawn_blocking(move || {
+                    let n = this.file.read_at(&mut buf, bytes_read).map_err(
                         |source| ErrorKind::ReadFile { source, path: None },
                     )?;
                     buf.truncate(n);
-                    Ok::<_, Error>(buf)
+                    Ok::<_, Error>((this, buf))
                 })
                 .await??;
                 let bytes = buf.split().freeze();
                 if bytes.is_empty() {
-                    let msg = if self.hash
+                    let msg = if this.hash
                         != ArtifactHash(hasher.finalize().into())
                     {
                         "invalid checksum"
-                    } else if self.length != bytes_read {
+                    } else if this.length != bytes_read {
                         "invalid length"
                     } else {
                         return Ok(None);
@@ -211,7 +212,7 @@ impl UnpackedArtifact {
                 hasher.update(&bytes);
                 bytes_read +=
                     u64::try_from(bytes.len()).expect("usize fits in u64");
-                Ok(Some((bytes, (buf, hasher, bytes_read))))
+                Ok(Some((bytes, (this, buf, hasher, bytes_read))))
             },
         )
     }

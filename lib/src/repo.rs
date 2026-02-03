@@ -35,8 +35,8 @@ use crate::error::ErrorKind;
 use crate::schema::ArtifactSchema;
 use crate::schema::ArtifactsSchema;
 
-pub type TargetStream<'a> =
-    Pin<Box<dyn Stream<Item = Result<Bytes, Error>> + Send + Sync + 'a>>;
+pub type TargetStream =
+    Pin<Box<dyn Stream<Item = Result<Bytes, Error>> + Send + Sync + 'static>>;
 
 /// A loaded TUF repository.
 #[derive(Debug, Clone)]
@@ -191,16 +191,16 @@ impl Repository {
         self.v1_unpacked.is_some()
     }
 
-    pub async fn read_target<'a>(
-        &'a self,
+    pub async fn read_target(
+        &self,
         target: &str,
-    ) -> Result<TargetStream<'a>, Error> {
+    ) -> Result<TargetStream, Error> {
         if let Some(stream) = read_target(&self.inner, target).await? {
             return Ok(Box::pin(stream));
         }
 
         if let Some(unpacked) = &self.v1_unpacked
-            && let Some(entry) = unpacked.entries.get(target)
+            && let Some(entry) = unpacked.entries.get(target).cloned()
         {
             return Ok(Box::pin(entry.stream()));
         }
@@ -330,15 +330,15 @@ impl ArtifactHandle {
         self.artifact
     }
 
-    pub async fn stream(&self) -> Result<TargetStream<'_>, Error> {
+    pub async fn stream(&self) -> Result<TargetStream, Error> {
         self.repo.read_target(&self.artifact.target_name).await
     }
 }
 
-async fn read_target<'a>(
-    repo: &'a tough::Repository,
+async fn read_target(
+    repo: &tough::Repository,
     target: &str,
-) -> Result<Option<impl Stream<Item = Result<Bytes, Error>> + use<'a>>, Error> {
+) -> Result<Option<impl Stream<Item = Result<Bytes, Error>> + 'static>, Error> {
     let target_name = target.parse()?;
     // Ensure the target is in the top-level targets.json role and not a
     // delegated target; we don't permit the use of delegated targets in
