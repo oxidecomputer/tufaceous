@@ -13,7 +13,7 @@ use bytes::Bytes;
 use bytes::BytesMut;
 use camino::FromPathBufError;
 use camino::Utf8PathBuf;
-use flate2::read::GzDecoder;
+use flate2::bufread::GzDecoder;
 use futures_util::Stream;
 use futures_util::TryStreamExt;
 use futures_util::pin_mut;
@@ -437,7 +437,7 @@ impl Read for MpscReader {
     fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
         self.fill_buf()?;
         let len = self.buf.len().min(buf.len());
-        self.buf.split_to(len).copy_to_slice(buf);
+        self.buf.split_to(len).copy_to_slice(&mut buf[..len]);
         Ok(len)
     }
 }
