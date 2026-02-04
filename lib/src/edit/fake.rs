@@ -17,6 +17,20 @@ use crate::edit::source::BytesSource;
 use crate::error::Error;
 use crate::schema::ArtifactSchema;
 
+const FAKE_ZONES: [&str; 11] = [
+    "clickhouse",
+    "clickhouse_keeper",
+    "clickhouse_server",
+    "cockroachdb",
+    "crucible-zone",
+    "crucible-pantry-zone",
+    "external-dns",
+    "internal-dns",
+    "ntp",
+    "nexus",
+    "oximeter",
+];
+
 pub trait ArtifactsExt: Sized {
     fn fake(version: ArtifactVersion) -> Result<Self, Error>;
 }
@@ -82,7 +96,7 @@ impl Input<BytesSource> {
                 version.clone(),
             )?);
         }
-        for name in ["zone1", "zone2"] {
+        for name in FAKE_ZONES {
             inputs.push(Self::fake_zone_image(name.into(), version.clone())?);
         }
         Ok(inputs)

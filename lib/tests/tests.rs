@@ -63,7 +63,7 @@ async fn verify_targets() -> Result<(), Error> {
     let repo = Arc::new(repo);
     let parallelism =
         std::thread::available_parallelism().unwrap_or(NonZero::<usize>::MIN);
-    repo.verify_targets(parallelism).await?;
+    repo.verify_targets(parallelism.get()).await?;
 
     // Now intentionally fuck up the archive, and ensure verification fails.
     let pos = memchr::memmem::find(&zip, b"hubris")
@@ -74,7 +74,7 @@ async fn verify_targets() -> Result<(), Error> {
         .load_zip_buffer(zip.clone(), &log)
         .await?;
     let repo = Arc::new(repo);
-    let err = repo.verify_targets(parallelism).await.unwrap_err();
+    let err = repo.verify_targets(parallelism.get()).await.unwrap_err();
     // This error ultimately comes from `rawzip`'s CRC-32 checking.
     assert!(err.to_string().contains("Invalid checksum"));
 

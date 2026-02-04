@@ -6,7 +6,6 @@ mod v1;
 
 use std::collections::BTreeMap;
 use std::collections::HashMap;
-use std::num::NonZero;
 use std::pin::Pin;
 use std::sync::Arc;
 
@@ -257,18 +256,16 @@ impl Repository {
     /// ZIP archive; this caught binaries that were corrupted in transit between
     /// CI and destination hardware.
     ///
-    /// `parallelism` controls how many targets are read at a time. Consider
-    /// using [`std::thread::available_parallelism`], or [`NonZero::<usize>::MIN`]
-    /// as a fallback or if you do not want parallelism.
+    /// `parallelism` controls how many targets are read at a time.
     #[expect(clippy::missing_panics_doc)]
     pub async fn verify_targets(
-        self: &Arc<Self>,
-        parallelism: NonZero<usize>,
+        &self,
+        parallelism: usize,
     ) -> Result<(), Error> {
         // This is a reimplementation of `parallel-task-set` from Omicron,
         // and could potentially be replaced with that if it's published to
         // crates.io.
-        let semaphore = Arc::new(Semaphore::new(parallelism.get()));
+        let semaphore = Arc::new(Semaphore::new(parallelism.max(1)));
         let mut set: JoinSet<Result<(), Error>> = JoinSet::new();
 
         for target_name in self.targets().keys() {
@@ -288,10 +285,9 @@ impl Repository {
                         .expect("we never close the semaphore")
                 }
             };
-            let this = Arc::clone(self);
+            let mut stream = self.read_target(&target).await?;
             set.spawn(async move {
                 let _permit = permit;
-                let mut stream = this.read_target(&target).await?;
                 // Read the stream to the end. There's no need to do anything
                 // with the data; the underlying stream performs verification.
                 while stream.try_next().await?.is_some() {}

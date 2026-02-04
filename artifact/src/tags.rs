@@ -2,12 +2,14 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+use std::borrow::Cow;
 use std::collections::BTreeMap;
 
 use serde::Deserialize;
 use serde::Serialize;
 use serde::de::value::MapDeserializer;
 
+use crate::DisplayTags;
 use crate::InstallinatorArtifactKind;
 use crate::Sign;
 
@@ -46,6 +48,10 @@ pub enum KnownArtifactTags {
 }
 
 impl KnownArtifactTags {
+    pub fn display(&self) -> DisplayTags<'static> {
+        DisplayTags(Cow::Owned(self.to_tags()))
+    }
+
     pub fn from_tags(
         tags: &BTreeMap<String, String>,
     ) -> Result<Self, serde::de::value::Error> {
@@ -102,8 +108,8 @@ macro_rules! display_serialize {
 )]
 #[cfg_attr(any(test, feature = "proptest"), derive(test_strategy::Arbitrary))]
 pub struct OsPhase1Tags {
-    pub os_variant: OsVariant,
     pub os_board: OsBoard,
+    pub os_variant: OsVariant,
 }
 
 impl From<OsPhase1Tags> for KnownArtifactTags {

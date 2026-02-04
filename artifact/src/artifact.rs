@@ -2,6 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+use std::borrow::Cow;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::collections::btree_map::IntoValues;
@@ -38,12 +39,12 @@ impl Artifact {
     }
 
     pub fn display_tags(&self) -> DisplayTags<'_> {
-        DisplayTags(&self.tags)
+        DisplayTags(Cow::Borrowed(&self.tags))
     }
 }
 
 #[derive(Debug, Clone)]
-pub struct DisplayTags<'a>(&'a BTreeMap<String, String>);
+pub struct DisplayTags<'a>(pub(crate) Cow<'a, BTreeMap<String, String>>);
 
 impl Display for DisplayTags<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -71,7 +72,7 @@ impl ArtifactId {
     }
 
     pub fn display_tags(&self) -> DisplayTags<'_> {
-        DisplayTags(&self.tags)
+        DisplayTags(Cow::Borrowed(&self.tags))
     }
 }
 

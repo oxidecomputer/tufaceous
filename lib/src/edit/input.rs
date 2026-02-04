@@ -89,14 +89,14 @@ impl<Source> Input<Source> {
                 vec.push(Output::new(
                     base.join("image").join(COSMO_PHASE_1_PATH).into(),
                     version.clone(),
-                    OsPhase1Tags { os_variant, os_board: OsBoard::Cosmo }
+                    OsPhase1Tags { os_board: OsBoard::Cosmo, os_variant }
                         .into(),
                     cosmo_phase_1,
                 ));
                 vec.push(Output::new(
                     base.join("image").join(GIMLET_PHASE_1_PATH).into(),
                     version.clone(),
-                    OsPhase1Tags { os_variant, os_board: OsBoard::Gimlet }
+                    OsPhase1Tags { os_board: OsBoard::Gimlet, os_variant }
                         .into(),
                     gimlet_phase_1,
                 ));
