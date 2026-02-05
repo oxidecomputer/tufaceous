@@ -87,21 +87,21 @@ impl<Source> Input<Source> {
                 let base = Utf8PathBuf::from(format!("os-{os_variant}"));
                 let mut vec = Vec::new();
                 vec.push(Output::new(
-                    base.join("image").join(COSMO_PHASE_1_PATH).into(),
+                    base.join(COSMO_PHASE_1_PATH).into(),
                     version.clone(),
                     OsPhase1Tags { os_board: OsBoard::Cosmo, os_variant }
                         .into(),
                     cosmo_phase_1,
                 ));
                 vec.push(Output::new(
-                    base.join("image").join(GIMLET_PHASE_1_PATH).into(),
+                    base.join(GIMLET_PHASE_1_PATH).into(),
                     version.clone(),
                     OsPhase1Tags { os_board: OsBoard::Gimlet, os_variant }
                         .into(),
                     gimlet_phase_1,
                 ));
                 vec.push(Output::new(
-                    base.join("image").join(PHASE_2_PATH).into(),
+                    base.join(PHASE_2_PATH).into(),
                     version,
                     OsPhase2Tags { os_variant }.into(),
                     phase_2,
