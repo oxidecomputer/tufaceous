@@ -4,6 +4,7 @@
 
 use std::collections::HashMap;
 use std::io::BufRead;
+use std::io::BufReader;
 use std::io::Read;
 use std::io::Write;
 use std::sync::Arc;
@@ -12,6 +13,7 @@ use bytes::Buf;
 use bytes::Bytes;
 use bytes::BytesMut;
 use camino::FromPathBufError;
+use camino::Utf8Path;
 use camino::Utf8PathBuf;
 use flate2::bufread::GzDecoder;
 use futures_util::Stream;
@@ -34,6 +36,8 @@ use tufaceous_artifact::Artifact;
 use tufaceous_artifact::ArtifactHash;
 use tufaceous_artifact::ArtifactVersion;
 use tufaceous_artifact::Artifacts;
+use tufaceous_artifact::InstallinatorArtifact;
+use tufaceous_artifact::InstallinatorDocument;
 use tufaceous_artifact::KnownArtifactTags;
 use tufaceous_artifact::OsBoard;
 use tufaceous_artifact::OsPhase1Tags;
@@ -59,6 +63,7 @@ pub(crate) struct Unpacked {
     pub(crate) entries: HashMap<String, UnpackedArtifact>,
 }
 
+#[expect(clippy::too_many_lines)]
 pub(crate) async fn from_loaded(
     repo: &tough::Repository,
     log: &Logger,
@@ -71,6 +76,7 @@ pub(crate) async fn from_loaded(
 
     let mut artifacts = Artifacts::default();
     let mut unpacked = Unpacked { entries: HashMap::new() };
+    let mut installinator_document = None;
     for V1Artifact { version, kind, target } in v1_artifacts {
         let Some((hash, length)) = sha256_length(repo, log, &target) else {
             continue;
@@ -141,7 +147,11 @@ pub(crate) async fn from_loaded(
             }
 
             V1KnownArtifactKind::InstallinatorDocument => {
-                KnownArtifactTags::InstallinatorDocument
+                // Ignore this Installinator document, because it is written for
+                // the v1 artifacts. We need to generate a new one for the v2
+                // artifacts once all of the potential artifacts are extracted.
+                installinator_document = Some((version, target));
+                continue;
             }
 
             V1KnownArtifactKind::ControlPlane => {
@@ -161,6 +171,16 @@ pub(crate) async fn from_loaded(
         let tags = tags.to_tags();
         artifacts.insert(Artifact { target_name, version, tags, hash, length });
     }
+
+    if let Some((version, target)) = installinator_document {
+        generate_installinator_document(
+            &mut artifacts,
+            &mut unpacked,
+            version,
+            target,
+        )
+        .await?;
+    }
     Ok(Some((system_version, artifacts, unpacked)))
 }
 
@@ -172,6 +192,36 @@ pub(crate) struct UnpackedArtifact {
 }
 
 impl UnpackedArtifact {
+    fn new_blocking(
+        reader: &mut dyn BufRead,
+        map_read_err: impl FnOnce(std::io::Error) -> ErrorKind,
+    ) -> Result<Self, Error> {
+        let mut file =
+            camino_tempfile::tempfile().map_err(ErrorKind::CreateTempFile)?;
+        let mut hasher = Sha256::new();
+        let mut length = 0u64;
+        loop {
+            let buf = match reader.fill_buf() {
+                Ok(buf) => buf,
+                Err(error) => return Err(map_read_err(error).into()),
+            };
+            if buf.is_empty() {
+                break;
+            }
+            let len = buf.len();
+            file.write_all(buf).map_err(|source| ErrorKind::WriteFile {
+                source,
+                path: None,
+            })?;
+            hasher.update(buf);
+            reader.consume(len);
+            length += u64::try_from(len).expect("usize fits in u64");
+        }
+        let file = Arc::new(file.into());
+        let hash = ArtifactHash(hasher.finalize().into());
+        Ok(Self { file, hash, length })
+    }
+
     pub(crate) fn stream(
         self,
     ) -> impl Stream<Item = Result<Bytes, Error>> + 'static {
@@ -261,7 +311,7 @@ impl CompositeArtifact {
                     target: target_name.clone(),
                 }
             })? {
-                let (mut entry, path) = entry
+                let (entry, path) = entry
                     .and_then(|entry| {
                         let path = entry.header().path()?.into_owned();
                         let path = Utf8PathBuf::try_from(path)
@@ -272,27 +322,15 @@ impl CompositeArtifact {
                         source,
                         target: target_name.clone(),
                     })?;
-                let mut file = camino_tempfile::tempfile()
-                    .map_err(ErrorKind::CreateTempFile)?;
-                let mut hasher = Sha256::new();
-                let mut length = 0u64;
-                let mut buf = [0; 8192];
-                while let n = entry.read(&mut buf).map_err(|source| {
-                    ErrorKind::ReadCompositeArtifact {
-                        source,
-                        target: target_name.clone(),
-                    }
-                })? && n > 0
-                {
-                    file.write_all(&buf[..n]).map_err(|source| {
-                        ErrorKind::WriteFile { source, path: None }
+                let mut entry = BufReader::new(entry);
+                let unpacked_artifact =
+                    UnpackedArtifact::new_blocking(&mut entry, |source| {
+                        ErrorKind::ReadCompositeArtifact {
+                            source,
+                            target: target_name.clone(),
+                        }
                     })?;
-                    hasher.update(&buf[..n]);
-                    length += u64::try_from(n).expect("usize fits in u64");
-                }
-                let file = Arc::new(file.into());
-                let hash = ArtifactHash(hasher.finalize().into());
-                entries.insert(path, UnpackedArtifact { file, hash, length });
+                entries.insert(path, unpacked_artifact);
             }
             Ok(Self { entries, original_target_name: target_name })
         });
@@ -478,6 +516,49 @@ impl BufRead for MpscReader {
     fn consume(&mut self, amount: usize) {
         self.buf.advance(amount);
     }
+}
+
+async fn generate_installinator_document(
+    artifacts: &mut Artifacts,
+    unpacked: &mut Unpacked,
+    version: ArtifactVersion,
+    original_target: String,
+) -> Result<(), Error> {
+    let target_name = format!("{original_target}/v2.json");
+    let mut document = InstallinatorDocument::default();
+    for artifact in artifacts.iter() {
+        if let Ok(tags) = KnownArtifactTags::from_tags(&artifact.tags)
+            && let Some(kind) = tags.to_installinator()
+            && let Some(file_name) =
+                Utf8Path::new(&artifact.target_name).file_name()
+        {
+            document.artifacts.insert(InstallinatorArtifact {
+                file_name: file_name.to_owned(),
+                kind,
+                sha256: artifact.hash,
+            });
+        }
+    }
+
+    let mut json = serde_json::to_string_pretty(&document)
+        .map_err(ErrorKind::SerializeInstallinator)?;
+    json.push('\n');
+    let unpacked_artifact = tokio::task::spawn_blocking(move || {
+        UnpackedArtifact::new_blocking(&mut json.as_bytes(), |_error| {
+            unreachable!("Read::read for &[u8] does not return an error")
+        })
+    })
+    .await??;
+
+    artifacts.insert(Artifact {
+        target_name: target_name.clone(),
+        version,
+        tags: KnownArtifactTags::InstallinatorDocument.to_tags(),
+        hash: unpacked_artifact.hash,
+        length: unpacked_artifact.length,
+    });
+    unpacked.entries.insert(target_name, unpacked_artifact);
+    Ok(())
 }
 
 #[derive(Debug, Deserialize)]
