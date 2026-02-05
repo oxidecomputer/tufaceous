@@ -2,6 +2,57 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+// ZIP is a somewhat dreadful archive format. We use it as the repository
+// format of choice for Tufaceous because it has two qualities:
+//
+// 1. It is well-supported on most operating systems without any additional
+//    software, so anybody who finds themselves needing to deal with the
+//    repository can inspect it in a reasonable way.
+// 2. Files can be accessed in random order.
+//
+// We use the `rawzip` crate to deal with parsing the structures in a ZIP
+// archive; any higher-level use cases are an exercise left to the consumer.
+// This allows us to create a very strict ZIP archive reader. A list of common
+// problems with using ZIP files, and the defenses we take:
+//
+// - Directory traversal, symlinks, and similar naughty file operations related
+//   to extracting ZIP archives to a directory (e.g. "Zip Slip"). This module's
+//   defense is to never extract any files to disk, avoiding recreating any
+//   problems related to extraction. (The available API is to read specific
+//   files in the archive as a stream.) Symlinks in ZIP files largely do not
+//   work in the real world so they are ignored here (attempts to read a file
+//   which is a symlink result in an error).
+// - Central directory confusion due to differences in readers. APPNOTE.TXT is
+//   full of doublespeak: one section says that archives must be read "from the
+//   back" (starting from searching for the end-of-central-directory record),
+//   and another suggests that archives can be streamed, or read "from the
+//   front". `rawzip` always reads "from the back". Additionally, APPNOTE.TXT
+//   arguably underspecifies comments, making it possible for the comment to
+//   contain something that is misparsed as an end-of-central-directory record.
+//   This module always expects the end-of-central-directory record to come at
+//   the very end of the file, rejecting any archives that contain comments or
+//   any extra content at the end.
+//   https://web.archive.org/web/20250131021721/https://games.greggman.com/game/zip-rant/
+// - Multiple entries with the same file name, leading to confusion due to
+//   differences in readers. These are detected and those files return an error
+//   if reading is attempted.
+// - Quines and zip bombs which abuse overlapping file headers leading to a
+//   denial of service. This module takes the defense suggested by `rawzip`,
+//   which is to reject archives that contain files with overlapping file
+//   data. We additionally reject archives where file data overlaps the central
+//   directory.
+//   https://www.bamsoftware.com/hacks/zipbomb/
+// - Zip bombs which use extreme compression ratios leading to a denial of
+//   service. This module takes no defense against this; instead this defense
+//   is implemented in `tough`. The library places default size limits on
+//   repository metadata, and all targets in the repository have a file size in
+//   the signed metadata. A malicious archive designed to run a system out of
+//   memory or temporary disk space would therefore also need to be signed and
+//   trusted by the user (in the context of the Oxide control plane, this user
+//   is either an administrator over the entire control plane, or has physical
+//   access to the technician port).
+//   https://docs.rs/tough/0.21.0/tough/struct.Limits.html
+
 use std::collections::HashMap;
 use std::fmt::Debug;
 use std::fs::File;
@@ -36,6 +87,10 @@ use url::Url;
 
 use crate::error::Error;
 use crate::error::ErrorKind;
+
+// The length of the end-of-central-directory record if the comment is zero
+// bytes. Archives with a "comment" (data after the EOCD) are rejected.
+const EOCD_MAX_SEARCH_SPACE: u64 = 22;
 
 /// Implementation of [`tough::Transport`] that operates on a Zip archive.
 ///
@@ -84,7 +139,10 @@ impl<T: ReaderAt + Debug + Send + Sync + 'static> Clone for ZipTransport<T> {
 
 impl<T: AsRef<[u8]> + Debug + Send + Sync + 'static> ZipTransport<Cursor<T>> {
     pub fn from_slice(data: T, log: &Logger) -> Result<Self, Error> {
-        let archive = ZipArchive::from_slice(data).upgrade(None)?;
+        let archive = ZipArchive::with_max_search_space(EOCD_MAX_SEARCH_SPACE)
+            .locate_in_slice(data)
+            .map_err(|(_, error)| error)
+            .upgrade(None)?;
         Self::from_impl_blocking(archive.into_zip_archive(), None, None, log)
     }
 }
@@ -99,8 +157,11 @@ impl ZipTransport<FileReader> {
         tokio::task::spawn_blocking(move || {
             let archive_path = archive_path;
             let mut buffer = vec![0; rawzip::RECOMMENDED_BUFFER_SIZE];
-            let archive = ZipArchive::from_file(file, &mut buffer)
-                .upgrade(archive_path.as_ref())?;
+            let archive =
+                ZipArchive::with_max_search_space(EOCD_MAX_SEARCH_SPACE)
+                    .locate_in_file(file, &mut buffer)
+                    .map_err(|(_, error)| error)
+                    .upgrade(archive_path.as_ref())?;
             Self::from_impl_blocking(archive, archive_path, Some(buffer), &log)
         })
         .await?
