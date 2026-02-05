@@ -15,7 +15,7 @@ pub(crate) struct ArtifactsSchema {
     #[serde(default)]
     pub(crate) artifacts: Vec<ArtifactSchema>,
     #[serde(default)]
-    pub(crate) metadata: BTreeMap<String, serde_json::Value>,
+    pub(crate) metadata: BTreeMap<String, String>,
 }
 
 impl ArtifactsSchema {

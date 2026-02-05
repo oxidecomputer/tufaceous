@@ -48,7 +48,7 @@ pub struct Repository {
     pub(crate) archive_path: Option<Utf8PathBuf>,
     pub(crate) archive_sha256: Option<[u8; 32]>,
     artifacts: Artifacts,
-    metadata: BTreeMap<String, serde_json::Value>,
+    metadata: BTreeMap<String, String>,
     v1_unpacked: Option<v1::Unpacked>,
 }
 
@@ -184,7 +184,7 @@ impl Repository {
         &self.artifacts
     }
 
-    pub fn metadata(&self) -> &BTreeMap<String, serde_json::Value> {
+    pub fn metadata(&self) -> &BTreeMap<String, String> {
         &self.metadata
     }
 

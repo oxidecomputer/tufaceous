@@ -45,7 +45,6 @@ pub struct RepositoryEditor<'a> {
     generate_installinator_document: bool,
     targets: HashMap<String, Vec<TargetSource<'a>>>,
     artifacts: HashMap<String, HashSet<ArtifactSchema>>,
-    metadata: BTreeMap<String, serde_json::Value>,
 }
 
 impl<'a> RepositoryEditor<'a> {
@@ -57,7 +56,6 @@ impl<'a> RepositoryEditor<'a> {
             generate_installinator_document: true,
             targets: HashMap::new(),
             artifacts: HashMap::new(),
-            metadata: BTreeMap::new(),
         }
     }
 
@@ -268,16 +266,6 @@ impl<'a> RepositoryEditor<'a> {
         Ok(editor)
     }
 
-    pub fn metadata(mut self, key: String, value: serde_json::Value) -> Self {
-        self.metadata.insert(key, value);
-        self
-    }
-
-    pub fn remove_metadata(mut self, key: &str) -> Self {
-        self.metadata.remove(key);
-        self
-    }
-
     pub fn from_repo(repo: &'a Repository) -> Result<Self, Error> {
         Self::new(repo.system_version().clone()).import_repo(repo)
     }
@@ -397,7 +385,7 @@ impl<'a> RepositoryEditor<'a> {
         let document = ArtifactsSchema {
             system_version: self.system_version,
             artifacts: artifacts.into_values().collect(),
-            metadata: self.metadata,
+            metadata: BTreeMap::new(),
         };
         let target = BytesSource::json(&document)
             .map_err(ErrorKind::SerializeArtifacts)?
