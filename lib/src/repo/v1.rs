@@ -248,8 +248,9 @@ impl CompositeArtifact {
                 ErrorKind::TargetNotFound { target_name: target_name.clone() }
             })?;
         pin_mut!(stream);
+
         let (tx, rx) = mpsc::channel(1);
-        let target_name = target_name.clone();
+        let target_name_clone = target_name.clone();
         let task = tokio::task::spawn_blocking(move || {
             let mut archive =
                 tar::Archive::new(GzDecoder::new(MpscReader::new(rx)));
@@ -295,10 +296,32 @@ impl CompositeArtifact {
             }
             Ok(Self { entries, original_target_name: target_name })
         });
+
+        let mut stream_interrupted = false;
         while let Some(item) = stream.try_next().await? {
-            let Ok(()) = tx.send(item).await else { break };
+            let Ok(()) = tx.send(item).await else {
+                // The receiver hung up early. We are not allowed to return `Ok`
+                // from this function, otherwise we have not actually verified
+                // any of the data we just read against its hash.
+                stream_interrupted = true;
+                break;
+            };
         }
-        task.await?
+        drop(tx);
+        let result = task.await?;
+        if stream_interrupted && result.is_ok() {
+            // No, it isn't ok.
+            Err(ErrorKind::ReadCompositeArtifact {
+                source: std::io::Error::new(
+                    std::io::ErrorKind::Interrupted,
+                    "stream unexpectedly interrupted",
+                ),
+                target: target_name_clone,
+            }
+            .into())
+        } else {
+            result
+        }
     }
 
     async fn read_rot(
@@ -437,7 +460,7 @@ impl Read for MpscReader {
     fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
         self.fill_buf()?;
         let len = self.buf.len().min(buf.len());
-        self.buf.split_to(len).copy_to_slice(&mut buf[..len]);
+        self.buf.copy_to_slice(&mut buf[..len]);
         Ok(len)
     }
 }
@@ -498,4 +521,59 @@ enum V1KnownArtifactKind {
     SwitchSp,
     SwitchRot,
     SwitchRotBootloader,
+}
+
+#[cfg(test)]
+mod tests {
+    use std::io::Read;
+
+    use bytes::Bytes;
+    use tokio::sync::mpsc;
+
+    use crate::repo::v1::MpscReader;
+
+    #[tokio::test]
+    async fn mpsc_reader() {
+        static CHUNKS: [Bytes; 5] = [
+            Bytes::from_static(b"hello world"),
+            Bytes::from_static(&[0x5a; 512]),
+            Bytes::from_static(b"meow meow meow meow\0"),
+            Bytes::from_static(&[0; 12345]),
+            Bytes::from_static(&[0x5a; 256]),
+        ];
+
+        let expected = CHUNKS.concat();
+
+        let (tx, rx) = mpsc::channel(1);
+        let task = tokio::task::spawn_blocking(move || {
+            let mut bytes_read = Vec::new();
+            let mut reader = MpscReader::new(rx);
+            let mut buf = [0; 2048];
+            while let n = reader.read(&mut buf).unwrap()
+                && n > 0
+            {
+                bytes_read.extend_from_slice(&buf[..n]);
+            }
+            bytes_read
+        });
+        for chunk in &CHUNKS {
+            tx.send(chunk.clone()).await.unwrap();
+        }
+        drop(tx);
+        let bytes_read = task.await.unwrap();
+        assert_eq!(bytes_read, expected);
+    }
+
+    #[tokio::test]
+    async fn mpsc_reader_empty() {
+        let (tx, rx) = mpsc::channel(1);
+        let task = tokio::task::spawn_blocking(move || {
+            let mut bytes_read = Vec::new();
+            MpscReader::new(rx).read_to_end(&mut bytes_read).unwrap();
+            bytes_read
+        });
+        drop(tx);
+        let bytes_read = task.await.unwrap();
+        assert!(bytes_read.is_empty());
+    }
 }

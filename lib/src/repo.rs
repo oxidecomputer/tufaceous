@@ -344,14 +344,10 @@ async fn read_target_vec(
     repo: &tough::Repository,
     target: &str,
 ) -> Result<Option<Vec<u8>>, Error> {
-    let Some(mut stream) = read_target(repo, target).await? else {
+    let Some(stream) = read_target(repo, target).await? else {
         return Ok(None);
     };
-    let mut buf = Vec::new();
-    while let Some(item) = stream.try_next().await? {
-        buf.extend_from_slice(item.as_ref());
-    }
-    Ok(Some(buf))
+    stream.map_ok(Vec::from).try_concat().await.map(Some)
 }
 
 async fn read_target_json<T: DeserializeOwned>(
@@ -361,9 +357,9 @@ async fn read_target_json<T: DeserializeOwned>(
     let Some(vec) = read_target_vec(repo, target).await? else {
         return Ok(None);
     };
-    Ok(serde_json::from_slice(&vec).map_err(|source| {
-        ErrorKind::ParseTargetJson { source, target: target.into() }
-    })?)
+    serde_json::from_slice(&vec).map_err(|source| {
+        ErrorKind::ParseTargetJson { source, target: target.into() }.into()
+    })
 }
 
 fn sha256_length(
