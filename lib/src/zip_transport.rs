@@ -22,8 +22,6 @@ use rawzip::FileReader;
 use rawzip::ReaderAt;
 use rawzip::ZipArchive;
 use rawzip::ZipArchiveEntryWayfinder;
-use rawzip::ZipReader;
-use rawzip::ZipVerifier;
 use rawzip::path::RawPath;
 use rawzip::path::ZipFilePath;
 use slog::Logger;
@@ -38,9 +36,6 @@ use url::Url;
 
 use crate::error::Error;
 use crate::error::ErrorKind;
-
-const MAX_SYMLINK_TARGET_LEN: usize = 1024 - 1;
-const MAX_SYMLINK_TRAVERSAL: usize = 8;
 
 /// Implementation of [`tough::Transport`] that operates on a Zip archive.
 ///
@@ -69,8 +64,8 @@ struct Inner<T: ReaderAt + Debug + Send + Sync + 'static> {
 #[derive(Debug, Clone, Copy)]
 enum Entry {
     File(EntryData),
-    Symlink(EntryData),
     Dir,
+    Symlink,
     Duplicate,
 }
 
@@ -145,16 +140,14 @@ impl<T: ReaderAt + Debug + Send + Sync + 'static> ZipTransport<T> {
                 std::collections::hash_map::Entry::Vacant(e) => {
                     if record.is_dir() {
                         e.insert(Entry::Dir);
+                    } else if record.mode().is_symlink() {
+                        e.insert(Entry::Symlink);
                     } else {
                         let data = EntryData {
                             compression_method: record.compression_method(),
                             wayfinder: record.wayfinder(),
                         };
-                        if record.mode().is_symlink() {
-                            e.insert(Entry::Symlink(data));
-                        } else {
-                            e.insert(Entry::File(data));
-                        }
+                        e.insert(Entry::File(data));
                     }
                 }
             }
@@ -219,23 +212,6 @@ impl<T: ReaderAt + Debug + Send + Sync + 'static> ZipTransport<T> {
         Ok(Self { inner: Arc::new(Inner { archive, entries }) })
     }
 
-    fn reader_blocking(
-        &self,
-        EntryData { compression_method, wayfinder }: EntryData,
-    ) -> Result<Reader<'_, T>, ZipTransportError> {
-        let entry = self.inner.archive.get_entry(wayfinder)?;
-        let reader = entry.reader();
-        match compression_method {
-            CompressionMethod::Store => {
-                Ok(Reader::Store(entry.verifying_reader(reader)))
-            }
-            CompressionMethod::Deflate => Ok(Reader::Deflate(
-                entry.verifying_reader(DeflateDecoder::new(reader)),
-            )),
-            other => Err(ZipTransportError::CompressionMethod(other)),
-        }
-    }
-
     fn stream(
         self,
         entry_data: EntryData,
@@ -243,7 +219,21 @@ impl<T: ReaderAt + Debug + Send + Sync + 'static> ZipTransport<T> {
     ) -> impl Stream<Item = Result<Bytes, TransportError>> {
         let (tx, mut rx) = mpsc::channel(1);
         let task = tokio::task::spawn_blocking(move || {
-            let mut reader = self.reader_blocking(entry_data)?;
+            let entry = self.inner.archive.get_entry(entry_data.wayfinder)?;
+            let mut reader = match entry_data.compression_method {
+                CompressionMethod::Store => {
+                    let reader = entry.reader();
+                    Box::new(entry.verifying_reader(reader)) as Box<dyn Read>
+                }
+                CompressionMethod::Deflate => {
+                    let reader = DeflateDecoder::new(entry.reader());
+                    Box::new(entry.verifying_reader(reader)) as Box<dyn Read>
+                }
+                other => {
+                    return Err(ZipTransportError::CompressionMethod(other));
+                }
+            };
+
             let mut buf = BytesMut::zeroed(8192);
             while let n = reader.read(&mut buf)?
                 && n > 0
@@ -270,88 +260,33 @@ impl<T: ReaderAt + Debug + Send + Sync + 'static> ZipTransport<T> {
             }),
         )
     }
-
-    async fn read_symlink_target(
-        self,
-        entry_data: EntryData,
-        base: &Url,
-    ) -> Result<Url, ZipTransportError> {
-        let target = tokio::task::spawn_blocking(move || {
-            let mut reader = self.reader_blocking(entry_data)?;
-            let mut v = vec![0; MAX_SYMLINK_TARGET_LEN + 1];
-            let len =
-                std::io::copy(&mut reader, &mut Cursor::new(v.as_mut_slice()))?
-                    .try_into()
-                    .expect("MAX_SYMLINK_TARGET_LEN <= usize::MAX");
-            if v.len() > MAX_SYMLINK_TARGET_LEN {
-                return Err(ZipTransportError::SymlinkTargetLengthLimit);
-            }
-            v.truncate(len);
-            String::from_utf8(v).map_err(|source| {
-                ZipTransportError::SymlinkUtf8(source.utf8_error())
-            })
-        })
-        .await??;
-        base.join(&target).map_err(|source| ZipTransportError::UrlJoin {
-            source,
-            url: target,
-            base: base.to_string(),
-        })
-    }
 }
 
 #[async_trait]
 impl<T: ReaderAt + Debug + Send + Sync + 'static> Transport
     for ZipTransport<T>
 {
-    async fn fetch(
-        &self,
-        original_url: Url,
-    ) -> Result<TransportStream, TransportError> {
-        let mut url = original_url.clone();
+    async fn fetch(&self, url: Url) -> Result<TransportStream, TransportError> {
         if url.scheme() != "zip" {
             return Err(TransportError::new(
                 TransportErrorKind::UnsupportedUrlScheme,
                 url,
             ));
         }
-        for _ in 0..MAX_SYMLINK_TRAVERSAL {
-            match self.inner.entries.get(&url).copied() {
-                Some(Entry::File(entry_data)) => {
-                    return Ok(Box::pin(self.clone().stream(entry_data, url)));
-                }
-                Some(Entry::Symlink(entry_data)) => {
-                    url = self
-                        .clone()
-                        .read_symlink_target(entry_data, &url)
-                        .await
-                        .map_err(|error| error.upgrade(url))?;
-                }
-                Some(Entry::Dir) => {
-                    return Err(ZipTransportError::IsADirectory.upgrade(url));
-                }
-                Some(Entry::Duplicate) => {
-                    return Err(ZipTransportError::Duplicate.upgrade(url));
-                }
-                None => {
-                    return Err(ZipTransportError::FileNotFound.upgrade(url));
-                }
+        match self.inner.entries.get(&url).copied() {
+            Some(Entry::File(entry_data)) => {
+                Ok(Box::pin(self.clone().stream(entry_data, url)))
             }
-        }
-        Err(ZipTransportError::SymlinkTraversalLimit.upgrade(original_url))
-    }
-}
-
-enum Reader<'a, T: ReaderAt> {
-    Store(ZipVerifier<ZipReader<&'a T>, &'a T>),
-    Deflate(ZipVerifier<DeflateDecoder<ZipReader<&'a T>>, &'a T>),
-}
-
-impl<T: ReaderAt> Read for Reader<'_, T> {
-    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
-        match self {
-            Reader::Store(reader) => reader.read(buf),
-            Reader::Deflate(reader) => reader.read(buf),
+            Some(Entry::Dir) => {
+                Err(ZipTransportError::IsADirectory.upgrade(url))
+            }
+            Some(Entry::Symlink) => {
+                Err(ZipTransportError::IsASymlink.upgrade(url))
+            }
+            Some(Entry::Duplicate) => {
+                Err(ZipTransportError::Duplicate.upgrade(url))
+            }
+            None => Err(ZipTransportError::FileNotFound.upgrade(url)),
         }
     }
 }
@@ -393,12 +328,8 @@ pub enum ZipTransportError {
     FileNotFound,
     #[error("is a directory")]
     IsADirectory,
-    #[error("symlink target name exceeded byte limit")]
-    SymlinkTargetLengthLimit,
-    #[error("reached symlink traversal limit")]
-    SymlinkTraversalLimit,
-    #[error("symlink target is not valid UTF-8")]
-    SymlinkUtf8(std::str::Utf8Error),
+    #[error("is a symlink")]
+    IsASymlink,
 }
 
 impl ZipTransportError {
@@ -413,9 +344,7 @@ impl ZipTransportError {
             | ZipTransportError::CompressionMethod(_)
             | ZipTransportError::Duplicate
             | ZipTransportError::IsADirectory
-            | ZipTransportError::SymlinkTargetLengthLimit
-            | ZipTransportError::SymlinkTraversalLimit
-            | ZipTransportError::SymlinkUtf8(_) => TransportErrorKind::Other,
+            | ZipTransportError::IsASymlink => TransportErrorKind::Other,
         };
         TransportError::new_with_cause(kind, url, self)
     }

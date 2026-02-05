@@ -265,9 +265,7 @@ impl ErrorKind {
                         | ZipTransportError::Duplicate
                         | ZipTransportError::FileNotFound
                         | ZipTransportError::IsADirectory
-                        | ZipTransportError::SymlinkTargetLengthLimit
-                        | ZipTransportError::SymlinkTraversalLimit
-                        | ZipTransportError::SymlinkUtf8(_) => true,
+                        | ZipTransportError::IsASymlink => true,
 
                         ZipTransportError::Io(_)
                         | ZipTransportError::Join(_) => false,
