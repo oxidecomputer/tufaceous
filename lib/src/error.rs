@@ -2,6 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+use std::collections::BTreeMap;
 use std::convert::Infallible;
 use std::error::Error as _;
 use std::fmt;
@@ -27,6 +28,7 @@ macro_rules! try_path {
     };
 }
 pub(crate) use try_path;
+use tufaceous_artifact::DisplayTags;
 
 #[derive(Debug, thiserror::Error)]
 #[error(transparent)]
@@ -175,6 +177,16 @@ pub enum ErrorKind {
     GuessArtifact { path: Utf8PathBuf },
     #[error("target name collision on {target_name}")]
     TargetNameCollision { target_name: String },
+    #[error(
+        "artifacts {first_target_name} and {second_target_name}
+        have the same tags {tags}, which is not allowed",
+        tags = DisplayTags::from(.tags),
+    )]
+    DisallowedTagCollision {
+        first_target_name: String,
+        second_target_name: String,
+        tags: BTreeMap<String, String>,
+    },
     #[error("failed to serialize artifacts document")]
     SerializeArtifacts(#[source] serde_json::Error),
     #[error("failed to serialize Installinator document")]
@@ -239,6 +251,7 @@ impl ErrorKind {
             | ErrorKind::Corim { .. }
             | ErrorKind::GuessArtifact { .. }
             | ErrorKind::TargetNameCollision { .. }
+            | ErrorKind::DisallowedTagCollision { .. }
             | ErrorKind::SerializeArtifacts(_)
             | ErrorKind::SerializeInstallinator(_)
             | ErrorKind::NoSigningRoot

@@ -2,7 +2,6 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use std::borrow::Cow;
 use std::collections::BTreeMap;
 
 use serde::Deserialize;
@@ -49,7 +48,7 @@ pub enum KnownArtifactTags {
 
 impl KnownArtifactTags {
     pub fn display(&self) -> DisplayTags<'static> {
-        DisplayTags(Cow::Owned(self.to_tags()))
+        self.to_tags().into()
     }
 
     pub fn from_tags(

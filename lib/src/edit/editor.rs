@@ -317,6 +317,28 @@ impl<'a> RepositoryEditor<'a> {
             })
             .collect::<Result<BTreeMap<_, _>, Error>>()?;
 
+        // Ensure each set of tags is unique, except for known tag sets that
+        // we expect to be non-unique.
+        let mut seen_tags = HashMap::new();
+        for (target_name, artifact) in &artifacts {
+            if let Ok(tags) = KnownArtifactTags::from_tags(&artifact.tags)
+                && matches!(tags, KnownArtifactTags::MeasurementCorpus)
+            {
+                continue;
+            }
+
+            if let Some(first_target_name) =
+                seen_tags.insert(&artifact.tags, target_name)
+            {
+                return Err(ErrorKind::DisallowedTagCollision {
+                    first_target_name: first_target_name.clone(),
+                    second_target_name: target_name.clone(),
+                    tags: artifact.tags.clone(),
+                }
+                .into());
+            }
+        }
+
         // Collect all the sha256 hashes and lengths for each source. For file
         // and fake sources, we want to calculate the hashes in parallel, so
         // we spawn their calculation tasks on a JoinSet. Sources from borrowed

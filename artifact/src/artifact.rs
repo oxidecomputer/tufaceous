@@ -39,7 +39,7 @@ impl Artifact {
     }
 
     pub fn display_tags(&self) -> DisplayTags<'_> {
-        DisplayTags(Cow::Borrowed(&self.tags))
+        DisplayTags::from(&self.tags)
     }
 }
 
@@ -56,6 +56,18 @@ impl Display for DisplayTags<'_> {
             comma = ",";
         }
         Ok(())
+    }
+}
+
+impl From<BTreeMap<String, String>> for DisplayTags<'static> {
+    fn from(tags: BTreeMap<String, String>) -> Self {
+        Self(Cow::Owned(tags))
+    }
+}
+
+impl<'a> From<&'a BTreeMap<String, String>> for DisplayTags<'a> {
+    fn from(tags: &'a BTreeMap<String, String>) -> Self {
+        Self(Cow::Borrowed(tags))
     }
 }
 
