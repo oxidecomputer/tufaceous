@@ -140,12 +140,12 @@ pub enum ErrorKind {
     },
     #[error("failed to generate fake hubris archive")]
     GenerateFakeHubrisArchive(#[source] hubtools::Error),
+    #[error("failed to read CoRIM manifest {path}")]
+    ReadCorim { source: rats_corim::Error, path: Utf8PathBuf },
     #[error("failed to generate fake measurement corpus")]
     GenerateFakeMeasurementCorpus(#[source] rats_corim::Error),
     #[error("failed to serialize fake measurement corpus")]
-    SerializeFakeMeasurementCorpus(
-        #[source] ciborium::ser::Error<std::io::Error>,
-    ),
+    SerializeFakeMeasurementCorpus(#[source] rats_corim::Error),
     #[error("failed to generate fake zone image")]
     GenerateFakeZoneImage(#[source] std::io::Error),
 
@@ -171,13 +171,6 @@ pub enum ErrorKind {
 
     #[error(transparent)]
     ArtifactVersion(#[from] tufaceous_artifact::ArtifactVersionError),
-    #[error("failed to read {path} as CoRIM")]
-    DeserializeCorim {
-        source: ciborium::de::Error<std::io::Error>,
-        path: Utf8PathBuf,
-    },
-    #[error("failed to read version from CoRIM document {path}")]
-    CorimVersion { source: rats_corim::Error, path: Utf8PathBuf },
     #[error("failed to guess what kind of artifact {path} is")]
     GuessArtifact { path: Utf8PathBuf },
     #[error("target name collision on {target_name}")]
@@ -248,13 +241,12 @@ impl ErrorKind {
             | ErrorKind::ReadStream(_)
             | ErrorKind::GenerateFakeHubrisArchive(_)
             | ErrorKind::GenerateFakeMeasurementCorpus(_)
+            | ErrorKind::ReadCorim { .. }
             | ErrorKind::SerializeFakeMeasurementCorpus(_)
             | ErrorKind::GenerateFakeZoneImage(_)
             | ErrorKind::Ed25519Generate
             | ErrorKind::KeyId(_)
             | ErrorKind::RoleVerify(_)
-            | ErrorKind::DeserializeCorim { .. }
-            | ErrorKind::CorimVersion { .. }
             | ErrorKind::GuessArtifact { .. }
             | ErrorKind::TargetNameCollision { .. }
             | ErrorKind::DisallowedTagCollision { .. }

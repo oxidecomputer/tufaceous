@@ -4,8 +4,6 @@
 
 use std::ops::ControlFlow;
 
-use bytes::BufMut;
-use bytes::BytesMut;
 use rats_corim::Corim;
 use rats_corim::CorimBuilder;
 use sha2::Digest;
@@ -32,16 +30,11 @@ impl Input<TargetSource<'static>> {
             corim
         } else {
             let v = source.read_to_end().await?;
-            try_path!(
-                ciborium::from_reader(v.as_slice()),
-                DeserializeCorim,
-                &source.path
-            )
+            try_path!(Corim::from_bytes(v.as_slice()), ReadCorim, &source.path)
         };
         let sha256 = source.sha256().await?;
         let version =
-            try_path!(corim.get_version(), CorimVersion, &source.path)
-                .parse()?;
+            try_path!(corim.get_version(), ReadCorim, &source.path).parse()?;
         Ok(Self::MeasurementCorpus {
             source: source.into(),
             corim_id: corim.id,
@@ -62,12 +55,15 @@ impl Input<TargetSource<'static>> {
                 Err(ciborium::de::Error::Io(err))
                     if err.kind() == std::io::ErrorKind::UnexpectedEof =>
                 {
-                    // This was plausibly a CoRIM manifest until we hit the end of
-                    // the buffer, indicating a very high likelihood that if we read
-                    // the entire thing it'd still be a CoRIM manifest.
+                    // This was plausibly a CoRIM manifest until we hit the end
+                    // of the buffer, indicating a very high likelihood that if
+                    // we read the entire thing it'd still be a CoRIM manifest.
                     None
                 }
-                Err(_) => return Ok(ControlFlow::Continue(input)),
+                Err(error) => {
+                    eprintln!("{error:?}");
+                    return Ok(ControlFlow::Continue(input));
+                }
             };
         Self::measurement_corpus(input.source, corim)
             .await
@@ -91,16 +87,54 @@ impl Input<BytesSource> {
         let corim = builder
             .build()
             .map_err(ErrorKind::GenerateFakeMeasurementCorpus)?;
-
-        let mut writer = BytesMut::new().writer();
-        ciborium::into_writer(&corim, &mut writer)
+        let bytes = corim
+            .to_vec()
             .map_err(ErrorKind::SerializeFakeMeasurementCorpus)?;
-        let bytes = writer.into_inner().freeze();
         Ok(Input::MeasurementCorpus {
             corim_id: corim.id,
             sha256: ArtifactHash(Sha256::digest(&bytes).into()),
             source: BytesSource::new(bytes),
             version,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use camino::Utf8Path;
+    use futures_util::TryStreamExt;
+    use futures_util::pin_mut;
+
+    use crate::edit::guess::GuessInput;
+    use crate::edit::input::Input;
+    use crate::edit::source::FileSource;
+    use crate::error::Error;
+
+    #[tokio::test]
+    async fn guess_partial_input() -> Result<(), Error> {
+        const TRUNCATE_LEN: usize = 16;
+
+        let path = Utf8Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/data/corim-all-sp-v1.0.55.cbor");
+        let metadata = tokio::fs::metadata(&path).await.unwrap();
+        assert!(usize::try_from(metadata.len()).unwrap() > TRUNCATE_LEN);
+
+        let mut source = FileSource::open(path).await?;
+        // Read the first chunk from the stream, but truncate it to ensure
+        // we hit the match arm where we correctly guess that this was an
+        // incomplete read.
+        let file_start = {
+            let stream = source.stream();
+            pin_mut!(stream);
+            stream.try_next().await?.unwrap().split_to(TRUNCATE_LEN)
+        };
+        let input =
+            Input::guess_measurement_corpus(GuessInput { file_start, source })
+                .await?
+                .break_value()
+                .unwrap();
+        assert!(matches!(input, Input::MeasurementCorpus { .. }));
+
+        Ok(())
     }
 }
