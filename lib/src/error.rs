@@ -172,7 +172,12 @@ pub enum ErrorKind {
     #[error(transparent)]
     ArtifactVersion(#[from] tufaceous_artifact::ArtifactVersionError),
     #[error("failed to read {path} as CoRIM")]
-    Corim { source: ciborium::de::Error<std::io::Error>, path: Utf8PathBuf },
+    DeserializeCorim {
+        source: ciborium::de::Error<std::io::Error>,
+        path: Utf8PathBuf,
+    },
+    #[error("failed to read version from CoRIM document {path}")]
+    CorimVersion { source: rats_corim::Error, path: Utf8PathBuf },
     #[error("failed to guess what kind of artifact {path} is")]
     GuessArtifact { path: Utf8PathBuf },
     #[error("target name collision on {target_name}")]
@@ -248,7 +253,8 @@ impl ErrorKind {
             | ErrorKind::Ed25519Generate
             | ErrorKind::KeyId(_)
             | ErrorKind::RoleVerify(_)
-            | ErrorKind::Corim { .. }
+            | ErrorKind::DeserializeCorim { .. }
+            | ErrorKind::CorimVersion { .. }
             | ErrorKind::GuessArtifact { .. }
             | ErrorKind::TargetNameCollision { .. }
             | ErrorKind::DisallowedTagCollision { .. }

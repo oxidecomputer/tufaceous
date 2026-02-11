@@ -21,7 +21,6 @@ use crate::error::try_path;
 pub(crate) struct GuessInput {
     pub(crate) file_start: Bytes,
     pub(crate) source: FileSource,
-    pub(crate) version: ArtifactVersion,
 }
 
 pub(crate) type GuessResult =
@@ -48,7 +47,6 @@ impl Input<TargetSource<'static>> {
         let guess_input = GuessInput {
             file_start: buf.freeze(),
             source: FileSource::from_file(file, path.clone()),
-            version,
         };
         let guess_input =
             match Self::guess_measurement_corpus(guess_input).await? {

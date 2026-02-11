@@ -82,20 +82,16 @@ impl<'a> RepositoryEditor<'a> {
         path: Utf8PathBuf,
     ) -> Result<Self, Error> {
         let source = FileSource::open(path).await?;
-        let input = Input::measurement_corpus(
-            source,
-            None,
-            self.artifact_version.clone()?,
-        )
-        .await?;
+        let input = Input::measurement_corpus(source, None).await?;
         Ok(self.insert_input(input))
     }
 
-    pub fn fake_measurement_corpus(self, hashes: usize) -> Result<Self, Error> {
-        let input = Input::fake_measurement_corpus(
-            hashes,
-            self.artifact_version.clone()?,
-        )?;
+    pub fn fake_measurement_corpus(
+        self,
+        hashes: usize,
+        version: ArtifactVersion,
+    ) -> Result<Self, Error> {
+        let input = Input::fake_measurement_corpus(hashes, version)?;
         Ok(self.insert_input(input))
     }
 

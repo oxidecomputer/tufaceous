@@ -27,18 +27,24 @@ impl Input<TargetSource<'static>> {
     pub(crate) async fn measurement_corpus(
         mut source: FileSource,
         corim: Option<Corim>,
-        version: ArtifactVersion,
     ) -> Result<Self, Error> {
-        let Corim { id, .. } = if let Some(corim) = corim {
+        let corim = if let Some(corim) = corim {
             corim
         } else {
             let v = source.read_to_end().await?;
-            try_path!(ciborium::from_reader(v.as_slice()), Corim, &source.path)
+            try_path!(
+                ciborium::from_reader(v.as_slice()),
+                DeserializeCorim,
+                &source.path
+            )
         };
         let sha256 = source.sha256().await?;
+        let version =
+            try_path!(corim.get_version(), CorimVersion, &source.path)
+                .parse()?;
         Ok(Self::MeasurementCorpus {
             source: source.into(),
-            corim_id: id,
+            corim_id: corim.id,
             sha256,
             version,
         })
@@ -63,7 +69,7 @@ impl Input<TargetSource<'static>> {
                 }
                 Err(_) => return Ok(ControlFlow::Continue(input)),
             };
-        Self::measurement_corpus(input.source, corim, input.version)
+        Self::measurement_corpus(input.source, corim)
             .await
             .map(ControlFlow::Break)
     }
@@ -78,6 +84,7 @@ impl Input<BytesSource> {
         builder.vendor("fake-vendor".to_string());
         builder.id("fake-measurement-id".to_string());
         builder.tag_id("fake-tag-id".to_string());
+        builder.version(version.to_string());
         for i in 0..hashes {
             builder.add_hash(format!("layer{i}"), 10, vec![0; 32]);
         }
