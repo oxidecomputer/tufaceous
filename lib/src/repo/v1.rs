@@ -525,7 +525,7 @@ async fn generate_installinator_document(
     original_target: String,
 ) -> Result<(), Error> {
     let target_name = format!("{original_target}/v2.json");
-    let mut document = InstallinatorDocument::default();
+    let mut document = InstallinatorDocument::empty(version.clone());
     for artifact in artifacts.iter() {
         if let Ok(tags) = KnownArtifactTags::from_tags(&artifact.tags)
             && let Some(kind) = tags.to_installinator()

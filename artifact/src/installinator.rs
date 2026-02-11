@@ -9,6 +9,7 @@ use serde::Deserialize;
 use serde::Serialize;
 
 use crate::ArtifactHash;
+use crate::ArtifactVersion;
 
 /// Artifact-specific information used by Installinator.
 ///
@@ -19,9 +20,18 @@ use crate::ArtifactHash;
 /// There are no backwards compatibility constraints for this document. The
 /// version of Installinator that processes this document is the same as the
 /// version of tufaceous that creates it.
-#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct InstallinatorDocument {
+    pub system_version: ArtifactVersion,
     pub artifacts: BTreeSet<InstallinatorArtifact>,
+}
+
+impl InstallinatorDocument {
+    /// Creates an Installinator document with the provided system version and
+    /// an empty list of artifacts.
+    pub fn empty(system_version: ArtifactVersion) -> Self {
+        Self { system_version, artifacts: BTreeSet::new() }
+    }
 }
 
 /// Describes an artifact available to Installinator.

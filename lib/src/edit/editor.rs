@@ -446,7 +446,7 @@ pub(crate) fn generate_installinator_document(
     version: ArtifactVersion,
 ) -> Result<Output<BytesSource>, Error> {
     let target_name = format!("installinator_document-{version}.json");
-    let mut document = InstallinatorDocument::default();
+    let mut document = InstallinatorDocument::empty(version.clone());
     for (artifact, sha256) in artifacts {
         let artifact = artifact.as_ref();
         if let Ok(tags) = KnownArtifactTags::from_tags(&artifact.tags)
