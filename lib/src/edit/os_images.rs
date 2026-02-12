@@ -120,7 +120,8 @@ impl Input<TargetSource<'static>> {
             OsVariant::Host
         };
 
-        let phase_2 = FileSource::from_file(file, phase_2_path);
+        let phase_2 =
+            FileSource::from_file(file.into_std().await, phase_2_path);
         Some(
             Self::os_images(variant, path, Some(phase_2), version.clone())
                 .await,

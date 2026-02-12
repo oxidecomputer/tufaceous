@@ -37,7 +37,7 @@ use crate::error::ErrorKind;
 use crate::schema::ArtifactSchema;
 use crate::schema::ArtifactsSchema;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 #[must_use]
 pub struct RepositoryEditor<'a> {
     system_version: Version,

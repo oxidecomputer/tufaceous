@@ -35,7 +35,7 @@ impl Input<TargetSource<'static>> {
             path.clone(),
         )
         .await?;
-        let source = FileSource::from_file(file.into(), path);
+        let source = FileSource::from_file(file, path);
         Ok(Self::Zone {
             source: source.into(),
             tags: ZoneTags { zone_name: layer_info.pkg },

@@ -22,7 +22,7 @@ impl ArtifactsSchema {
     pub(crate) const TARGET_NAME: &str = "artifacts-v2.json";
 }
 
-#[derive(Debug, Deserialize, Serialize, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq, Hash)]
 pub(crate) struct ArtifactSchema {
     pub(crate) target_name: String,
     pub(crate) version: ArtifactVersion,

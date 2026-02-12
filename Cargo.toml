@@ -50,7 +50,6 @@ test-strategy = "0.4.0"
 thiserror = "2.0.12"
 tokio = "1.47.0"
 tokio-test = "0.4.5"
-tokio-util = "0.7.15"
 # https://github.com/awslabs/tough/pull/917
 tough = { git = "https://github.com/iliana/tough.git", branch = "transport-is-sync" }
 tufaceous.path = "lib"

@@ -39,12 +39,12 @@ impl Input<TargetSource<'static>> {
         let tags = try_path!(
             RotTags::from_caboose(&caboose, slot),
             ReadCaboose,
-            source.path
+            source.path()
         );
         let version = ArtifactVersion::new(try_path!(
             read_version(&caboose),
             ReadCaboose,
-            source.path
+            source.path()
         ))?;
         Ok(Self::Rot { source: source.into(), tags, version })
     }
@@ -60,12 +60,12 @@ impl Input<TargetSource<'static>> {
         let tags = try_path!(
             RotBootloaderTags::from_caboose(&caboose),
             ReadCaboose,
-            source.path
+            source.path()
         );
         let version = ArtifactVersion::new(try_path!(
             read_version(&caboose),
             ReadCaboose,
-            source.path
+            source.path()
         ))?;
         Ok(Self::RotBootloader { source: source.into(), tags, version })
     }
@@ -78,14 +78,17 @@ impl Input<TargetSource<'static>> {
             Some(caboose) => caboose,
             None => source.read_hubris_caboose().await?,
         };
-        let tags =
-            try_path!(SpTags::from_caboose(&caboose), ReadCaboose, source.path);
-        let name =
-            try_path!(read_name(&caboose), ReadCaboose, source.path).to_owned();
+        let tags = try_path!(
+            SpTags::from_caboose(&caboose),
+            ReadCaboose,
+            source.path()
+        );
+        let name = try_path!(read_name(&caboose), ReadCaboose, source.path())
+            .to_owned();
         let version = ArtifactVersion::new(try_path!(
             read_version(&caboose),
             ReadCaboose,
-            source.path
+            source.path()
         ))?;
         Ok(Self::Sp { source: source.into(), tags, name, version })
     }

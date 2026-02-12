@@ -46,7 +46,7 @@ impl Input<TargetSource<'static>> {
 
         let guess_input = GuessInput {
             file_start: buf.freeze(),
-            source: FileSource::from_file(file, path.clone()),
+            source: FileSource::from_file(file.into_std().await, path.clone()),
         };
         let guess_input =
             match Self::guess_measurement_corpus(guess_input).await? {

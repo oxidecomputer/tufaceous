@@ -4,8 +4,12 @@
 
 use std::convert::Infallible;
 use std::pin::Pin;
+use std::sync::Arc;
+use std::sync::Mutex;
 
 use bytes::Bytes;
+use bytes::BytesMut;
+use camino::Utf8Path;
 use camino::Utf8PathBuf;
 use futures_util::Stream;
 use futures_util::StreamExt;
@@ -13,12 +17,12 @@ use futures_util::TryStreamExt;
 use futures_util::stream;
 use hubtools::Caboose;
 use hubtools::RawHubrisArchive;
+use rawzip::FileReader;
+use rawzip::ReaderAt;
 use serde::Serialize;
 use sha2::Digest;
 use sha2::Sha256;
 use tokio::fs::File;
-use tokio::io::AsyncSeekExt;
-use tokio_util::io::ReaderStream;
 use tufaceous_artifact::ArtifactHash;
 
 use crate::Repository;
@@ -33,7 +37,7 @@ pub(crate) struct Target<'a> {
     pub(crate) source: TargetSource<'a>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub(crate) enum TargetSource<'a> {
     Bytes(BytesSource),
     File(FileSource),
@@ -51,7 +55,7 @@ impl TargetSource<'_> {
     }
 
     pub(crate) fn stream(
-        &mut self,
+        &self,
     ) -> Pin<Box<dyn Stream<Item = Result<Bytes, Error>> + '_>> {
         match self {
             TargetSource::Bytes(source) => {
@@ -162,27 +166,46 @@ impl BytesSource {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub(crate) struct FileSource {
-    file: Box<File>,
-    pub(crate) path: Utf8PathBuf,
-    length_sha256: Option<(u64, ArtifactHash)>,
+    inner: Arc<FileSourceInner>,
+}
+
+#[derive(Debug)]
+struct FileSourceInner {
+    file: FileReader,
+    path: Utf8PathBuf,
+    length_sha256: Mutex<Option<(u64, ArtifactHash)>>,
 }
 
 impl FileSource {
     pub(crate) async fn open(path: Utf8PathBuf) -> Result<Self, Error> {
         let file = try_path!(File::open(&path).await, OpenFile, path);
-        Ok(Self::from_file(file, path))
+        Ok(Self::from_file(file.into_std().await, path))
     }
 
-    pub(crate) fn from_file(file: File, path: Utf8PathBuf) -> Self {
-        Self { file: Box::new(file), path, length_sha256: None }
+    pub(crate) fn from_file(file: std::fs::File, path: Utf8PathBuf) -> Self {
+        Self {
+            inner: Arc::new(FileSourceInner {
+                file: file.into(),
+                path,
+                length_sha256: Mutex::new(None),
+            }),
+        }
+    }
+
+    pub(crate) fn path(&self) -> &Utf8Path {
+        &self.inner.path
     }
 
     pub(crate) async fn into_target(
         mut self,
     ) -> Result<Target<'static>, Error> {
-        let (length, sha256) = match self.length_sha256 {
+        let inner = {
+            let guard = self.inner.length_sha256.lock().expect("poisoned");
+            *guard
+        };
+        let (length, sha256) = match inner {
             Some(inner) => inner,
             None => self.read_impl(None).await?,
         };
@@ -209,11 +232,18 @@ impl FileSource {
             )
             .await?;
         let sha256 = ArtifactHash(hasher.finalize().into());
-        Ok(*self.length_sha256.insert((length, sha256)))
+        Ok({
+            let mut guard = self.inner.length_sha256.lock().expect("poisoned");
+            *guard.insert((length, sha256))
+        })
     }
 
     pub(crate) async fn sha256(&mut self) -> Result<ArtifactHash, Error> {
-        let (_, sha256) = match self.length_sha256 {
+        let inner = {
+            let guard = self.inner.length_sha256.lock().expect("poisoned");
+            *guard
+        };
+        let (_, sha256) = match inner {
             Some(inner) => inner,
             None => self.read_impl(None).await?,
         };
@@ -229,42 +259,52 @@ impl FileSource {
     pub(crate) async fn read_hubris_archive(
         &mut self,
     ) -> Result<RawHubrisArchive, Error> {
-        RawHubrisArchive::from_vec(self.read_to_end().await?).map_err(
-            |source| {
-                ErrorKind::ReadHubrisArchive { source, path: self.path.clone() }
-                    .into()
-            },
-        )
+        Ok(try_path!(
+            RawHubrisArchive::from_vec(self.read_to_end().await?),
+            ReadHubrisArchive,
+            &self.inner.path
+        ))
     }
 
     pub(crate) async fn read_hubris_caboose(
         &mut self,
     ) -> Result<Caboose, Error> {
-        self.read_hubris_archive().await?.read_caboose().map_err(|source| {
-            ErrorKind::ReadHubrisArchive { source, path: self.path.clone() }
-                .into()
-        })
+        Ok(try_path!(
+            self.read_hubris_archive().await?.read_caboose(),
+            ReadHubrisArchive,
+            &self.inner.path
+        ))
     }
 
-    pub(crate) fn stream(
-        &mut self,
-    ) -> impl Stream<Item = Result<Bytes, Error>> {
-        stream::once(async {
-            try_path!(self.file.rewind().await, SeekFile, self.path.clone());
-            Ok::<_, Error>(
-                ReaderStream::new(&mut self.file)
-                    .map_err(|source| ErrorKind::ReadFile {
-                        source,
-                        path: Some(self.path.clone()),
-                    })
-                    .err_into::<Error>(),
-            )
-        })
-        .try_flatten()
+    pub(crate) fn stream(&self) -> impl Stream<Item = Result<Bytes, Error>> {
+        let inner = self.inner.clone();
+        stream::try_unfold(
+            (inner, BytesMut::new(), 0),
+            async |(inner, mut buf, mut offset)| {
+                tokio::task::spawn_blocking(move || {
+                    if buf.capacity() == 0 {
+                        buf.reserve(8192);
+                    }
+                    buf.resize(buf.capacity(), 0);
+                    let n = try_path!(
+                        inner.file.read_at(&mut buf, offset),
+                        ReadFile,
+                        inner.path.clone()
+                    );
+                    if n == 0 {
+                        return Ok(None);
+                    }
+                    offset += u64::try_from(n).expect("usize fits in u64");
+                    buf.truncate(n);
+                    Ok(Some((buf.split().freeze(), (inner, buf, offset))))
+                })
+                .await?
+            },
+        )
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub(crate) struct RepositorySource<'a> {
     pub(crate) repo: &'a Repository,
     pub(crate) target_name: String,

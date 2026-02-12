@@ -30,11 +30,11 @@ impl Input<TargetSource<'static>> {
             corim
         } else {
             let v = source.read_to_end().await?;
-            try_path!(Corim::from_bytes(v.as_slice()), ReadCorim, &source.path)
+            try_path!(Corim::from_bytes(v.as_slice()), ReadCorim, source.path())
         };
         let sha256 = source.sha256().await?;
         let version =
-            try_path!(corim.get_version(), ReadCorim, &source.path).parse()?;
+            try_path!(corim.get_version(), ReadCorim, source.path()).parse()?;
         Ok(Self::MeasurementCorpus {
             source: source.into(),
             corim_id: corim.id,
@@ -119,7 +119,7 @@ mod tests {
         let metadata = tokio::fs::metadata(&path).await.unwrap();
         assert!(usize::try_from(metadata.len()).unwrap() > TRUNCATE_LEN);
 
-        let mut source = FileSource::open(path).await?;
+        let source = FileSource::open(path).await?;
         // Read the first chunk from the stream, but truncate it to ensure
         // we hit the match arm where we correctly guess that this was an
         // incomplete read.
