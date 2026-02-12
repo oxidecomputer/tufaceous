@@ -153,6 +153,8 @@ pub enum ErrorKind {
     Ed25519Generate,
     #[error("failed to calculate TUF key ID")]
     KeyId(#[source] tough::schema::Error),
+    #[error("failed to serialize root role")]
+    SerializeRoot(#[source] serde_json::Error),
     #[error("role verification failed")]
     RoleVerify(#[source] tough::schema::Error),
 
@@ -246,6 +248,7 @@ impl ErrorKind {
             | ErrorKind::GenerateFakeZoneImage(_)
             | ErrorKind::Ed25519Generate
             | ErrorKind::KeyId(_)
+            | ErrorKind::SerializeRoot(_)
             | ErrorKind::RoleVerify(_)
             | ErrorKind::GuessArtifact { .. }
             | ErrorKind::TargetNameCollision { .. }

@@ -3,6 +3,7 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use std::collections::HashMap;
+use std::fmt::Display;
 use std::num::NonZero;
 
 use aws_lc_rs::rand::SystemRandom;
@@ -21,21 +22,62 @@ use tough::schema::Signed;
 use crate::error::Error;
 use crate::error::ErrorKind;
 
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
-#[serde(transparent)]
-pub struct Root(Signed<schema::Root>);
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Root {
+    inner: Signed<schema::Root>,
+    buffer: String,
+}
 
 impl Root {
     pub async fn generate(
         keys: &[Box<dyn KeySource>],
         expires: DateTime<Utc>,
     ) -> Result<Self, Error> {
-        Ok(Self(generate_root(keys, expires).await?.signed().clone()))
+        let inner = generate_root(keys, expires).await?.signed().clone();
+        let mut buffer = serde_json::to_string_pretty(&inner)
+            .map_err(ErrorKind::SerializeRoot)?;
+        buffer.push('\n');
+        Ok(Self { inner, buffer })
     }
 
     pub fn verify_self_signed(&self) -> Result<(), Error> {
-        self.0.signed.verify_role(&self.0).map_err(ErrorKind::RoleVerify)?;
+        self.inner
+            .signed
+            .verify_role(&self.inner)
+            .map_err(ErrorKind::RoleVerify)?;
         Ok(())
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.buffer
+    }
+}
+
+impl Display for Root {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.buffer)
+    }
+}
+
+impl Serialize for Root {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        self.inner.serialize(serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for Root {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let inner = <Signed<schema::Root>>::deserialize(deserializer)?;
+        let mut buffer = serde_json::to_string_pretty(&inner)
+            .map_err(serde::de::Error::custom)?;
+        buffer.push('\n');
+        Ok(Self { inner, buffer })
     }
 }
 
