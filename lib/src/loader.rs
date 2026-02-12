@@ -3,6 +3,7 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use std::fmt::Debug;
+use std::io::Seek;
 
 use bytes::Bytes;
 use camino::Utf8PathBuf;
@@ -187,13 +188,14 @@ impl RepositoryLoader {
         log: &Logger,
     ) -> Result<Repository, Error> {
         let (file, sha256) = if self.compute_archive_sha256 {
-            let path = archive_path.clone();
+            let archive_path = archive_path.clone();
             tokio::task::spawn_blocking(move || {
                 let mut hasher = Sha256::new();
                 try_path!(
-                    std::io::copy(&mut file, &mut hasher),
+                    file.rewind()
+                        .and_then(|()| std::io::copy(&mut file, &mut hasher)),
                     ReadFile,
-                    path
+                    archive_path
                 );
                 Ok::<_, Error>((file, Some(hasher.finalize().into())))
             })
