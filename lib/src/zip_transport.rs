@@ -64,9 +64,8 @@ use bytes::Bytes;
 use bytes::BytesMut;
 use camino::Utf8PathBuf;
 use flate2::read::DeflateDecoder;
-use futures_util::FutureExt;
 use futures_util::Stream;
-use futures_util::StreamExt;
+use futures_util::TryFutureExt;
 use futures_util::stream;
 use rawzip::CompressionMethod;
 use rawzip::FileReader;
@@ -78,6 +77,7 @@ use rawzip::path::ZipFilePath;
 use slog::Logger;
 use slog::warn;
 use tokio::sync::mpsc;
+use tokio::sync::oneshot;
 use tough::Transport;
 use tough::TransportError;
 use tough::TransportErrorKind;
@@ -278,47 +278,78 @@ impl<T: ReaderAt + Debug + Send + Sync + 'static> ZipTransport<T> {
         entry_data: EntryData,
         url: Url,
     ) -> impl Stream<Item = Result<Bytes, TransportError>> {
-        let (tx, mut rx) = mpsc::channel(1);
+        // This could be a lot nicer but the ZIP entry reader can't cross in/out
+        // of `spawn_blocking` because the type has an associated lifetime.
+        let (outer_tx, mut outer_rx) = mpsc::channel::<
+            oneshot::Sender<Result<Bytes, ZipTransportError>>,
+        >(1);
         let task = tokio::task::spawn_blocking(move || {
-            let entry = self.inner.archive.get_entry(entry_data.wayfinder)?;
-            let mut reader = match entry_data.compression_method {
-                CompressionMethod::Store => {
-                    let reader = entry.reader();
-                    Box::new(entry.verifying_reader(reader)) as Box<dyn Read>
-                }
-                CompressionMethod::Deflate => {
-                    let reader = DeflateDecoder::new(entry.reader());
-                    Box::new(entry.verifying_reader(reader)) as Box<dyn Read>
-                }
-                other => {
-                    return Err(ZipTransportError::CompressionMethod(other));
+            let Some(inner_tx) = outer_rx.blocking_recv() else { return };
+            let mut reader = match self
+                .inner
+                .archive
+                .get_entry(entry_data.wayfinder)
+                .map_err(ZipTransportError::from)
+                .and_then(|entry| match entry_data.compression_method {
+                    CompressionMethod::Store => Ok(entry.verifying_reader(
+                        Box::new(entry.reader()) as Box<dyn Read>,
+                    )),
+                    CompressionMethod::Deflate => Ok(entry.verifying_reader(
+                        Box::new(DeflateDecoder::new(entry.reader())),
+                    )),
+                    other => Err(ZipTransportError::CompressionMethod(other)),
+                }) {
+                Ok(reader) => reader,
+                Err(error) => {
+                    inner_tx.send(Err(error)).ok();
+                    return;
                 }
             };
 
-            let mut buf = BytesMut::zeroed(8192);
-            while let n = reader.read(&mut buf)?
-                && n > 0
+            let mut buf = BytesMut::new();
+            let mut first_tx = Some(inner_tx);
+            while let Some(inner_tx) =
+                first_tx.take().or_else(|| outer_rx.blocking_recv())
             {
-                buf.truncate(n);
-                let Ok(()) = tx.blocking_send(buf.split().freeze()) else {
-                    break;
-                };
                 if buf.capacity() == 0 {
                     buf.reserve(8192);
                 }
                 buf.resize(buf.capacity(), 0);
-            }
-            Ok::<_, ZipTransportError>(())
-        });
-        stream::poll_fn(move |cx| rx.poll_recv(cx)).map(Ok).chain(
-            task.into_stream().filter_map(move |result| {
-                let error = match result {
-                    Ok(Ok(())) => return std::future::ready(None),
-                    Ok(Err(error)) => error,
-                    Err(join_error) => join_error.into(),
+                let result = match reader.read(&mut buf) {
+                    Ok(0) => break,
+                    Ok(n) => {
+                        buf.truncate(n);
+                        Ok(buf.split().freeze())
+                    }
+                    Err(error) => Err(error.into()),
                 };
-                std::future::ready(Some(Err(error.upgrade(url.clone()))))
-            }),
+                let Ok(()) = inner_tx.send(result) else { break };
+            }
+        });
+        stream::try_unfold(
+            (outer_tx, task, url),
+            async |(outer_tx, task, url)| {
+                let (inner_tx, inner_rx) = oneshot::channel();
+                match outer_tx
+                    .send(inner_tx)
+                    .map_err(|_send_error| ())
+                    .and_then(|()| inner_rx.map_err(|_recv_error| ()))
+                    .await
+                {
+                    Ok(Ok(bytes)) => Ok(Some((bytes, (outer_tx, task, url)))),
+                    Ok(Err(error)) => Err(error.upgrade(url)),
+                    Err(()) => {
+                        // The task hung up. If we're still here, then the task
+                        // reached EOF. await the task and return.
+                        match task.await {
+                            Ok(()) => Ok(None),
+                            Err(error) => {
+                                Err(ZipTransportError::from(error).upgrade(url))
+                            }
+                        }
+                    }
+                }
+            },
         )
     }
 }
