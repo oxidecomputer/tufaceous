@@ -66,6 +66,7 @@ impl Input<BytesSource> {
     pub(crate) fn fake_zone_image(
         zone_name: String,
         version: ArtifactVersion,
+        interior_version: Option<ArtifactVersion>,
     ) -> Result<Self, Error> {
         let mut archive = tar::Builder::new(GzEncoder::new(
             BytesMut::new().writer(),
@@ -73,7 +74,7 @@ impl Input<BytesSource> {
         ));
         let metadata = Metadata::new(ArchiveType::Layer(LayerInfo {
             pkg: zone_name.clone(),
-            version: version.clone(),
+            version: interior_version.unwrap_or_else(|| version.clone()),
         }));
         metadata
             .append_to_tar(&mut archive, 0)

@@ -16,13 +16,15 @@ use tufaceous::RepositoryLoader;
 use tufaceous::TrustStoreBehavior;
 use tufaceous::edit::RepositoryEditor;
 use tufaceous::error::Error;
+use tufaceous_artifact::KnownArtifactTags;
 
-const VERSION: Version = Version::new(1, 0, 0);
+const V1: Version = Version::new(1, 0, 0);
+const V2: Version = Version::new(2, 0, 0);
 
 #[tokio::test]
 async fn it_works() -> Result<(), Error> {
     let log = slog::Logger::root(slog::Discard, slog::o!());
-    let zip = RepositoryEditor::fake(VERSION)?
+    let zip = RepositoryEditor::fake(V1)?
         .finish()
         .await?
         .generate_root()
@@ -47,7 +49,7 @@ async fn it_works() -> Result<(), Error> {
 #[tokio::test]
 async fn verify_targets() -> Result<(), Error> {
     let log = slog::Logger::root(slog::Discard, slog::o!());
-    let mut zip = RepositoryEditor::fake(VERSION)?
+    let mut zip = RepositoryEditor::fake(V1)?
         .finish()
         .await?
         .generate_root()
@@ -82,7 +84,7 @@ async fn verify_targets() -> Result<(), Error> {
 #[tokio::test]
 async fn no_artifacts() -> Result<(), Error> {
     let log = slog::Logger::root(slog::Discard, slog::o!());
-    let zip = RepositoryEditor::new(VERSION)
+    let zip = RepositoryEditor::new(V1)
         .generate_installinator_document(false)
         .finish()
         .await?
@@ -103,12 +105,12 @@ async fn no_artifacts() -> Result<(), Error> {
 #[tokio::test]
 async fn empty_artifact() -> Result<(), Error> {
     let log = slog::Logger::root(slog::Discard, slog::o!());
-    let zip = RepositoryEditor::new(VERSION)
+    let zip = RepositoryEditor::new(V1)
         .generate_installinator_document(false)
         .fake_artifact(
             "empty.img".to_owned(),
             "1.0.0".parse().unwrap(),
-            &tufaceous_artifact::KnownArtifactTags::InstallinatorDocument,
+            &KnownArtifactTags::InstallinatorDocument,
             0,
         )
         .finish()
@@ -135,9 +137,64 @@ async fn empty_artifact() -> Result<(), Error> {
 }
 
 #[tokio::test]
+async fn inconsistent_fake() -> Result<(), Error> {
+    let log = slog::Logger::root(slog::Discard, slog::o!());
+    let zip = RepositoryEditor::fake(V1)?
+        .finish()
+        .await?
+        .generate_root()
+        .sign()
+        .await?
+        .write_zip(Vec::new(), Utc::now())
+        .await?;
+    let repo1 = RepositoryLoader::new()
+        .trust_store_behavior(TrustStoreBehavior::UnsafeBlindFaith)
+        .load_zip_buffer(zip, &log)
+        .await?;
+
+    let artifact_v1 = V1.to_string().parse()?;
+    let artifact_v2 = V2.to_string().parse()?;
+    let zip =
+        RepositoryEditor::inconsistent_fake(V2, &artifact_v2, &artifact_v1)?
+            .finish()
+            .await?
+            .generate_root()
+            .sign()
+            .await?
+            .write_zip(Vec::new(), Utc::now())
+            .await?;
+    let repo2 = RepositoryLoader::new()
+        .trust_store_behavior(TrustStoreBehavior::UnsafeBlindFaith)
+        .load_zip_buffer(zip, &log)
+        .await?;
+
+    for (first, second) in
+        repo1.artifacts().iter().zip(repo2.artifacts().iter())
+    {
+        // Each artifact should have the same tags.
+        assert_eq!(first.tags, second.tags);
+        // If this is the Installinator document, skip the rest of the checks.
+        // The Installinator document's version is always the system version.
+        if first.known_tags() == Some(KnownArtifactTags::InstallinatorDocument)
+        {
+            continue;
+        }
+        // The first artifact should be 1.0.0, and the second should be 2.0.0.
+        assert_eq!(first.version, artifact_v1);
+        assert_eq!(second.version, artifact_v2);
+        // The artifacts should have the same contents (hash and length), as they
+        // should both have an interior version of 1.0.0.
+        assert_eq!(first.hash, second.hash);
+        assert_eq!(first.length, second.length);
+    }
+
+    Ok(())
+}
+
+#[tokio::test]
 async fn compute_archive_sha256() -> Result<(), Error> {
     let log = slog::Logger::root(slog::Discard, slog::o!());
-    let zip = RepositoryEditor::fake(VERSION)?
+    let zip = RepositoryEditor::fake(V1)?
         .finish()
         .await?
         .generate_root()

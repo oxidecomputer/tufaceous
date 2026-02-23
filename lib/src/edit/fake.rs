@@ -38,7 +38,7 @@ pub trait ArtifactsExt: Sized {
 impl ArtifactsExt for Artifacts {
     fn fake(version: ArtifactVersion) -> Result<Self, Error> {
         let mut artifacts = Artifacts::default();
-        for input in Input::fake(&version)? {
+        for input in Input::fake(&version, None)? {
             for output in input.outputs() {
                 artifacts.extend(output.into_artifact());
             }
@@ -64,14 +64,24 @@ impl ArtifactsExt for Artifacts {
 }
 
 impl Input<BytesSource> {
-    pub(crate) fn fake(version: &ArtifactVersion) -> Result<Vec<Self>, Error> {
+    pub(crate) fn fake(
+        version: &ArtifactVersion,
+        interior_version: Option<&ArtifactVersion>,
+    ) -> Result<Vec<Self>, Error> {
         let mut inputs = Vec::new();
         for hashes in [4, 16] {
-            inputs
-                .push(Self::fake_measurement_corpus(hashes, version.clone())?);
+            inputs.push(Self::fake_measurement_corpus(
+                hashes,
+                version.clone(),
+                interior_version,
+            )?);
         }
         for variant in [OsVariant::Host, OsVariant::Recovery] {
-            inputs.push(Self::fake_os_images(variant, version.clone()));
+            inputs.push(Self::fake_os_images(
+                variant,
+                version.clone(),
+                interior_version,
+            ));
         }
         for slot in [RotSlot::A, RotSlot::B] {
             inputs.push(Self::fake_rot_archive(
@@ -81,6 +91,7 @@ impl Input<BytesSource> {
                     rot_slot: slot,
                 },
                 version.clone(),
+                interior_version,
             )?);
         }
         inputs.push(Self::fake_rot_bootloader_archive(
@@ -89,15 +100,21 @@ impl Input<BytesSource> {
                 rot_sign: Sign::UNSIGNED,
             },
             version.clone(),
+            interior_version,
         )?);
         for board in ["fake-gimlet", "fake-cosmo", "fake-sidecar", "fake-psc"] {
             inputs.push(Self::fake_sp_archive(
                 SpTags { sp_board: board.into() },
                 version.clone(),
+                interior_version,
             )?);
         }
         for name in FAKE_ZONES {
-            inputs.push(Self::fake_zone_image(name.into(), version.clone())?);
+            inputs.push(Self::fake_zone_image(
+                name.into(),
+                version.clone(),
+                interior_version.cloned(),
+            )?);
         }
         Ok(inputs)
     }

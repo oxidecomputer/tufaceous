@@ -91,7 +91,7 @@ impl<'a> RepositoryEditor<'a> {
         hashes: usize,
         version: ArtifactVersion,
     ) -> Result<Self, Error> {
-        let input = Input::fake_measurement_corpus(hashes, version)?;
+        let input = Input::fake_measurement_corpus(hashes, version, None)?;
         Ok(self.insert_input(input))
     }
 
@@ -116,8 +116,11 @@ impl<'a> RepositoryEditor<'a> {
     }
 
     pub fn fake_os_image(self, variant: OsVariant) -> Result<Self, Error> {
-        let input =
-            Input::fake_os_images(variant, self.artifact_version.clone()?);
+        let input = Input::fake_os_images(
+            variant,
+            self.artifact_version.clone()?,
+            None,
+        );
         Ok(self.insert_input(input))
     }
 
@@ -145,8 +148,11 @@ impl<'a> RepositoryEditor<'a> {
     }
 
     pub fn fake_rot_archive(self, tags: RotTags) -> Result<Self, Error> {
-        let input =
-            Input::fake_rot_archive(tags, self.artifact_version.clone()?)?;
+        let input = Input::fake_rot_archive(
+            tags,
+            self.artifact_version.clone()?,
+            None,
+        )?;
         Ok(self.insert_input(input))
     }
 
@@ -157,13 +163,14 @@ impl<'a> RepositoryEditor<'a> {
         let input = Input::fake_rot_bootloader_archive(
             tags,
             self.artifact_version.clone()?,
+            None,
         )?;
         Ok(self.insert_input(input))
     }
 
     pub fn fake_sp_archive(self, tags: SpTags) -> Result<Self, Error> {
         let input =
-            Input::fake_sp_archive(tags, self.artifact_version.clone()?)?;
+            Input::fake_sp_archive(tags, self.artifact_version.clone()?, None)?;
         Ok(self.insert_input(input))
     }
 
@@ -173,7 +180,7 @@ impl<'a> RepositoryEditor<'a> {
 
     pub fn fake_zone_image(self, name: String) -> Result<Self, Error> {
         let input =
-            Input::fake_zone_image(name, self.artifact_version.clone()?)?;
+            Input::fake_zone_image(name, self.artifact_version.clone()?, None)?;
         Ok(self.insert_input(input))
     }
 
@@ -253,10 +260,29 @@ impl<'a> RepositoryEditor<'a> {
         self
     }
 
+    /// Create a fake repository for testing purposes.
     pub fn fake(system_version: Version) -> Result<Self, Error> {
         let mut editor = Self::new(system_version);
         let version = editor.artifact_version.clone()?;
-        for input in Input::fake(&version)? {
+        for input in Input::fake(&version, None)? {
+            editor = editor.insert_input(input);
+        }
+        Ok(editor)
+    }
+
+    /// Create a fake repository for testing purposes where the system version,
+    /// artifact versions, and the versions interior to the artifact data are
+    /// potentially different.
+    ///
+    /// The Installinator document, if generated, always uses `system_version`
+    /// for the artifact and interior versions.
+    pub fn inconsistent_fake(
+        system_version: Version,
+        artifact_version: &ArtifactVersion,
+        interior_version: &ArtifactVersion,
+    ) -> Result<Self, Error> {
+        let mut editor = Self::new(system_version);
+        for input in Input::fake(artifact_version, Some(interior_version))? {
             editor = editor.insert_input(input);
         }
         Ok(editor)

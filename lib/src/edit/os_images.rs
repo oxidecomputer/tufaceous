@@ -178,17 +178,25 @@ impl Input<BytesSource> {
     pub(crate) fn fake_os_images(
         os_variant: OsVariant,
         version: ArtifactVersion,
+        interior_version: Option<&ArtifactVersion>,
     ) -> Self {
+        let interior_version = interior_version.unwrap_or(&version);
         let cosmo_phase_1 = BytesSource::fake_padded(
-            format!("cosmo {os_variant} OS phase 1 image version {version}\n"),
+            format!(
+                "cosmo {os_variant} OS phase 1 image version {interior_version}\n"
+            ),
             MIB,
         );
         let gimlet_phase_1 = BytesSource::fake_padded(
-            format!("gimlet {os_variant} OS phase 1 image version {version}\n"),
+            format!(
+                "gimlet {os_variant} OS phase 1 image version {interior_version}\n"
+            ),
             MIB,
         );
         let phase_2 = BytesSource::fake_padded(
-            format!("{os_variant} OS phase 2 image version {version}\n"),
+            format!(
+                "{os_variant} OS phase 2 image version {interior_version}\n"
+            ),
             4 * MIB,
         );
 
@@ -196,14 +204,14 @@ impl Input<BytesSource> {
         extra_targets.insert(
             String::from("unix.z"),
             BytesSource::fake_padded(
-                format!("{os_variant} OS unix.z version {version}\n"),
+                format!("{os_variant} OS unix.z version {interior_version}\n"),
                 64 * KIB,
             ),
         );
         extra_targets.insert(
             String::from("cpio.z"),
             BytesSource::fake_padded(
-                format!("{os_variant} OS cpio.z version {version}\n"),
+                format!("{os_variant} OS cpio.z version {interior_version}\n"),
                 256 * KIB,
             ),
         );

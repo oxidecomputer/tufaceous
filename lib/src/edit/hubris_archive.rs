@@ -133,12 +133,13 @@ impl Input<BytesSource> {
     pub(crate) fn fake_rot_archive(
         tags: RotTags,
         version: ArtifactVersion,
+        interior_version: Option<&ArtifactVersion>,
     ) -> Result<Self, Error> {
         let data = CabooseData {
             board: &tags.rot_board,
             sign: &tags.rot_sign,
             commit: "this-is-a-fake-rot",
-            version: &version,
+            version: interior_version.unwrap_or(&version),
         };
         let source = data.generate_fake_archive()?;
         Ok(Input::Rot { source, tags, version })
@@ -147,12 +148,13 @@ impl Input<BytesSource> {
     pub(crate) fn fake_rot_bootloader_archive(
         tags: RotBootloaderTags,
         version: ArtifactVersion,
+        interior_version: Option<&ArtifactVersion>,
     ) -> Result<Self, Error> {
         let data = CabooseData {
             board: &tags.rot_board,
             sign: &tags.rot_sign,
             commit: "this-is-a-fake-rot-bootloader",
-            version: &version,
+            version: interior_version.unwrap_or(&version),
         };
         let source = data.generate_fake_archive()?;
         Ok(Input::RotBootloader { source, tags, version })
@@ -161,12 +163,13 @@ impl Input<BytesSource> {
     pub(crate) fn fake_sp_archive(
         tags: SpTags,
         version: ArtifactVersion,
+        interior_version: Option<&ArtifactVersion>,
     ) -> Result<Self, Error> {
         let data = CabooseData {
             board: &tags.sp_board,
             sign: &Sign::UNSIGNED,
             commit: "this-is-a-fake-sp",
-            version: &version,
+            version: interior_version.unwrap_or(&version),
         };
         let source = data.generate_fake_archive()?;
         Ok(Input::Sp { source, name: tags.sp_board.clone(), tags, version })

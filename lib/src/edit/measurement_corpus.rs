@@ -75,12 +75,13 @@ impl Input<BytesSource> {
     pub(crate) fn fake_measurement_corpus(
         hashes: usize,
         version: ArtifactVersion,
+        interior_version: Option<&ArtifactVersion>,
     ) -> Result<Self, Error> {
         let mut builder = CorimBuilder::new();
         builder.vendor("fake-vendor".to_string());
         builder.id("fake-measurement-id".to_string());
         builder.tag_id("fake-tag-id".to_string());
-        builder.version(version.to_string());
+        builder.version(interior_version.unwrap_or(&version).to_string());
         for i in 0..hashes {
             builder.add_hash(format!("layer{i}"), 10, vec![0; 32]);
         }
