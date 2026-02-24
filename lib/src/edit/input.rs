@@ -60,6 +60,7 @@ pub(crate) enum Input<Source> {
     },
     Zone {
         source: Source,
+        file_name: String,
         tags: ZoneTags,
         version: ArtifactVersion,
     },
@@ -145,9 +146,8 @@ impl<Source> Input<Source> {
                     vec![Output::extra(target_name, source)]
                 }
             }
-            Input::Zone { source, tags, version } => {
-                let target_name =
-                    format!("zones/{name}.tar.gz", name = tags.zone_name);
+            Input::Zone { source, file_name, tags, version } => {
+                let target_name = format!("zones/{file_name}");
                 vec![Output::new(target_name, version, tags.into(), source)]
             }
         }

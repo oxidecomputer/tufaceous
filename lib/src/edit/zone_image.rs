@@ -30,6 +30,10 @@ impl Input<TargetSource<'static>> {
     pub(crate) async fn zone_image(path: Utf8PathBuf) -> Result<Self, Error> {
         let file =
             try_path!(tokio::fs::File::open(&path).await, OpenFile, path);
+        let file_name = path
+            .file_name()
+            .expect("a path to an opened file must have a file name")
+            .to_string();
         let (file, layer_info) = crate::util::read_zone_layer_info(
             file.into_std().await,
             path.clone(),
@@ -38,6 +42,7 @@ impl Input<TargetSource<'static>> {
         let source = FileSource::from_file(file, path);
         Ok(Self::Zone {
             source: source.into(),
+            file_name,
             tags: ZoneTags { zone_name: layer_info.pkg },
             version: layer_info.version,
         })
@@ -54,8 +59,13 @@ impl Input<TargetSource<'static>> {
         else {
             return Ok(ControlFlow::Continue(input));
         };
+        let Some(file_name) = input.source.path().file_name() else {
+            return Ok(ControlFlow::Continue(input));
+        };
+        let file_name = file_name.to_string();
         Ok(ControlFlow::Break(Self::Zone {
             source: input.source.into(),
+            file_name,
             tags: ZoneTags { zone_name: layer_info.pkg },
             version: layer_info.version,
         }))
@@ -65,6 +75,7 @@ impl Input<TargetSource<'static>> {
 impl Input<BytesSource> {
     pub(crate) fn fake_zone_image(
         zone_name: String,
+        file_name: String,
         version: ArtifactVersion,
         interior_version: Option<ArtifactVersion>,
     ) -> Result<Self, Error> {
@@ -87,6 +98,7 @@ impl Input<BytesSource> {
             .freeze();
         Ok(Input::Zone {
             source: BytesSource::new(bytes),
+            file_name,
             tags: ZoneTags { zone_name },
             version,
         })

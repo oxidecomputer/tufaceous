@@ -178,9 +178,17 @@ impl<'a> RepositoryEditor<'a> {
         Ok(self.insert_input(Input::zone_image(path).await?))
     }
 
-    pub fn fake_zone_image(self, name: String) -> Result<Self, Error> {
-        let input =
-            Input::fake_zone_image(name, self.artifact_version.clone()?, None)?;
+    pub fn fake_zone_image(
+        self,
+        zone_name: String,
+        file_name: String,
+    ) -> Result<Self, Error> {
+        let input = Input::fake_zone_image(
+            zone_name,
+            file_name,
+            self.artifact_version.clone()?,
+            None,
+        )?;
         Ok(self.insert_input(input))
     }
 
