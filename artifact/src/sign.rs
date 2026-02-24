@@ -61,8 +61,8 @@ pub struct Sign(pub Option<String>);
 impl Sign {
     pub const UNSIGNED: Sign = Sign(None);
 
-    pub fn new(sign: Option<String>) -> Self {
-        Self(sign)
+    pub fn signed(sign: String) -> Self {
+        Self(Some(sign))
     }
 
     pub fn is_signed(&self) -> bool {

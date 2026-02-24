@@ -17,6 +17,9 @@ use crate::edit::source::BytesSource;
 use crate::error::Error;
 use crate::schema::ArtifactSchema;
 
+const FAKE_SIGN: &str =
+    "0000000000000000000000000000000000000000000000000000000000000000";
+
 const FAKE_ZONES: [(&str, &str); 11] = [
     ("clickhouse", "clickhouse.tar.gz"),
     ("clickhouse_keeper", "clickhouse_keeper.tar.gz"),
@@ -86,8 +89,8 @@ impl Input<BytesSource> {
         for slot in [RotSlot::A, RotSlot::B] {
             inputs.push(Self::fake_rot_archive(
                 RotTags {
-                    rot_board: "fake-rot".into(),
-                    rot_sign: Sign::UNSIGNED,
+                    rot_board: "SimRot".into(),
+                    rot_sign: Sign::signed(FAKE_SIGN.into()),
                     rot_slot: slot,
                 },
                 version.clone(),
@@ -96,13 +99,13 @@ impl Input<BytesSource> {
         }
         inputs.push(Self::fake_rot_bootloader_archive(
             RotBootloaderTags {
-                rot_board: "fake-rot".into(),
-                rot_sign: Sign::UNSIGNED,
+                rot_board: "SimRot".into(),
+                rot_sign: Sign::signed(FAKE_SIGN.into()),
             },
             version.clone(),
             interior_version,
         )?);
-        for board in ["fake-gimlet", "fake-cosmo", "fake-sidecar", "fake-psc"] {
+        for board in ["SimGimletSp", "SimCosmoSp", "SimSidecarSp", "SimPscSp"] {
             inputs.push(Self::fake_sp_archive(
                 SpTags { sp_board: board.into() },
                 version.clone(),
