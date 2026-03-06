@@ -13,49 +13,51 @@ pub(crate) fn from_map<D: DeserializeOwned>(
     serde_json::from_value(map.into_iter().collect())
 }
 
+/// This should always succeed, and callers must use proptests to ensure that
+/// it does.
+///
+/// # Panics
+///
+/// When debug assertions are enabled, this function panics if
+/// `serde_json::to_value` returns a type other than `Value::Object` or an
+/// error, or if any of the values in the object are not `Value::String`.
+///
+/// When debug assertions are disabled, this function returns an empty map
+/// if any of these conditions are hit.
 pub(crate) fn to_map<S: Serialize>(s: &S) -> BTreeMap<String, String> {
-    // Call `to_map_impl`. On error, panic if debug assertions are enabled,
-    // otherwise return `BTreeMap::default()`.
-    match to_map_impl(s) {
-        Ok(map) => map,
-        Err(err) => {
+    macro_rules! debug_panic {
+        ($($tt:tt)*) => {
             if cfg!(debug_assertions) {
-                panic!(
-                    "serializing {} to map should always succeed: {err:?}",
-                    std::any::type_name::<S>()
-                );
+                panic!($($tt)*);
             } else {
-                BTreeMap::default()
+                return BTreeMap::default()
             }
         }
     }
-}
 
-fn to_map_impl<S: Serialize>(
-    s: &S,
-) -> Result<BTreeMap<String, String>, ToMapError> {
-    let value = serde_json::to_value(s)?;
-    let serde_json::Value::Object(map) = value else {
-        return Err(ToMapError::StructNotObject(Box::new(value)));
+    let value_map = match serde_json::to_value(s) {
+        Ok(serde_json::Value::Object(map)) => map,
+        Ok(not_string) => debug_panic!(
+            "{} serialized to {not_string:?}, not an object",
+            std::any::type_name::<S>()
+        ),
+        Err(err) => debug_panic!(
+            "failed to serialize {}: {err:?}",
+            std::any::type_name::<S>()
+        ),
     };
-    map.into_iter()
-        .map(|(key, value)| match value {
-            serde_json::Value::String(value) => Ok((key, value)),
-            _ => {
-                Err(ToMapError::ValueNotString { key, value: Box::new(value) })
-            }
-        })
-        .collect()
-}
-
-#[derive(Debug, thiserror::Error)]
-enum ToMapError {
-    #[error("failed to serialize struct")]
-    Serialize(#[from] serde_json::Error),
-    #[error("struct serialized to {0:?}, not an object")]
-    StructNotObject(Box<serde_json::Value>),
-    #[error("value for {key:?} serialized to {value:?}, not a string")]
-    ValueNotString { key: String, value: Box<serde_json::Value> },
+    let mut map = BTreeMap::new();
+    for (key, value) in value_map {
+        if let serde_json::Value::String(value) = value {
+            map.insert(key, value);
+        } else {
+            debug_panic!(
+                "{key:?} in {} serialized to {value:?}, not a string",
+                std::any::type_name::<S>()
+            );
+        }
+    }
+    map
 }
 
 #[cfg(test)]
