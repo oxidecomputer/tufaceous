@@ -8,6 +8,7 @@ use semver::Version;
 use serde::Deserialize;
 use serde::Serialize;
 use tufaceous_artifact::ArtifactVersion;
+use tufaceous_artifact::KnownArtifactTags;
 
 #[derive(Debug, Deserialize, Serialize)]
 pub(crate) struct ArtifactsSchema {
@@ -27,6 +28,12 @@ pub(crate) struct ArtifactSchema {
     pub(crate) target_name: String,
     pub(crate) version: ArtifactVersion,
     pub(crate) tags: BTreeMap<String, String>,
+}
+
+impl ArtifactSchema {
+    pub(crate) fn known_tags(&self) -> Option<KnownArtifactTags> {
+        KnownArtifactTags::from_tags(self.tags.clone()).ok()
+    }
 }
 
 impl AsRef<ArtifactSchema> for ArtifactSchema {

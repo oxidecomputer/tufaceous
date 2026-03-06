@@ -17,6 +17,7 @@ use tufaceous_artifact::ArtifactVersionError;
 use tufaceous_artifact::InstallinatorArtifact;
 use tufaceous_artifact::InstallinatorDocument;
 use tufaceous_artifact::KnownArtifactTags;
+use tufaceous_artifact::Metadata;
 use tufaceous_artifact::OsVariant;
 use tufaceous_artifact::RotBootloaderTags;
 use tufaceous_artifact::RotSlot;
@@ -45,6 +46,7 @@ pub struct RepositoryEditor<'a> {
     generate_installinator_document: bool,
     targets: HashMap<String, Vec<TargetSource<'a>>>,
     artifacts: HashMap<String, HashSet<ArtifactSchema>>,
+    metadata: BTreeMap<String, String>,
 }
 
 impl<'a> RepositoryEditor<'a> {
@@ -56,6 +58,7 @@ impl<'a> RepositoryEditor<'a> {
             generate_installinator_document: true,
             targets: HashMap::new(),
             artifacts: HashMap::new(),
+            metadata: BTreeMap::new(),
         }
     }
 
@@ -296,6 +299,11 @@ impl<'a> RepositoryEditor<'a> {
         Ok(editor)
     }
 
+    pub fn metadata(mut self, metadata: &Metadata) -> Self {
+        self.metadata = metadata.to_map();
+        self
+    }
+
     pub fn from_repo(repo: &'a Repository) -> Result<Self, Error> {
         Self::new(repo.system_version().clone()).import_repo(repo)
     }
@@ -329,6 +337,7 @@ impl<'a> RepositoryEditor<'a> {
                     tags: artifact.tags.clone(),
                 });
         }
+        self.metadata = repo.metadata().clone();
         Ok(self)
     }
 
@@ -351,7 +360,7 @@ impl<'a> RepositoryEditor<'a> {
         // we expect to be non-unique.
         let mut seen_tags = HashMap::new();
         for (target_name, artifact) in &artifacts {
-            if let Ok(tags) = KnownArtifactTags::from_tags(&artifact.tags)
+            if let Some(tags) = artifact.known_tags()
                 && matches!(tags, KnownArtifactTags::MeasurementCorpus)
             {
                 continue;
@@ -437,7 +446,7 @@ impl<'a> RepositoryEditor<'a> {
         let document = ArtifactsSchema {
             system_version: self.system_version,
             artifacts: artifacts.into_values().collect(),
-            metadata: BTreeMap::new(),
+            metadata: self.metadata,
         };
         let target = BytesSource::json(&document)
             .map_err(ErrorKind::SerializeArtifacts)?
@@ -483,7 +492,7 @@ pub(crate) fn generate_installinator_document(
     let mut document = InstallinatorDocument::empty(version.clone());
     for (artifact, sha256) in artifacts {
         let artifact = artifact.as_ref();
-        if let Ok(tags) = KnownArtifactTags::from_tags(&artifact.tags)
+        if let Some(tags) = artifact.known_tags()
             && let Some(kind) = tags.to_installinator()
             && let Some(file_name) =
                 Utf8Path::new(&artifact.target_name).file_name()

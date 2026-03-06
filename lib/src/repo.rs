@@ -29,6 +29,7 @@ use tufaceous_artifact::ArtifactHash;
 use tufaceous_artifact::Artifacts;
 use tufaceous_artifact::GetError;
 use tufaceous_artifact::KnownArtifactTags;
+use tufaceous_artifact::Metadata;
 
 use crate::RepositoryLoader;
 use crate::error::Error;
@@ -186,6 +187,10 @@ impl Repository {
 
     pub fn metadata(&self) -> &BTreeMap<String, String> {
         &self.metadata
+    }
+
+    pub fn structured_metadata(&self) -> Option<Metadata> {
+        Metadata::from_map(self.metadata.clone()).ok()
     }
 
     pub fn is_v1(&self) -> bool {

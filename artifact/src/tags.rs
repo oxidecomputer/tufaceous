@@ -6,7 +6,6 @@ use std::collections::BTreeMap;
 
 use serde::Deserialize;
 use serde::Serialize;
-use serde::de::value::MapDeserializer;
 
 use crate::DisplayTags;
 use crate::InstallinatorArtifactKind;
@@ -52,26 +51,13 @@ impl KnownArtifactTags {
     }
 
     pub fn from_tags(
-        tags: &BTreeMap<String, String>,
-    ) -> Result<Self, serde::de::value::Error> {
-        Self::deserialize(MapDeserializer::new(
-            tags.iter().map(|(k, v)| (k.as_str(), v.as_str())),
-        ))
+        tags: BTreeMap<String, String>,
+    ) -> Result<Self, serde_json::Error> {
+        crate::map::from_map(tags)
     }
 
     pub fn to_tags(&self) -> BTreeMap<String, String> {
-        self.to_tags_impl().unwrap_or_default()
-    }
-
-    fn to_tags_impl(&self) -> Option<BTreeMap<String, String>> {
-        let value = serde_json::to_value(self).ok()?;
-        let serde_json::Value::Object(map) = value else { return None };
-        map.into_iter()
-            .map(|(k, v)| match v {
-                serde_json::Value::String(v) => Some((k, v)),
-                _ => None,
-            })
-            .collect()
+        crate::map::to_map(self)
     }
 
     pub fn to_installinator(&self) -> Option<InstallinatorArtifactKind> {
@@ -276,15 +262,45 @@ impl From<ZoneTags> for KnownArtifactTags {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeMap;
+
     use test_strategy::proptest;
 
     use crate::KnownArtifactTags;
+    use crate::RotSlot;
+    use crate::RotTags;
+    use crate::Sign;
 
     #[proptest]
     fn tags_roundtrip(tags: KnownArtifactTags) {
-        let tag_map = tags
-            .to_tags_impl()
-            .expect("serialized value trivially converts to tag map");
-        assert_eq!(KnownArtifactTags::from_tags(&tag_map).unwrap(), tags);
+        let map = tags.to_tags();
+        assert_eq!(KnownArtifactTags::from_tags(map).unwrap(), tags);
+    }
+
+    #[test]
+    fn rot_sign() {
+        let mut tags = BTreeMap::from([
+            ("kind".to_owned(), "rot".to_owned()),
+            ("rot_board".to_owned(), "oxide-rot-1".to_owned()),
+            // rot_sign not included
+            ("rot_slot".to_owned(), "a".to_owned()),
+        ]);
+        assert_eq!(
+            KnownArtifactTags::from_tags(tags.clone()).unwrap(),
+            KnownArtifactTags::Rot(RotTags {
+                rot_board: "oxide-rot-1".to_owned(),
+                rot_sign: Sign::UNSIGNED,
+                rot_slot: RotSlot::A
+            })
+        );
+        tags.insert("rot_sign".to_owned(), "meow".to_owned());
+        assert_eq!(
+            KnownArtifactTags::from_tags(tags).unwrap(),
+            KnownArtifactTags::Rot(RotTags {
+                rot_board: "oxide-rot-1".to_owned(),
+                rot_sign: Sign(Some("meow".to_owned())),
+                rot_slot: RotSlot::A
+            })
+        );
     }
 }

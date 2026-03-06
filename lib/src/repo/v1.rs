@@ -527,7 +527,7 @@ async fn generate_installinator_document(
     let target_name = format!("{original_target}/v2.json");
     let mut document = InstallinatorDocument::empty(version.clone());
     for artifact in artifacts.iter() {
-        if let Ok(tags) = KnownArtifactTags::from_tags(&artifact.tags)
+        if let Some(tags) = artifact.known_tags()
             && let Some(kind) = tags.to_installinator()
             && let Some(file_name) =
                 Utf8Path::new(&artifact.target_name).file_name()

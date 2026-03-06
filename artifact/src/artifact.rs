@@ -35,7 +35,7 @@ impl Artifact {
     }
 
     pub fn known_tags(&self) -> Option<KnownArtifactTags> {
-        KnownArtifactTags::from_tags(&self.tags).ok()
+        KnownArtifactTags::from_tags(self.tags.clone()).ok()
     }
 
     pub fn display_tags(&self) -> DisplayTags<'_> {
@@ -80,7 +80,7 @@ pub struct ArtifactId {
 
 impl ArtifactId {
     pub fn known_tags(&self) -> Option<KnownArtifactTags> {
-        KnownArtifactTags::from_tags(&self.tags).ok()
+        KnownArtifactTags::from_tags(self.tags.clone()).ok()
     }
 
     pub fn display_tags(&self) -> DisplayTags<'_> {
