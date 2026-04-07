@@ -2,7 +2,6 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use std::borrow::Cow;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::collections::btree_map::IntoValues;
@@ -29,40 +28,12 @@ pub struct Artifact {
 }
 
 impl Artifact {
-    /// Clones this artifact's `version` and `tags` into an [`ArtifactId`].
-    pub fn id(&self) -> ArtifactId {
-        ArtifactId { version: self.version.clone(), tags: self.tags.clone() }
-    }
-
     pub fn known_tags(&self) -> Option<KnownArtifactTags> {
         KnownArtifactTags::from_tags(self.tags.clone()).ok()
     }
 
     pub fn display_tags(&self) -> DisplayTags<'_> {
         DisplayTags::from(&self.tags)
-    }
-}
-
-#[derive(Debug, Clone, Deserialize, Serialize)]
-#[cfg_attr(any(test, feature = "schemars"), derive(schemars::JsonSchema))]
-pub struct ArtifactId {
-    pub version: ArtifactVersion,
-    pub tags: BTreeMap<String, String>,
-}
-
-impl ArtifactId {
-    pub fn known_tags(&self) -> Option<KnownArtifactTags> {
-        KnownArtifactTags::from_tags(self.tags.clone()).ok()
-    }
-
-    pub fn display_tags(&self) -> DisplayTags<'_> {
-        DisplayTags(Cow::Borrowed(&self.tags))
-    }
-}
-
-impl From<Artifact> for ArtifactId {
-    fn from(artifact: Artifact) -> Self {
-        ArtifactId { version: artifact.version, tags: artifact.tags }
     }
 }
 
