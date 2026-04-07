@@ -4,10 +4,10 @@
 
 //! Handling of `oxide.json` metadata files in tarballs.
 //!
-//! `oxide.json` is originally defined by the omicron1(7) zone brand, which
-//! lives at <https://github.com/oxidecomputer/helios-omicron-brand>. tufaceous
-//! extended this format with additional archive types for identifying other
-//! types of tarballs.
+//! `oxide.json` is defined by the omicron1(7) zone brand, which lives
+//! at <https://github.com/oxidecomputer/helios-omicron-brand>. tufaceous
+//! previously extended this format with additional archive types for
+//! identifying composite artifacts.
 
 use std::io::Error;
 use std::io::ErrorKind;
@@ -32,17 +32,13 @@ pub struct Metadata {
     t: ArchiveType,
 }
 
+/// Archive types defined in helios-build-utils (part of helios-omicron-brand).
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case", tag = "t")]
 pub enum ArchiveType {
-    // Originally defined in helios-build-utils (part of helios-omicron-brand):
     Baseline,
     Layer(LayerInfo),
     Os,
-
-    // tufaceous extensions:
-    Rot,
-    ControlPlane,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -130,14 +126,6 @@ impl Metadata {
     pub fn is_os(&self) -> bool {
         matches!(&self.t, ArchiveType::Os)
     }
-
-    pub fn is_rot(&self) -> bool {
-        matches!(&self.t, ArchiveType::Rot)
-    }
-
-    pub fn is_control_plane(&self) -> bool {
-        matches!(&self.t, ArchiveType::ControlPlane)
-    }
 }
 
 #[cfg(test)]
@@ -159,9 +147,5 @@ mod tests {
             r#"{"v":"1","t":"os","i":{"checksum":"42eda100ee0e3bf44b9d0bb6a836046fa3133c378cd9d3a4ba338c3ba9e56eb7","name":"ci 3a2ed5e/9d37813 2024-12-20 08:54"}}"#,
         ).unwrap();
         assert!(metadata.is_os());
-
-        let metadata: Metadata =
-            serde_json::from_str(r#"{"v":"1","t":"control_plane"}"#).unwrap();
-        assert!(metadata.is_control_plane());
     }
 }
