@@ -7,7 +7,7 @@ use std::collections::BTreeSet;
 use anyhow::Result;
 use camino::Utf8PathBuf;
 use clap::Parser;
-use tough::ExpirationEnforcement;
+use tufaceous::ExpirationEnforcement;
 use tufaceous::RepositoryLoader;
 use tufaceous::TrustStoreBehavior;
 

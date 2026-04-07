@@ -7,7 +7,7 @@ use camino::Utf8PathBuf;
 use chrono::Utc;
 use clap::Parser;
 use semver::Version;
-use tough::ExpirationEnforcement;
+use tufaceous::ExpirationEnforcement;
 use tufaceous::RepositoryLoader;
 use tufaceous::TrustStoreBehavior;
 use tufaceous::edit::RepositoryEditor;

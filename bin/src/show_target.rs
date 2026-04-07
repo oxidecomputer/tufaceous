@@ -9,7 +9,7 @@ use anyhow::Result;
 use camino::Utf8PathBuf;
 use clap::Parser;
 use futures_util::TryStreamExt;
-use tough::ExpirationEnforcement;
+use tufaceous::ExpirationEnforcement;
 use tufaceous::RepositoryLoader;
 use tufaceous::TrustStoreBehavior;
 
