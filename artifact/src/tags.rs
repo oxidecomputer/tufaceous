@@ -2,12 +2,13 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+use std::borrow::Cow;
 use std::collections::BTreeMap;
+use std::fmt::Display;
 
 use serde::Deserialize;
 use serde::Serialize;
 
-use crate::DisplayTags;
 use crate::InstallinatorArtifactKind;
 use crate::Sign;
 
@@ -257,6 +258,34 @@ pub struct ZoneTags {
 impl From<ZoneTags> for KnownArtifactTags {
     fn from(tags: ZoneTags) -> Self {
         KnownArtifactTags::Zone(tags)
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct DisplayTags<'a>(pub(crate) Cow<'a, BTreeMap<String, String>>);
+
+impl Display for DisplayTags<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let mut comma = "";
+        let kind = self.0.get_key_value("kind").into_iter();
+        let remainder = self.0.iter().filter(|(k, _)| *k != "kind");
+        for (key, value) in kind.chain(remainder) {
+            write!(f, "{comma}{key}={value}")?;
+            comma = ",";
+        }
+        Ok(())
+    }
+}
+
+impl From<BTreeMap<String, String>> for DisplayTags<'static> {
+    fn from(tags: BTreeMap<String, String>) -> Self {
+        Self(Cow::Owned(tags))
+    }
+}
+
+impl<'a> From<&'a BTreeMap<String, String>> for DisplayTags<'a> {
+    fn from(tags: &'a BTreeMap<String, String>) -> Self {
+        Self(Cow::Borrowed(tags))
     }
 }
 

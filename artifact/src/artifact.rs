@@ -7,7 +7,6 @@ use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::collections::btree_map::IntoValues;
 use std::collections::btree_map::Values;
-use std::fmt::Display;
 use std::iter::Flatten;
 
 use serde::Deserialize;
@@ -15,6 +14,7 @@ use serde::Serialize;
 
 use crate::ArtifactHash;
 use crate::ArtifactVersion;
+use crate::DisplayTags;
 use crate::KnownArtifactTags;
 
 #[derive(
@@ -40,34 +40,6 @@ impl Artifact {
 
     pub fn display_tags(&self) -> DisplayTags<'_> {
         DisplayTags::from(&self.tags)
-    }
-}
-
-#[derive(Debug, Clone)]
-pub struct DisplayTags<'a>(pub(crate) Cow<'a, BTreeMap<String, String>>);
-
-impl Display for DisplayTags<'_> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let mut comma = "";
-        let kind = self.0.get_key_value("kind").into_iter();
-        let remainder = self.0.iter().filter(|(k, _)| *k != "kind");
-        for (key, value) in kind.chain(remainder) {
-            write!(f, "{comma}{key}={value}")?;
-            comma = ",";
-        }
-        Ok(())
-    }
-}
-
-impl From<BTreeMap<String, String>> for DisplayTags<'static> {
-    fn from(tags: BTreeMap<String, String>) -> Self {
-        Self(Cow::Owned(tags))
-    }
-}
-
-impl<'a> From<&'a BTreeMap<String, String>> for DisplayTags<'a> {
-    fn from(tags: &'a BTreeMap<String, String>) -> Self {
-        Self(Cow::Borrowed(tags))
     }
 }
 
