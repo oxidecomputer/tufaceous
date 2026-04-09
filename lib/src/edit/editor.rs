@@ -12,10 +12,9 @@ use futures_util::FutureExt;
 use futures_util::TryFutureExt;
 use semver::Version;
 use tokio::task::JoinSet;
+use tufaceous_artifact::ArtifactHash;
 use tufaceous_artifact::ArtifactVersion;
 use tufaceous_artifact::ArtifactVersionError;
-use tufaceous_artifact::InstallinatorArtifact;
-use tufaceous_artifact::InstallinatorDocument;
 use tufaceous_artifact::KnownArtifactTags;
 use tufaceous_artifact::Metadata;
 use tufaceous_artifact::OsVariant;
@@ -23,6 +22,8 @@ use tufaceous_artifact::RotBootloaderTags;
 use tufaceous_artifact::RotSlot;
 use tufaceous_artifact::RotTags;
 use tufaceous_artifact::SpTags;
+use tufaceous_artifact::installinator::InstallinatorArtifact;
+use tufaceous_artifact::installinator::InstallinatorDocument;
 
 use crate::Repository;
 use crate::edit::UnsignedRepository;
@@ -36,7 +37,7 @@ use crate::edit::source::TargetSource;
 use crate::error::Error;
 use crate::error::ErrorKind;
 use crate::schema::ArtifactSchema;
-use crate::schema::ArtifactsSchema;
+use crate::schema::ArtifactSetSchema;
 
 #[derive(Debug, Clone)]
 #[must_use]
@@ -314,7 +315,7 @@ impl<'a> RepositoryEditor<'a> {
         }
 
         for (target_name, target) in repo.targets() {
-            if target_name.raw() == ArtifactsSchema::TARGET_NAME {
+            if target_name.raw() == ArtifactSetSchema::TARGET_NAME {
                 continue;
             }
             self.targets.entry(target_name.raw().to_owned()).or_default().push(
@@ -443,7 +444,7 @@ impl<'a> RepositoryEditor<'a> {
             )?;
         }
 
-        let document = ArtifactsSchema {
+        let document = ArtifactSetSchema {
             system_version: self.system_version,
             artifacts: artifacts.into_values().collect(),
             metadata: self.metadata,
@@ -452,7 +453,7 @@ impl<'a> RepositoryEditor<'a> {
             .map_err(ErrorKind::SerializeArtifacts)?
             .into_target()
             .await;
-        targets.insert(ArtifactsSchema::TARGET_NAME.to_owned(), target)?;
+        targets.insert(ArtifactSetSchema::TARGET_NAME.to_owned(), target)?;
         Ok(UnsignedRepository::from_targets(targets.0))
     }
 }
@@ -490,18 +491,18 @@ pub(crate) fn generate_installinator_document(
 ) -> Result<Output<BytesSource>, Error> {
     let target_name = format!("installinator_document-{version}.json");
     let mut document = InstallinatorDocument::empty(version.clone());
-    for (artifact, sha256) in artifacts {
+    for (artifact, hash) in artifacts {
         let artifact = artifact.as_ref();
         if let Some(tags) = artifact.known_tags()
             && let Some(kind) = tags.to_installinator()
             && let Some(file_name) =
                 Utf8Path::new(&artifact.target_name).file_name()
-            && let Ok(sha256) = sha256.as_ref().try_into()
+            && let Ok(hash) = hash.as_ref().try_into().map(ArtifactHash)
         {
             document.artifacts.insert(InstallinatorArtifact {
                 file_name: file_name.to_owned(),
                 kind,
-                sha256,
+                hash,
             });
         }
     }

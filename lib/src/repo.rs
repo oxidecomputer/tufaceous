@@ -26,16 +26,16 @@ use tough::schema::Hashes;
 use tough::schema::Target;
 use tufaceous_artifact::Artifact;
 use tufaceous_artifact::ArtifactHash;
-use tufaceous_artifact::Artifacts;
-use tufaceous_artifact::GetError;
+use tufaceous_artifact::ArtifactSet;
 use tufaceous_artifact::KnownArtifactTags;
 use tufaceous_artifact::Metadata;
+use tufaceous_artifact::artifact_set::GetError;
 
 use crate::RepositoryLoader;
 use crate::error::Error;
 use crate::error::ErrorKind;
 use crate::schema::ArtifactSchema;
-use crate::schema::ArtifactsSchema;
+use crate::schema::ArtifactSetSchema;
 
 pub type TargetStream =
     Pin<Box<dyn Stream<Item = Result<Bytes, Error>> + Send + Sync + 'static>>;
@@ -48,7 +48,7 @@ pub struct Repository {
     trust_root: Vec<u8>,
     pub(crate) archive_path: Option<Utf8PathBuf>,
     pub(crate) archive_sha256: Option<[u8; 32]>,
-    artifacts: Artifacts,
+    artifacts: ArtifactSet,
     metadata: BTreeMap<String, String>,
     v1_unpacked: Option<v1::Unpacked>,
 }
@@ -109,8 +109,8 @@ impl Repository {
         archive_sha256: Option<[u8; 32]>,
         v1_compatibility: bool,
     ) -> Result<Self, Error> {
-        let Some(ArtifactsSchema { system_version, artifacts, metadata }) =
-            read_target_json(&repo, ArtifactsSchema::TARGET_NAME).await?
+        let Some(ArtifactSetSchema { system_version, artifacts, metadata }) =
+            read_target_json(&repo, ArtifactSetSchema::TARGET_NAME).await?
         else {
             if v1_compatibility
                 && let Some((system_version, artifacts, v1_unpacked)) =
@@ -129,7 +129,7 @@ impl Repository {
             }
 
             return Err(ErrorKind::TargetNotFound {
-                target_name: ArtifactsSchema::TARGET_NAME.to_owned(),
+                target_name: ArtifactSetSchema::TARGET_NAME.to_owned(),
             }
             .into());
         };
@@ -181,7 +181,7 @@ impl Repository {
         &self.inner.targets().signed.targets
     }
 
-    pub fn artifacts(&self) -> &Artifacts {
+    pub fn artifacts(&self) -> &ArtifactSet {
         &self.artifacts
     }
 
@@ -226,7 +226,7 @@ impl Repository {
     /// Returns an error if there is not exactly one artifact matching `tags`.
     pub fn get_handle(
         self: &Arc<Self>,
-        tags: KnownArtifactTags,
+        tags: &KnownArtifactTags,
     ) -> Result<ArtifactHandle, GetError> {
         let artifact = self.artifacts.get(tags)?.clone();
         Ok(ArtifactHandle { artifact, repo: Arc::clone(self) })
@@ -405,5 +405,5 @@ fn sha256_length(
             );
         })
         .ok()?;
-    Some((sha256, target.length))
+    Some((ArtifactHash(sha256), target.length))
 }

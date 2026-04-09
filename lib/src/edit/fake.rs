@@ -2,13 +2,13 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+use tufaceous_artifact::ArtifactSet;
 use tufaceous_artifact::ArtifactVersion;
-use tufaceous_artifact::Artifacts;
 use tufaceous_artifact::OsVariant;
 use tufaceous_artifact::RotBootloaderTags;
+use tufaceous_artifact::RotSign;
 use tufaceous_artifact::RotSlot;
 use tufaceous_artifact::RotTags;
-use tufaceous_artifact::Sign;
 use tufaceous_artifact::SpTags;
 
 use crate::edit::generate_installinator_document;
@@ -34,13 +34,13 @@ const FAKE_ZONES: [(&str, &str); 11] = [
     ("oximeter", "oximeter.tar.gz"),
 ];
 
-pub trait ArtifactsExt: Sized {
+pub trait ArtifactSetExt: Sized {
     fn fake(version: ArtifactVersion) -> Result<Self, Error>;
 }
 
-impl ArtifactsExt for Artifacts {
+impl ArtifactSetExt for ArtifactSet {
     fn fake(version: ArtifactVersion) -> Result<Self, Error> {
-        let mut artifacts = Artifacts::default();
+        let mut artifacts = ArtifactSet::default();
         for input in Input::fake(&version, None)? {
             for output in input.outputs() {
                 artifacts.extend(output.into_artifact());
@@ -90,7 +90,7 @@ impl Input<BytesSource> {
             inputs.push(Self::fake_rot_archive(
                 RotTags {
                     rot_board: "SimRot".into(),
-                    rot_sign: Sign::signed(FAKE_SIGN.into()),
+                    rot_sign: RotSign(Some(FAKE_SIGN.into())),
                     rot_slot: slot,
                 },
                 version.clone(),
@@ -100,7 +100,7 @@ impl Input<BytesSource> {
         inputs.push(Self::fake_rot_bootloader_archive(
             RotBootloaderTags {
                 rot_board: "SimRot".into(),
-                rot_sign: Sign::signed(FAKE_SIGN.into()),
+                rot_sign: RotSign(Some(FAKE_SIGN.into())),
             },
             version.clone(),
             interior_version,
@@ -129,11 +129,11 @@ mod tests {
     use std::time::Duration;
 
     use semver::Version;
+    use tufaceous_artifact::ArtifactSet;
     use tufaceous_artifact::ArtifactVersion;
-    use tufaceous_artifact::Artifacts;
 
     use crate::Repository;
-    use crate::edit::ArtifactsExt;
+    use crate::edit::ArtifactSetExt;
 
     #[tokio::test]
     async fn fake_artifacts_equals_fake_repo() {
@@ -141,7 +141,7 @@ mod tests {
         let system_version = Version::new(1, 0, 0);
         let version = ArtifactVersion::new(system_version.to_string()).unwrap();
 
-        let artifacts = Artifacts::fake(version).unwrap();
+        let artifacts = ArtifactSet::fake(version).unwrap();
         // sleep 1 second to ensure any embedded timestamps would be different.
         // we could ostensibly use `tokio::time::Instant` throughout the code
         // base but that wouldn't take into account third-party libraries we use

@@ -9,8 +9,8 @@ use std::fmt::Display;
 use serde::Deserialize;
 use serde::Serialize;
 
-use crate::InstallinatorArtifactKind;
-use crate::Sign;
+use crate::RotSign;
+use crate::installinator::InstallinatorArtifactKind;
 
 /// Sets of artifact tags known to the control plane.
 #[derive(
@@ -160,6 +160,7 @@ pub enum OsBoard {
 }
 display_serialize!(OsBoard);
 
+/// The inner value of [`KnownArtifactTags::Rot`].
 #[derive(
     Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Deserialize, Serialize,
 )]
@@ -173,8 +174,8 @@ pub struct RotTags {
     /// For unsigned images this will not be present; this will generally
     /// never occur in release repos but can be useful on hardware that has
     /// not fully made it through manufacturing yet.
-    #[serde(skip_serializing_if = "Sign::is_unsigned")]
-    pub rot_sign: Sign,
+    #[serde(skip_serializing_if = "RotSign::is_none")]
+    pub rot_sign: RotSign,
     /// ROT images are compiled for two different locations in flash; this
     /// identifies which slot this image belongs to.
     pub rot_slot: RotSlot,
@@ -207,6 +208,7 @@ pub enum RotSlot {
 }
 display_serialize!(RotSlot);
 
+/// The inner value of [`KnownArtifactTags::RotBootloader`].
 #[derive(
     Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Deserialize, Serialize,
 )]
@@ -220,8 +222,8 @@ pub struct RotBootloaderTags {
     /// For unsigned images this will not be present; this will generally
     /// never occur in release repos but can be useful on hardware that has
     /// not fully made it through manufacturing yet.
-    #[serde(skip_serializing_if = "Sign::is_unsigned")]
-    pub rot_sign: Sign,
+    #[serde(skip_serializing_if = "RotSign::is_none")]
+    pub rot_sign: RotSign,
 }
 
 impl From<RotBootloaderTags> for KnownArtifactTags {
@@ -230,6 +232,7 @@ impl From<RotBootloaderTags> for KnownArtifactTags {
     }
 }
 
+/// The inner value of [`KnownArtifactTags::Sp`].
 #[derive(
     Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Deserialize, Serialize,
 )]
@@ -245,6 +248,7 @@ impl From<SpTags> for KnownArtifactTags {
     }
 }
 
+/// The inner value of [`KnownArtifactTags::Zone`].
 #[derive(
     Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Deserialize, Serialize,
 )]
@@ -261,6 +265,25 @@ impl From<ZoneTags> for KnownArtifactTags {
     }
 }
 
+/// An adapter that implements [`Display`] for a set of tags.
+///
+/// This is intended for error and log messages and is not a portable format.
+///
+/// # Example
+///
+/// ```
+/// # use std::collections::BTreeMap;
+/// # use tufaceous_artifact::DisplayTags;
+/// let tags = BTreeMap::from([
+///     ("foo".to_string(), "yes".to_string()),
+///     ("bar".to_string(), "definitely".to_string()),
+///     ("kind".to_string(), "thing".to_string()),
+/// ]);
+/// assert_eq!(
+///     DisplayTags::from(&tags).to_string(),
+///     "kind=thing,bar=definitely,foo=yes"
+/// );
+/// ```
 #[derive(Debug, Clone)]
 pub struct DisplayTags<'a>(pub(crate) Cow<'a, BTreeMap<String, String>>);
 
@@ -296,9 +319,9 @@ mod tests {
     use test_strategy::proptest;
 
     use crate::KnownArtifactTags;
+    use crate::RotSign;
     use crate::RotSlot;
     use crate::RotTags;
-    use crate::Sign;
 
     #[proptest]
     fn tags_roundtrip(tags: KnownArtifactTags) {
@@ -318,7 +341,7 @@ mod tests {
             KnownArtifactTags::from_tags(tags.clone()).unwrap(),
             KnownArtifactTags::Rot(RotTags {
                 rot_board: "oxide-rot-1".to_owned(),
-                rot_sign: Sign::UNSIGNED,
+                rot_sign: RotSign(None),
                 rot_slot: RotSlot::A
             })
         );
@@ -327,7 +350,7 @@ mod tests {
             KnownArtifactTags::from_tags(tags).unwrap(),
             KnownArtifactTags::Rot(RotTags {
                 rot_board: "oxide-rot-1".to_owned(),
-                rot_sign: Sign(Some("meow".to_owned())),
+                rot_sign: RotSign(Some("meow".to_owned())),
                 rot_slot: RotSlot::A
             })
         );

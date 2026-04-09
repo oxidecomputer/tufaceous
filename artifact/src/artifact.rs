@@ -3,206 +3,145 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use std::collections::BTreeMap;
-use std::collections::BTreeSet;
-use std::collections::btree_map::IntoValues;
-use std::collections::btree_map::Values;
-use std::iter::Flatten;
+use std::fmt::Debug;
+use std::fmt::Display;
+use std::str::FromStr;
 
+use daft::Diffable;
+use hex::FromHexError;
 use serde::Deserialize;
 use serde::Serialize;
 
-use crate::ArtifactHash;
 use crate::ArtifactVersion;
 use crate::DisplayTags;
 use crate::KnownArtifactTags;
 
+/// An artifact in a repository.
 #[derive(
     Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Deserialize, Serialize,
 )]
 pub struct Artifact {
+    /// The TUF target name, if this value is associated with a loaded
+    /// repository.
+    ///
+    /// If you are instantiating this struct from other records (such as a
+    /// database), you can use `String::new()` here.
     pub target_name: String,
+
+    /// The version of the artifact.
     pub version: ArtifactVersion,
+
+    /// The artifact's tags.
+    ///
+    /// Tags describe how an artifact is to be used by the control plane.
+    /// In this form, they are an arbitrary mapping of string keys to string
+    /// values. Using [`Artifact::known_tags`], they can be (fallibly) converted
+    /// into a strongly-typed description of the artifact.
+    ///
+    /// When recording artifacts for later use, the control plane must always
+    /// record these tags as-is, even if `Artifact::known_tags` returns `None`.
     pub tags: BTreeMap<String, String>,
+
+    /// The SHA-256 checksum of the artifact.
     pub hash: ArtifactHash,
+
+    /// The length of the artifact in bytes.
     pub length: u64,
 }
 
 impl Artifact {
+    /// Resolves [`Artifact::tags`] into [`KnownArtifactTags`].
+    ///
+    /// Returns `None` if the tags do not resolve to any known artifact.
     pub fn known_tags(&self) -> Option<KnownArtifactTags> {
         KnownArtifactTags::from_tags(self.tags.clone()).ok()
     }
 
+    /// Returns an adapter for displaying [`Artifact::tags`] as a human-readable
+    /// string.
     pub fn display_tags(&self) -> DisplayTags<'_> {
         DisplayTags::from(&self.tags)
     }
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct Artifacts {
-    inner: BTreeMap<Option<KnownArtifactTags>, BTreeSet<Artifact>>,
-}
+/// The SHA-256 checksum of an artifact.
+#[derive(
+    Copy,
+    Clone,
+    Diffable,
+    Eq,
+    PartialEq,
+    Ord,
+    PartialOrd,
+    Hash,
+    Serialize,
+    Deserialize,
+)]
+#[daft(leaf)]
+#[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "proptest", derive(test_strategy::Arbitrary))]
+#[serde(transparent)]
+pub struct ArtifactHash(
+    #[serde(with = "serde_human_bytes::hex_array")]
+    #[cfg_attr(
+        feature = "schemars",
+        schemars(schema_with = "hex_schema::<32>")
+    )]
+    pub [u8; 32],
+);
 
-impl Artifacts {
-    pub fn new(iter: impl IntoIterator<Item = Artifact>) -> Self {
-        Self::from_iter(iter)
-    }
-
-    pub fn len(&self) -> usize {
-        self.inner.values().map(BTreeSet::len).sum()
-    }
-
-    pub fn is_empty(&self) -> bool {
-        debug_assert_eq!(self.len(), 0);
-        self.inner.is_empty()
-    }
-
-    pub fn insert(&mut self, artifact: Artifact) {
-        self.inner.entry(artifact.known_tags()).or_default().insert(artifact);
-    }
-
-    pub fn get(&self, tags: KnownArtifactTags) -> Result<&Artifact, GetError> {
-        let vec = self.inner.get(&Some(tags)).ok_or(GetError::NotFound)?;
-        if vec.len() == 1
-            && let Some(artifact) = vec.first()
-        {
-            Ok(artifact)
-        } else {
-            Err(GetError::TooMany)
-        }
-    }
-
-    pub fn get_all(
-        &self,
-        tags: KnownArtifactTags,
-    ) -> impl Iterator<Item = &Artifact> {
-        self.inner.get(&Some(tags)).map(BTreeSet::iter).unwrap_or_default()
-    }
-
-    pub fn contains(&self, artifact: &Artifact) -> bool {
-        self.inner
-            .get(&artifact.known_tags())
-            .is_some_and(|set| set.contains(artifact))
-    }
-
-    pub fn filter_tags(
-        &self,
-        mut predicate: impl FnMut(&KnownArtifactTags) -> bool,
-    ) -> impl Iterator<Item = &Artifact> {
-        self.inner
-            .iter()
-            .filter_map(move |(tags, artifacts)| {
-                predicate(tags.as_ref()?).then_some(artifacts)
-            })
-            .flatten()
-    }
-
-    pub fn iter(&self) -> Iter<'_> {
-        Iter { inner: self.inner.values().flatten() }
+impl AsRef<[u8]> for ArtifactHash {
+    fn as_ref(&self) -> &[u8] {
+        &self.0
     }
 }
 
-impl Extend<Artifact> for Artifacts {
-    fn extend<T: IntoIterator<Item = Artifact>>(&mut self, iter: T) {
-        for artifact in iter {
-            self.insert(artifact);
-        }
+impl Debug for ArtifactHash {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_tuple("ArtifactHash").field(&hex::encode(self.0)).finish()
     }
 }
 
-impl FromIterator<Artifact> for Artifacts {
-    fn from_iter<T: IntoIterator<Item = Artifact>>(iter: T) -> Self {
-        let mut artifacts = Self::default();
-        artifacts.extend(iter);
-        artifacts
+impl Display for ArtifactHash {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        Display::fmt(&hex::encode(self.0), f)
     }
 }
 
-impl IntoIterator for Artifacts {
-    type Item = Artifact;
-    type IntoIter = IntoIter;
+impl FromStr for ArtifactHash {
+    type Err = FromHexError;
 
-    fn into_iter(self) -> Self::IntoIter {
-        IntoIter { inner: self.inner.into_values().flatten() }
+    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
+        let mut out = [0u8; 32];
+        hex::decode_to_slice(s, &mut out)?;
+        Ok(Self(out))
     }
 }
 
-impl<'a> IntoIterator for &'a Artifacts {
-    type Item = &'a Artifact;
-    type IntoIter = Iter<'a>;
+/// Produce an OpenAPI schema describing a hex array of a specific length (e.g.,
+/// a hash digest).
+#[cfg(feature = "schemars")]
+fn hex_schema<const N: usize>(
+    generator: &mut schemars::SchemaGenerator,
+) -> schemars::schema::Schema {
+    use schemars::JsonSchema;
 
-    fn into_iter(self) -> Self::IntoIter {
-        self.iter()
+    let mut schema: schemars::schema::SchemaObject =
+        <String>::json_schema(generator).into();
+    schema.format = Some(format!("hex string ({N} bytes)"));
+    schema.into()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn display_respects_padding() {
+        let h = ArtifactHash([0; 32]);
+        assert_eq!(
+            format!("{h:x>100}"),
+            "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx0000000000000000000000000000000000000000000000000000000000000000"
+        );
     }
-}
-
-impl<'de> Deserialize<'de> for Artifacts {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        struct Visitor;
-
-        impl<'de> serde::de::Visitor<'de> for Visitor {
-            type Value = Artifacts;
-
-            fn expecting(
-                &self,
-                f: &mut std::fmt::Formatter,
-            ) -> std::fmt::Result {
-                write!(f, "a sequence")
-            }
-
-            fn visit_seq<A>(self, mut seq: A) -> Result<Artifacts, A::Error>
-            where
-                A: serde::de::SeqAccess<'de>,
-            {
-                std::iter::from_fn(|| seq.next_element().transpose()).collect()
-            }
-        }
-
-        deserializer.deserialize_seq(Visitor)
-    }
-}
-
-impl Serialize for Artifacts {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        serializer.collect_seq(self.iter())
-    }
-}
-
-#[derive(Debug)]
-pub struct IntoIter {
-    inner: Flatten<IntoValues<Option<KnownArtifactTags>, BTreeSet<Artifact>>>,
-}
-
-impl Iterator for IntoIter {
-    type Item = Artifact;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        self.inner.next()
-    }
-}
-
-#[derive(Debug, Clone)]
-pub struct Iter<'a> {
-    inner: Flatten<Values<'a, Option<KnownArtifactTags>, BTreeSet<Artifact>>>,
-}
-
-impl<'a> Iterator for Iter<'a> {
-    type Item = &'a Artifact;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        self.inner.next()
-    }
-}
-
-#[derive(Debug, thiserror::Error)]
-pub enum GetError {
-    #[error("artifact not found")]
-    NotFound,
-    #[error("more than one artifact found")]
-    TooMany,
 }

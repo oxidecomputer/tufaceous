@@ -7,16 +7,16 @@ use tufaceous::ExpirationEnforcement;
 use tufaceous::RepositoryLoader;
 use tufaceous::TrustStoreBehavior;
 use tufaceous::error::Error;
-use tufaceous_artifact::Artifacts;
+use tufaceous_artifact::ArtifactSet;
 use tufaceous_artifact::KnownArtifactTags;
 use tufaceous_artifact::OsBoard;
 use tufaceous_artifact::OsPhase1Tags;
 use tufaceous_artifact::OsPhase2Tags;
 use tufaceous_artifact::OsVariant;
 use tufaceous_artifact::RotBootloaderTags;
+use tufaceous_artifact::RotSign;
 use tufaceous_artifact::RotSlot;
 use tufaceous_artifact::RotTags;
-use tufaceous_artifact::Sign;
 use tufaceous_artifact::SpTags;
 use tufaceous_artifact::ZoneTags;
 
@@ -51,7 +51,7 @@ async fn v1_fake() -> Result<(), Error> {
             expected.push(
                 RotTags {
                     rot_board: "SimRot".into(),
-                    rot_sign: Sign(Some(rot_sign.into())),
+                    rot_sign: RotSign(Some(rot_sign.into())),
                     rot_slot,
                 }
                 .into(),
@@ -60,7 +60,7 @@ async fn v1_fake() -> Result<(), Error> {
         expected.push(
             RotBootloaderTags {
                 rot_board: "SimRot".into(),
-                rot_sign: Sign(Some(rot_sign.into())),
+                rot_sign: RotSign(Some(rot_sign.into())),
             }
             .into(),
         );
@@ -72,9 +72,9 @@ async fn v1_fake() -> Result<(), Error> {
         expected.push(ZoneTags { zone_name: zone_name.into() }.into());
     }
     let seen = expected
-        .into_iter()
+        .iter()
         .map(|tags| repo.artifacts().get(tags).unwrap().clone())
-        .collect::<Artifacts>();
+        .collect::<ArtifactSet>();
     // And there should be no unexpected artifacts:
     assert_eq!(&seen, repo.artifacts());
 

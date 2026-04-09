@@ -8,13 +8,12 @@ use hubtools::Caboose;
 use hubtools::CabooseBuilder;
 use hubtools::HubrisArchiveBuilder;
 use tufaceous_artifact::ArtifactVersion;
+use tufaceous_artifact::ReadCabooseError;
 use tufaceous_artifact::RotBootloaderTags;
+use tufaceous_artifact::RotSign;
 use tufaceous_artifact::RotSlot;
 use tufaceous_artifact::RotTags;
-use tufaceous_artifact::Sign;
 use tufaceous_artifact::SpTags;
-use tufaceous_artifact::hubris::read_name;
-use tufaceous_artifact::hubris::read_version;
 
 use crate::edit::guess::GuessInput;
 use crate::edit::guess::GuessResult;
@@ -41,11 +40,12 @@ impl Input<TargetSource<'static>> {
             ReadCaboose,
             source.path()
         );
-        let version = ArtifactVersion::new(try_path!(
-            read_version(&caboose),
+        let version = try_path!(
+            tag_helper(caboose.version(), "VERS"),
             ReadCaboose,
             source.path()
-        ))?;
+        )
+        .parse()?;
         Ok(Self::Rot { source: source.into(), tags, version })
     }
 
@@ -62,12 +62,16 @@ impl Input<TargetSource<'static>> {
             ReadCaboose,
             source.path()
         );
-        let version = ArtifactVersion::new(try_path!(
-            read_version(&caboose),
+        let version = try_path!(
+            tag_helper(caboose.version(), "VERS"),
             ReadCaboose,
             source.path()
-        ))?;
-        Ok(Self::RotBootloader { source: source.into(), tags, version })
+        );
+        Ok(Self::RotBootloader {
+            source: source.into(),
+            tags,
+            version: version.parse()?,
+        })
     }
 
     pub(crate) async fn sp_archive(
@@ -83,14 +87,22 @@ impl Input<TargetSource<'static>> {
             ReadCaboose,
             source.path()
         );
-        let name = try_path!(read_name(&caboose), ReadCaboose, source.path())
-            .to_owned();
-        let version = ArtifactVersion::new(try_path!(
-            read_version(&caboose),
+        let name = try_path!(
+            tag_helper(caboose.name(), "NAME"),
             ReadCaboose,
             source.path()
-        ))?;
-        Ok(Self::Sp { source: source.into(), tags, name, version })
+        );
+        let version = try_path!(
+            tag_helper(caboose.version(), "VERS"),
+            ReadCaboose,
+            source.path()
+        );
+        Ok(Self::Sp {
+            source: source.into(),
+            tags,
+            name,
+            version: version.parse()?,
+        })
     }
 
     pub(crate) async fn guess_hubris_archive(
@@ -167,7 +179,7 @@ impl Input<BytesSource> {
     ) -> Result<Self, Error> {
         let data = CabooseData {
             board: &tags.sp_board,
-            sign: &Sign::UNSIGNED,
+            sign: &RotSign(None),
             commit: "this-is-a-fake-sp",
             version: interior_version.unwrap_or(&version),
         };
@@ -178,7 +190,7 @@ impl Input<BytesSource> {
 
 struct CabooseData<'a> {
     board: &'a str,
-    sign: &'a Sign,
+    sign: &'a RotSign,
     commit: &'static str,
     version: &'a ArtifactVersion,
 }
@@ -204,4 +216,13 @@ impl CabooseData<'_> {
             .map_err(ErrorKind::GenerateFakeHubrisArchive)?;
         Ok(BytesSource::new(vec))
     }
+}
+
+fn tag_helper(
+    value: Result<&[u8], hubtools::CabooseError>,
+    tag: &'static str,
+) -> Result<String, ReadCabooseError> {
+    let s = std::str::from_utf8(value?)
+        .map_err(|source| ReadCabooseError::Utf8 { tag, source })?;
+    Ok(s.to_owned())
 }

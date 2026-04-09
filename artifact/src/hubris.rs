@@ -9,40 +9,70 @@ use hubtools::CabooseError;
 
 use crate::KnownArtifactTags;
 use crate::RotBootloaderTags;
+use crate::RotSign;
 use crate::RotSlot;
 use crate::RotTags;
-use crate::Sign;
 use crate::SpTags;
 
 impl RotTags {
+    /// Attempts to read the values of `RotTags` from a Hubris caboose.
+    ///
+    /// `slot` is not part of the caboose and must be provided.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the caboose is not valid, if `BORD` is not present,
+    /// or if `BORD` or `SIGN` are not valid UTF-8 strings.
     pub fn from_caboose(
         caboose: &Caboose,
         slot: RotSlot,
     ) -> Result<Self, ReadCabooseError> {
         Ok(Self {
             rot_board: read_board(caboose)?,
-            rot_sign: Sign(read_sign(caboose)?),
+            rot_sign: RotSign(read_sign(caboose)?),
             rot_slot: slot,
         })
     }
 }
 
 impl RotBootloaderTags {
+    /// Attempts to read the values of `RotBootloaderTags` from a Hubris
+    /// caboose.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the caboose is not valid, if `BORD` is not present,
+    /// or if `BORD` or `SIGN` are not valid UTF-8 strings.
     pub fn from_caboose(caboose: &Caboose) -> Result<Self, ReadCabooseError> {
         Ok(Self {
             rot_board: read_board(caboose)?,
-            rot_sign: Sign(read_sign(caboose)?),
+            rot_sign: RotSign(read_sign(caboose)?),
         })
     }
 }
 
 impl SpTags {
+    /// Attempts to read the values of `SpTags` from a Hubris caboose.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the caboose is not valid, or if `BORD` is not
+    /// present or is not not a valid UTF-8 string.
     pub fn from_caboose(caboose: &Caboose) -> Result<Self, ReadCabooseError> {
         Ok(Self { sp_board: read_board(caboose)? })
     }
 }
 
 impl KnownArtifactTags {
+    /// Attempts to read the values of [`KnownArtifactTags::Rot`] from
+    /// a Hubris caboose.
+    ///
+    /// `slot` is not part of the caboose and must be provided.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the caboose is not valid, if `BORD` is not present,
+    /// or if `BORD` or `SIGN` are not valid UTF-8 strings.
     pub fn from_rot_caboose(
         caboose: &Caboose,
         slot: RotSlot,
@@ -50,6 +80,13 @@ impl KnownArtifactTags {
         RotTags::from_caboose(caboose, slot).map(KnownArtifactTags::Rot)
     }
 
+    /// Attempts to read the values of [`KnownArtifactTags::RotBootloader`] from
+    /// a Hubris caboose.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the caboose is not valid, if `BORD` is not present,
+    /// or if `BORD` or `SIGN` are not valid UTF-8 strings.
     pub fn from_rot_bootloader_caboose(
         caboose: &Caboose,
     ) -> Result<Self, ReadCabooseError> {
@@ -57,6 +94,13 @@ impl KnownArtifactTags {
             .map(KnownArtifactTags::RotBootloader)
     }
 
+    /// Attempts to read the values of [`KnownArtifactTags::Sp`] from a Hubris
+    /// caboose.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the caboose is not valid, or if `BORD` is not
+    /// present or is not not a valid UTF-8 string.
     pub fn from_sp_caboose(
         caboose: &Caboose,
     ) -> Result<Self, ReadCabooseError> {
@@ -84,18 +128,13 @@ fn read_sign(caboose: &Caboose) -> Result<Option<String>, ReadCabooseError> {
     }
 }
 
-pub fn read_name(caboose: &Caboose) -> Result<&str, ReadCabooseError> {
-    utf8(caboose.name()?, "NAME")
-}
-
-pub fn read_version(caboose: &Caboose) -> Result<&str, ReadCabooseError> {
-    utf8(caboose.version()?, "VERS")
-}
-
+/// An error that occurred while reading a Hubris archive.
 #[derive(Debug, thiserror::Error)]
 pub enum ReadCabooseError {
+    /// The caboose was not valid, or the required tag was missing.
     #[error(transparent)]
     Caboose(#[from] hubtools::CabooseError),
+    /// The tag value was not valid UTF-8.
     #[error("{tag} is not valid UTF-8")]
     Utf8 { tag: &'static str, source: std::str::Utf8Error },
 }

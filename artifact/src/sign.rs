@@ -51,41 +51,42 @@ const CA_LIST: [(&str, &str); 9] = [
 static CA_MAP: LazyLock<HashMap<&str, &str>> =
     LazyLock::new(|| HashMap::from(CA_LIST));
 
+/// Value of the `SIGN` field of a Hubris caboose.
+///
+/// Used in [`RotTags`] and [`RotBootloaderTags`].
+///
+/// This is a lowercase hexadecimal string of the ROT Key Table Hash (RKTH) that
+/// is used to identify the CA.
+///
+/// [`RotTags`]: crate::RotTags
+/// [`RotBootloaderTags`]: crate::RotBootloaderTags
 #[derive(
     Clone, Default, PartialEq, Eq, PartialOrd, Ord, Hash, Deserialize, Serialize,
 )]
 #[cfg_attr(any(test, feature = "proptest"), derive(test_strategy::Arbitrary))]
 #[serde(transparent)]
-pub struct Sign(pub Option<String>);
+pub struct RotSign(pub Option<String>);
 
-impl Sign {
-    pub const UNSIGNED: Sign = Sign(None);
-
-    pub fn signed(sign: String) -> Self {
-        Self(Some(sign))
-    }
-
-    pub fn is_signed(&self) -> bool {
-        self.0.is_some()
-    }
-
-    pub fn is_unsigned(&self) -> bool {
-        self.0.is_none()
-    }
-
+impl RotSign {
+    /// Returns a friendly name for the CA this RKTH represents, if one is
+    /// known. Returns `None` otherwise.
     pub fn friendly_ca_name(&self) -> Option<&'static str> {
         let inner = self.0.as_deref()?;
         CA_MAP.get(inner).copied()
     }
+
+    pub(crate) fn is_none(&self) -> bool {
+        self.0.is_none()
+    }
 }
 
-impl Debug for Sign {
+impl Debug for RotSign {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         Debug::fmt(&self.0, f)
     }
 }
 
-impl Display for Sign {
+impl Display for RotSign {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self.0.as_deref() {
             Some(inner) => {
@@ -94,15 +95,6 @@ impl Display for Sign {
             }
             None => write!(f, "unsigned"),
         }
-    }
-}
-
-impl<T> From<T> for Sign
-where
-    Option<String>: From<T>,
-{
-    fn from(sign: T) -> Self {
-        Self(sign.into())
     }
 }
 

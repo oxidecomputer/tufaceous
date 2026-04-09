@@ -34,18 +34,18 @@ use slog::warn;
 use tokio::sync::mpsc;
 use tufaceous_artifact::Artifact;
 use tufaceous_artifact::ArtifactHash;
+use tufaceous_artifact::ArtifactSet;
 use tufaceous_artifact::ArtifactVersion;
-use tufaceous_artifact::Artifacts;
-use tufaceous_artifact::InstallinatorArtifact;
-use tufaceous_artifact::InstallinatorDocument;
 use tufaceous_artifact::KnownArtifactTags;
 use tufaceous_artifact::OsBoard;
 use tufaceous_artifact::OsPhase1Tags;
 use tufaceous_artifact::OsPhase2Tags;
 use tufaceous_artifact::OsVariant;
+use tufaceous_artifact::ReadCabooseError;
 use tufaceous_artifact::RotSlot;
 use tufaceous_artifact::ZoneTags;
-use tufaceous_artifact::hubris::ReadCabooseError;
+use tufaceous_artifact::installinator::InstallinatorArtifact;
+use tufaceous_artifact::installinator::InstallinatorDocument;
 
 use crate::COSMO_PHASE_1_PATH;
 use crate::GIMLET_PHASE_1_PATH;
@@ -67,14 +67,14 @@ pub(crate) struct Unpacked {
 pub(crate) async fn from_loaded(
     repo: &tough::Repository,
     log: &Logger,
-) -> Result<Option<(Version, Artifacts, Unpacked)>, Error> {
-    let Some(V1ArtifactsSchema { system_version, artifacts: v1_artifacts }) =
-        read_target_json(repo, V1ArtifactsSchema::TARGET_NAME).await?
+) -> Result<Option<(Version, ArtifactSet, Unpacked)>, Error> {
+    let Some(V1ArtifactSetSchema { system_version, artifacts: v1_artifacts }) =
+        read_target_json(repo, V1ArtifactSetSchema::TARGET_NAME).await?
     else {
         return Ok(None);
     };
 
-    let mut artifacts = Artifacts::default();
+    let mut artifacts = ArtifactSet::default();
     let mut unpacked = Unpacked { entries: HashMap::new() };
     let mut installinator_document = None;
     for V1Artifact { version, kind, target } in v1_artifacts {
@@ -364,7 +364,7 @@ impl CompositeArtifact {
 
     async fn read_rot(
         mut self,
-        artifacts: &mut Artifacts,
+        artifacts: &mut ArtifactSet,
         unpacked: &mut Unpacked,
         version: ArtifactVersion,
     ) -> Result<(), Error> {
@@ -406,7 +406,7 @@ impl CompositeArtifact {
 
     fn read_os_image(
         mut self,
-        artifacts: &mut Artifacts,
+        artifacts: &mut ArtifactSet,
         unpacked: &mut Unpacked,
         os_variant: OsVariant,
         version: &ArtifactVersion,
@@ -449,7 +449,7 @@ impl CompositeArtifact {
 
     async fn read_control_plane(
         self,
-        artifacts: &mut Artifacts,
+        artifacts: &mut ArtifactSet,
         unpacked: &mut Unpacked,
     ) -> Result<(), Error> {
         for (tar_path, UnpackedArtifact { file, hash, length }) in self.entries
@@ -519,7 +519,7 @@ impl BufRead for MpscReader {
 }
 
 async fn generate_installinator_document(
-    artifacts: &mut Artifacts,
+    artifacts: &mut ArtifactSet,
     unpacked: &mut Unpacked,
     version: ArtifactVersion,
     original_target: String,
@@ -535,7 +535,7 @@ async fn generate_installinator_document(
             document.artifacts.insert(InstallinatorArtifact {
                 file_name: file_name.to_owned(),
                 kind,
-                sha256: artifact.hash,
+                hash: artifact.hash,
             });
         }
     }
@@ -562,12 +562,12 @@ async fn generate_installinator_document(
 }
 
 #[derive(Debug, Deserialize)]
-pub(crate) struct V1ArtifactsSchema {
+pub(crate) struct V1ArtifactSetSchema {
     system_version: Version,
     artifacts: Vec<V1Artifact>,
 }
 
-impl V1ArtifactsSchema {
+impl V1ArtifactSetSchema {
     pub(crate) const TARGET_NAME: &str = "artifacts.json";
 }
 

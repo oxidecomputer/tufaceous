@@ -11,7 +11,7 @@ use tufaceous_artifact::ArtifactVersion;
 use tufaceous_artifact::KnownArtifactTags;
 
 #[derive(Debug, Deserialize, Serialize)]
-pub(crate) struct ArtifactsSchema {
+pub(crate) struct ArtifactSetSchema {
     pub(crate) system_version: Version,
     #[serde(default)]
     pub(crate) artifacts: Vec<ArtifactSchema>,
@@ -19,7 +19,7 @@ pub(crate) struct ArtifactsSchema {
     pub(crate) metadata: BTreeMap<String, String>,
 }
 
-impl ArtifactsSchema {
+impl ArtifactSetSchema {
     pub(crate) const TARGET_NAME: &str = "artifacts-v2.json";
 }
 

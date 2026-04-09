@@ -19,7 +19,7 @@ use crate::ArtifactVersion;
 ///
 /// There are no backwards compatibility constraints for this document. The
 /// version of Installinator that processes this document is the same as the
-/// version of tufaceous that creates it.
+/// version of Tufaceous that creates it.
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct InstallinatorDocument {
     pub system_version: ArtifactVersion,
@@ -41,18 +41,15 @@ impl InstallinatorDocument {
 pub struct InstallinatorArtifact {
     #[serde(flatten)]
     pub kind: InstallinatorArtifactKind,
-    pub sha256: ArtifactHash,
+    pub hash: ArtifactHash,
     /// A file name without directory separators; not necessarily the target
     /// name.
     pub file_name: String,
 }
 
 impl InstallinatorArtifact {
-    pub fn downgrade(&self) -> InstallinatorArtifactId {
-        InstallinatorArtifactId {
-            kind: self.kind.downgrade(),
-            hash: self.sha256,
-        }
+    pub fn to_id(&self) -> InstallinatorArtifactId {
+        InstallinatorArtifactId { kind: self.kind.to_id(), hash: self.hash }
     }
 }
 
@@ -71,7 +68,7 @@ pub enum InstallinatorArtifactKind {
 }
 
 impl InstallinatorArtifactKind {
-    pub fn downgrade(&self) -> InstallinatorArtifactKindId {
+    pub fn to_id(&self) -> InstallinatorArtifactKindId {
         InstallinatorArtifactKindId(match self {
             InstallinatorArtifactKind::MeasurementCorpus => {
                 Cow::Borrowed("measurement_corpus")

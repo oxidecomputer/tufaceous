@@ -135,7 +135,7 @@ pub enum ErrorKind {
     ReadHubrisArchive { source: hubtools::Error, path: Utf8PathBuf },
     #[error("failed to read caboose from {path}")]
     ReadCaboose {
-        source: tufaceous_artifact::hubris::ReadCabooseError,
+        source: tufaceous_artifact::ReadCabooseError,
         path: Utf8PathBuf,
     },
     #[error("failed to generate fake hubris archive")]
