@@ -36,6 +36,8 @@ use tufaceous_artifact::Artifact;
 use tufaceous_artifact::ArtifactHash;
 use tufaceous_artifact::ArtifactSet;
 use tufaceous_artifact::ArtifactVersion;
+use tufaceous_artifact::InstallinatorArtifact;
+use tufaceous_artifact::InstallinatorDocument;
 use tufaceous_artifact::KnownArtifactTags;
 use tufaceous_artifact::OsBoard;
 use tufaceous_artifact::OsPhase1Tags;
@@ -44,8 +46,6 @@ use tufaceous_artifact::OsVariant;
 use tufaceous_artifact::ReadCabooseError;
 use tufaceous_artifact::RotSlot;
 use tufaceous_artifact::ZoneTags;
-use tufaceous_artifact::installinator::InstallinatorArtifact;
-use tufaceous_artifact::installinator::InstallinatorDocument;
 
 use crate::COSMO_PHASE_1_PATH;
 use crate::GIMLET_PHASE_1_PATH;
@@ -454,7 +454,7 @@ impl CompositeArtifact {
     ) -> Result<(), Error> {
         for (tar_path, UnpackedArtifact { file, hash, length }) in self.entries
         {
-            if !tar_path.starts_with("zones") {
+            if !tar_path.starts_with("zones/") {
                 continue;
             }
             let target_name =

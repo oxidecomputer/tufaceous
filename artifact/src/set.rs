@@ -255,8 +255,10 @@ impl<'a> Iterator for Iter<'a> {
 /// artifact.
 #[derive(Debug, thiserror::Error)]
 pub enum GetError {
+    /// An artifact matching the requested tags was not found.
     #[error("artifact not found")]
     NotFound,
+    /// There were multiple artifacts matching the requested tags.
     #[error("more than one artifact found")]
     TooMany,
 }

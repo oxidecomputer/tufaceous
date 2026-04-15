@@ -15,6 +15,8 @@ use tokio::task::JoinSet;
 use tufaceous_artifact::ArtifactHash;
 use tufaceous_artifact::ArtifactVersion;
 use tufaceous_artifact::ArtifactVersionError;
+use tufaceous_artifact::InstallinatorArtifact;
+use tufaceous_artifact::InstallinatorDocument;
 use tufaceous_artifact::KnownArtifactTags;
 use tufaceous_artifact::Metadata;
 use tufaceous_artifact::OsVariant;
@@ -22,8 +24,6 @@ use tufaceous_artifact::RotBootloaderTags;
 use tufaceous_artifact::RotSlot;
 use tufaceous_artifact::RotTags;
 use tufaceous_artifact::SpTags;
-use tufaceous_artifact::installinator::InstallinatorArtifact;
-use tufaceous_artifact::installinator::InstallinatorDocument;
 
 use crate::Repository;
 use crate::edit::UnsignedRepository;

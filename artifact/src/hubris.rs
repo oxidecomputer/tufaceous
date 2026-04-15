@@ -136,5 +136,10 @@ pub enum ReadCabooseError {
     Caboose(#[from] hubtools::CabooseError),
     /// The tag value was not valid UTF-8.
     #[error("{tag} is not valid UTF-8")]
-    Utf8 { tag: &'static str, source: std::str::Utf8Error },
+    Utf8 {
+        /// The tag that was not valid UTF-8.
+        tag: &'static str,
+        /// The underlying error.
+        source: std::str::Utf8Error,
+    },
 }

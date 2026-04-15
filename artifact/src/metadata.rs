@@ -8,19 +8,20 @@ use serde::Deserialize;
 use serde::Serialize;
 
 /// Structured repository-level metadata stored in `artifacts-v2.json`.
-///
-/// Similar to [`KnownArtifactTags`], this struct must serialize to and
-/// deserialize from a mapping of string keys to string values. Additionally, it
-/// is a requirement that all fields are optional; it must be possible to
-/// deserialize this struct from older metadata, and the oldest metadata
-/// is no metadata at all.
-///
-/// As such, a couple of recommendations for adding new fields:
-/// 1. Wrap all fields in [`Option`] and mark with
-///    `#[serde(skip_serializing_if = "Option::is_none")]`.
-/// 2. Mark nested structs with `#[serde(flatten)]`.
-///
-/// [`KnownArtifactTags`]: crate::KnownArtifactTags
+//
+// NOTE: Similar to KnownArtifactTags, this struct must serialize to
+// and deserialize from a mapping of string keys to string values. The
+// `metadata_roundtrip` test covers this (crate::map::to_map panics when debug
+// assertions are enabled if this does not hold).
+//
+// Additionally, it is a requirement that all fields are optional; it must
+// be possible to deserialize this struct from older metadata, and the oldest
+// metadata is no metadata at all.
+//
+// As such, a couple of recommendations for adding new fields:
+// 1. Wrap all fields in [`Option`] and mark with
+//    `#[serde(skip_serializing_if = "Option::is_none")]`.
+// 2. Mark nested structs with `#[serde(flatten)]`.
 #[derive(Debug, Default, Clone, PartialEq, Eq, Deserialize, Serialize)]
 #[cfg_attr(any(test, feature = "proptest"), derive(test_strategy::Arbitrary))]
 pub struct Metadata {

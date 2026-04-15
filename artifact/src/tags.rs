@@ -13,6 +13,11 @@ use crate::RotSign;
 use crate::installinator::InstallinatorArtifactKind;
 
 /// Sets of artifact tags known to the control plane.
+//
+// NOTE: This struct must serialize and deserialize from a mapping of
+// string keys to string values. The `tags_roundtrip` test covers this
+// (crate::map::to_map panics when debug assertions are enabled if this does
+// not hold).
 #[derive(
     Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Deserialize, Serialize,
 )]
@@ -47,20 +52,30 @@ pub enum KnownArtifactTags {
 }
 
 impl KnownArtifactTags {
+    /// Returns an adapter for displaying the tags as a human-readable string.
     pub fn display(&self) -> DisplayTags<'static> {
         self.to_tags().into()
     }
 
+    /// Resolves known tags from a tag mapping.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the `kind` tag is missing, not a known kind, or
+    /// required tags for that kind are not present.
     pub fn from_tags(
         tags: BTreeMap<String, String>,
     ) -> Result<Self, serde_json::Error> {
         crate::map::from_map(tags)
     }
 
+    /// Converts these known tags to a tag mapping.
     pub fn to_tags(&self) -> BTreeMap<String, String> {
         crate::map::to_map(self)
     }
 
+    /// Converts these tags into an [`InstallinatorArtifactKind`] if this
+    /// artifact kind should be included in the Installinator document.
     pub fn to_installinator(&self) -> Option<InstallinatorArtifactKind> {
         match self {
             KnownArtifactTags::MeasurementCorpus => {
@@ -89,12 +104,15 @@ macro_rules! display_serialize {
     };
 }
 
+/// The inner value of [`KnownArtifactTags::OsPhase1`].
 #[derive(
     Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Deserialize, Serialize,
 )]
 #[cfg_attr(any(test, feature = "proptest"), derive(test_strategy::Arbitrary))]
 pub struct OsPhase1Tags {
+    /// OS board artifact tag (gimlet or cosmo).
     pub os_board: OsBoard,
+    /// OS variant artifact tag (host or recovery).
     pub os_variant: OsVariant,
 }
 
@@ -104,11 +122,13 @@ impl From<OsPhase1Tags> for KnownArtifactTags {
     }
 }
 
+/// The inner value of [`KnownArtifactTags::OsPhase2`].
 #[derive(
     Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Deserialize, Serialize,
 )]
 #[cfg_attr(any(test, feature = "proptest"), derive(test_strategy::Arbitrary))]
 pub struct OsPhase2Tags {
+    /// OS variant artifact tag (host or recovery).
     pub os_variant: OsVariant,
 }
 
@@ -134,7 +154,10 @@ impl From<OsPhase2Tags> for KnownArtifactTags {
 #[cfg_attr(any(test, feature = "proptest"), derive(test_strategy::Arbitrary))]
 #[serde(rename_all = "snake_case")]
 pub enum OsVariant {
+    /// The host OS.
     Host,
+    /// The recovery OS (sometimes called the trampoline OS), which contains
+    /// Installinator and is used to install the host OS.
     Recovery,
 }
 display_serialize!(OsVariant);
@@ -155,7 +178,9 @@ display_serialize!(OsVariant);
 #[cfg_attr(any(test, feature = "proptest"), derive(test_strategy::Arbitrary))]
 #[serde(rename_all = "snake_case")]
 pub enum OsBoard {
+    /// First-generation SP3 compute board.
     Gimlet,
+    /// Second-generation SP5 compute board.
     Cosmo,
 }
 display_serialize!(OsBoard);
@@ -203,7 +228,9 @@ impl From<RotTags> for KnownArtifactTags {
 #[cfg_attr(any(test, feature = "proptest"), derive(test_strategy::Arbitrary))]
 #[serde(rename_all = "snake_case")]
 pub enum RotSlot {
+    /// Slot A.
     A,
+    /// Slot B.
     B,
 }
 display_serialize!(RotSlot);
@@ -238,7 +265,7 @@ impl From<RotBootloaderTags> for KnownArtifactTags {
 )]
 #[cfg_attr(any(test, feature = "proptest"), derive(test_strategy::Arbitrary))]
 pub struct SpTags {
-    /// The `BORD` field in the caboose (such as `oxide-rot-1`).
+    /// The `BORD` field in the caboose (such as `cosmo-b`).
     pub sp_board: String,
 }
 

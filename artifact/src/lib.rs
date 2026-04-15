@@ -5,9 +5,11 @@
 //! tufaceous-artifact defines the core types of tufaceous so that they can be
 //! used without the full tufaceous library.
 
+#![warn(missing_docs)]
+
 mod artifact;
 mod hubris;
-pub mod installinator;
+mod installinator;
 mod map;
 mod metadata;
 mod set;
@@ -17,6 +19,7 @@ mod version;
 
 pub use artifact::*;
 pub use hubris::ReadCabooseError;
+pub use installinator::*;
 pub use metadata::*;
 pub use set::ArtifactSet;
 pub use sign::*;

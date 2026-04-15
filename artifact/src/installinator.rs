@@ -2,7 +2,6 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use std::borrow::Cow;
 use std::collections::BTreeSet;
 
 use serde::Deserialize;
@@ -22,7 +21,9 @@ use crate::ArtifactVersion;
 /// version of Tufaceous that creates it.
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct InstallinatorDocument {
+    /// The system version of the repository this document is associated with.
     pub system_version: ArtifactVersion,
+    /// The list of Installinator artifacts.
     pub artifacts: BTreeSet<InstallinatorArtifact>,
 }
 
@@ -39,18 +40,18 @@ impl InstallinatorDocument {
     Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Deserialize, Serialize,
 )]
 pub struct InstallinatorArtifact {
+    /// The artifact kind.
     #[serde(flatten)]
     pub kind: InstallinatorArtifactKind,
+    /// The SHA256 hash of the artifact.
     pub hash: ArtifactHash,
     /// A file name without directory separators; not necessarily the target
     /// name.
+    // This alias is present for backwards compatibility with Tufaceous v1
+    // repositories uploaded to older versions of Wicket that are still using
+    // Tufaceous v1. This alias can be removed when the transition is complete.
+    #[serde(alias = "name")]
     pub file_name: String,
-}
-
-impl InstallinatorArtifact {
-    pub fn to_id(&self) -> InstallinatorArtifactId {
-        InstallinatorArtifactId { kind: self.kind.to_id(), hash: self.hash }
-    }
 }
 
 /// The artifact kind for an Installinator artifact.
@@ -64,57 +65,17 @@ pub enum InstallinatorArtifactKind {
     /// A measurement corpus.
     MeasurementCorpus,
     /// A control plane zone artifact.
-    Zone { zone_name: String },
-}
-
-impl InstallinatorArtifactKind {
-    pub fn to_id(&self) -> InstallinatorArtifactKindId {
-        InstallinatorArtifactKindId(match self {
-            InstallinatorArtifactKind::MeasurementCorpus => {
-                Cow::Borrowed("measurement_corpus")
-            }
-            InstallinatorArtifactKind::HostPhase2 => {
-                Cow::Borrowed("host_phase2")
-            }
-            InstallinatorArtifactKind::Zone { zone_name } => {
-                Cow::Owned(format!("zone-{zone_name}"))
-            }
-        })
-    }
-}
-
-/// Identifies an artifact that Installinator wants or has used.
-///
-/// Historically this was called `ArtifactHashId` and consists of two
-/// strings: `kind` and `hash`. It was developed before the present system
-/// of tags representing an artifact kind but remains in use for any
-/// Installinator-related interfaces (namely Wicket and mupdate overrides).
-///
-/// This schema is stored to disk and should not change.
-#[derive(
-    Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Deserialize, Serialize,
-)]
-#[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
-pub struct InstallinatorArtifactId {
-    pub kind: InstallinatorArtifactKindId,
-    pub hash: ArtifactHash,
-}
-
-/// Encodes [`InstallinatorArtifactKind`] as a string.
-///
-/// Used only in [`InstallinatorArtifactId`].
-#[derive(
-    Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Deserialize, Serialize,
-)]
-#[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
-#[serde(transparent)]
-pub struct InstallinatorArtifactKindId(Cow<'static, str>);
-
-impl InstallinatorArtifactKindId {
-    pub const INSTALLINATOR_DOCUMENT: Self =
-        Self(Cow::Borrowed("installinator_document"));
-
-    pub fn as_str(&self) -> &str {
-        &self.0
-    }
+    Zone {
+        /// The zone name, as self-identified in the tarball's `oxide.json`
+        /// file. This may differ from the file name.
+        zone_name: String,
+    },
+    /// A tarball of control plane zones. Used for backwards compatibility
+    /// only.
+    ///
+    /// This variant is present for backwards compatibility with Tufaceous
+    /// v1 repositories uploaded to older versions of Wicket that are still
+    /// using Tufaceous v1. This variant can be removed when the transition
+    /// is complete.
+    ControlPlane,
 }

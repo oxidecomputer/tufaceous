@@ -13,6 +13,8 @@ pub(crate) fn from_map<D: DeserializeOwned>(
     serde_json::from_value(map.into_iter().collect())
 }
 
+/// Internal function to convert a `Serialize` to a `BTreeMap<String, String>`.
+///
 /// This should always succeed, and callers must use proptests to ensure that
 /// it does.
 ///

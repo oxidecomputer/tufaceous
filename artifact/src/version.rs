@@ -183,19 +183,28 @@ static PROPTEST_REGEX: &str = {
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
 #[non_exhaustive]
 pub enum ArtifactVersionError {
+    /// The version string was empty.
     #[error("version is empty")]
     Empty,
+    /// The version string was too long.
     #[error(
         "version is too long ({len} bytes, max {})",
         ArtifactVersion::MAX_LEN
     )]
-    TooLong { len: usize },
+    TooLong {
+        /// Length of the version string that was too long.
+        len: usize,
+    },
     #[error(
         "version contains invalid byte `{}` (allowed: {})",
         b.escape_ascii(),
         ArtifactVersion::REGEX
     )]
-    InvalidByte { b: u8 },
+    /// The version string contained an invalid byte.
+    InvalidByte {
+        /// The first invalid byte.
+        b: u8,
+    },
 }
 
 impl ArtifactVersionError {
