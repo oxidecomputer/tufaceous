@@ -18,7 +18,8 @@ mod tags;
 mod version;
 
 pub use artifact::*;
-pub use hubris::ReadCabooseError;
+#[cfg(feature = "hubtools")]
+pub use hubris::*;
 pub use installinator::*;
 pub use metadata::*;
 pub use set::ArtifactSet;
