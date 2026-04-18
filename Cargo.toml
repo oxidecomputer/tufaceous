@@ -50,8 +50,7 @@ test-strategy = "0.4.0"
 thiserror = "2.0.12"
 tokio = "1.47.0"
 tokio-test = "0.4.5"
-# https://github.com/awslabs/tough/pull/917
-tough = { git = "https://github.com/iliana/tough.git", branch = "transport-is-sync" }
+tough = { git = "https://github.com/awslabs/tough.git", branch = "develop" }
 tufaceous.path = "lib"
 tufaceous-artifact.path = "artifact"
 tufaceous-brand-metadata.path = "brand-metadata"

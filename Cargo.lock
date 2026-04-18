@@ -1560,7 +1560,7 @@ dependencies = [
 [[package]]
 name = "olpc-cjson"
 version = "0.1.4"
-source = "git+https://github.com/iliana/tough.git?branch=transport-is-sync#47aff7d174914f46db6166dbade64124849f2468"
+source = "git+https://github.com/awslabs/tough.git?branch=develop#c9a9865dc2d64a65c9930ad5daf4930e556662c5"
 dependencies = [
  "serde",
  "serde_json",
@@ -2796,7 +2796,7 @@ dependencies = [
 [[package]]
 name = "tough"
 version = "0.21.0"
-source = "git+https://github.com/iliana/tough.git?branch=transport-is-sync#47aff7d174914f46db6166dbade64124849f2468"
+source = "git+https://github.com/awslabs/tough.git?branch=develop#c9a9865dc2d64a65c9930ad5daf4930e556662c5"
 dependencies = [
  "async-recursion",
  "async-trait",
