@@ -42,7 +42,7 @@ pub struct Artifact {
     /// record these tags as-is, even if `Artifact::known_tags` returns `None`.
     pub tags: BTreeMap<String, String>,
 
-    /// The SHA-256 checksum of the artifact.
+    /// The SHA256 checksum of the artifact.
     pub hash: ArtifactHash,
 
     /// The length of the artifact in bytes.
@@ -64,7 +64,7 @@ impl Artifact {
     }
 }
 
-/// The SHA-256 checksum of an artifact.
+/// The SHA256 checksum of an artifact.
 #[derive(
     Copy,
     Clone,

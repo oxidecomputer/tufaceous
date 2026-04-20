@@ -7,6 +7,7 @@ mod edit;
 mod list_targets;
 mod show_target;
 mod sign;
+mod verify;
 
 use std::sync::LazyLock;
 
@@ -33,12 +34,18 @@ static LOG: LazyLock<Logger> = LazyLock::new(|| {
 
 #[derive(Debug, Parser)]
 enum Command {
+    /// Build a new repository from a set of artifacts
     Build(build::Args),
+    /// Add artifacts to and remove targets from a repository
     Edit(edit::Args),
+    /// List the targets in a repository
     #[clap(alias = "ls")]
     ListTargets(list_targets::Args),
+    /// Write a target to stdout
     #[clap(aliases = ["cat", "show"])]
     ShowTarget(show_target::Args),
+    /// Verify the integrity of a repository and check for issues
+    Verify(verify::Args),
 }
 
 #[tokio::main]
@@ -49,5 +56,6 @@ async fn main() -> Result<()> {
         Command::Edit(args) => args.run().await,
         Command::ListTargets(args) => args.run().await,
         Command::ShowTarget(args) => args.run().await,
+        Command::Verify(args) => args.run().await,
     }
 }

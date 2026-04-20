@@ -2837,6 +2837,7 @@ dependencies = [
  "camino-tempfile",
  "chrono",
  "ciborium",
+ "daft",
  "flate2",
  "futures-util",
  "hex",

@@ -130,6 +130,15 @@ impl ArtifactSet {
     pub fn iter(&self) -> Iter<'_> {
         Iter { inner: self.known.values().flatten().chain(&self.unknown) }
     }
+
+    /// Returns an iterator over the known artifacts in the set.
+    pub fn known(
+        &self,
+    ) -> impl Iterator<
+        Item = (&KnownArtifactTags, impl ExactSizeIterator<Item = &Artifact>),
+    > {
+        self.known.iter().map(|(tags, artifacts)| (tags, artifacts.iter()))
+    }
 }
 
 impl Extend<Artifact> for ArtifactSet {

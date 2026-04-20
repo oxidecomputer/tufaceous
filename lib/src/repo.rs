@@ -197,6 +197,20 @@ impl Repository {
         self.v1_unpacked.is_some()
     }
 
+    pub(crate) fn contains_target(&self, target: &str) -> bool {
+        if let Ok(target_name) = target.parse()
+            && self.targets().contains_key(&target_name)
+        {
+            true
+        } else if let Some(unpacked) = &self.v1_unpacked
+            && unpacked.entries.contains_key(target)
+        {
+            true
+        } else {
+            false
+        }
+    }
+
     pub async fn read_target(
         &self,
         target: &str,

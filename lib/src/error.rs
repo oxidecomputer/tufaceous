@@ -350,7 +350,7 @@ impl Display for SpacePath<'_> {
     }
 }
 
-struct DebugByteString<'a>(&'a [u8]);
+pub(crate) struct DebugByteString<'a>(pub(crate) &'a [u8]);
 
 impl Debug for DebugByteString<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {

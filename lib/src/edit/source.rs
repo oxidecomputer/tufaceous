@@ -277,9 +277,8 @@ impl FileSource {
     }
 
     pub(crate) fn stream(&self) -> impl Stream<Item = Result<Bytes, Error>> {
-        let inner = self.inner.clone();
         stream::try_unfold(
-            (inner, BytesMut::new(), 0),
+            (self.inner.clone(), BytesMut::new(), 0),
             async |(inner, mut buf, mut offset)| {
                 tokio::task::spawn_blocking(move || {
                     if buf.capacity() == 0 {

@@ -30,6 +30,7 @@ use serde::Deserialize;
 use sha2::Digest;
 use sha2::Sha256;
 use slog::Logger;
+use slog::info;
 use slog::warn;
 use tokio::sync::mpsc;
 use tufaceous_artifact::Artifact;
@@ -50,6 +51,7 @@ use tufaceous_artifact::ZoneTags;
 use crate::COSMO_PHASE_1_PATH;
 use crate::GIMLET_PHASE_1_PATH;
 use crate::PHASE_2_PATH;
+use crate::error::DebugByteString;
 use crate::error::Error;
 use crate::error::ErrorKind;
 use crate::error::try_path;
@@ -100,29 +102,66 @@ pub(crate) async fn from_loaded(
             | V1KnownArtifactKind::SwitchSp => {
                 let image = read_target_vec(repo, &target).await?;
                 let Some(image) = image else { continue };
-                caboose_tags(
-                    image,
-                    &target,
-                    KnownArtifactTags::from_sp_caboose,
-                )?
+                let mut is_lab_image = false;
+                let tags = caboose_tags(image, &target, |caboose| {
+                    if let Ok(board) = caboose.board()
+                        && let Ok(name) = caboose.name()
+                        && board != name
+                    {
+                        // This is a lab image. These are stored in the TUF repo
+                        // for manufacturing but are not used in the control
+                        // plane, as they can never be used in an actual rack.
+                        info!(
+                            log,
+                            "skipping lab SP image";
+                            "board" => ?DebugByteString(board),
+                            "name" => ?DebugByteString(name),
+                        );
+                        is_lab_image = true;
+                    }
+                    KnownArtifactTags::from_sp_caboose(caboose)
+                })?;
+                if is_lab_image {
+                    continue;
+                }
+                tags
             }
             V1KnownArtifactKind::GimletRotBootloader
             | V1KnownArtifactKind::PscRotBootloader
             | V1KnownArtifactKind::SwitchRotBootloader => {
                 let image = read_target_vec(repo, &target).await?;
                 let Some(image) = image else { continue };
-                caboose_tags(
+                let tags = caboose_tags(
                     image,
                     &target,
                     KnownArtifactTags::from_rot_bootloader_caboose,
-                )?
+                )?;
+                if artifacts.get_all(&tags).iter().any(|artifact| {
+                    if let Some(existing) =
+                        sha256_length(repo, log, &artifact.target_name)
+                        && (hash, length) == existing
+                    {
+                        info!(
+                            log,
+                            "skipping duplicate ROT bootloader image";
+                            "existing" => &artifact.target_name,
+                            "skipped" => &target,
+                        );
+                        true
+                    } else {
+                        false
+                    }
+                }) {
+                    continue;
+                }
+                tags
             }
             V1KnownArtifactKind::GimletRot
             | V1KnownArtifactKind::PscRot
             | V1KnownArtifactKind::SwitchRot => {
                 CompositeArtifact::unpack(repo, target)
                     .await?
-                    .read_rot(&mut artifacts, &mut unpacked, version)
+                    .read_rot(log, &mut artifacts, &mut unpacked, version)
                     .await?;
                 continue;
             }
@@ -364,6 +403,7 @@ impl CompositeArtifact {
 
     async fn read_rot(
         mut self,
+        log: &Logger,
         artifacts: &mut ArtifactSet,
         unpacked: &mut Unpacked,
         version: ArtifactVersion,
@@ -390,6 +430,25 @@ impl CompositeArtifact {
             let tags = caboose_tags(image, &target_name, |caboose| {
                 KnownArtifactTags::from_rot_caboose(caboose, slot)
             })?;
+            if artifacts.get_all(&tags).iter().any(|artifact| {
+                if let Some(existing) =
+                    unpacked.entries.get(&artifact.target_name)
+                    && hash == existing.hash
+                    && length == existing.length
+                {
+                    info!(
+                        log,
+                        "skipping duplicate ROT image";
+                        "existing" => &artifact.target_name,
+                        "skipped" => &target_name,
+                    );
+                    true
+                } else {
+                    false
+                }
+            }) {
+                continue;
+            }
             artifacts.insert(Artifact {
                 target_name: target_name.clone(),
                 version: version.clone(),
