@@ -2,6 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+use std::collections::BTreeMap;
 use std::io::Read;
 use std::pin::Pin;
 use std::task::Context;
@@ -12,12 +13,38 @@ use camino::Utf8Path;
 use camino::Utf8PathBuf;
 use flate2::read::GzDecoder;
 use futures_util::Stream;
+use tufaceous_artifact::Artifact;
+use tufaceous_artifact::ArtifactHash;
+use tufaceous_artifact::InstallinatorArtifact;
+use tufaceous_artifact::KnownArtifactTags;
 use tufaceous_brand_metadata::LayerInfo;
 use tufaceous_brand_metadata::Metadata;
 
 use crate::error::Error;
 use crate::error::ErrorKind;
 use crate::error::try_path;
+
+pub(crate) trait ArtifactExt {
+    fn to_installinator(&self) -> Option<InstallinatorArtifact>;
+}
+
+impl ArtifactExt for Artifact {
+    fn to_installinator(&self) -> Option<InstallinatorArtifact> {
+        installinator_artifact(self.tags.clone(), self.hash, &self.target_name)
+    }
+}
+
+pub(crate) fn installinator_artifact(
+    tags: BTreeMap<String, String>,
+    hash: ArtifactHash,
+    target_name: &str,
+) -> Option<InstallinatorArtifact> {
+    Some(InstallinatorArtifact {
+        kind: KnownArtifactTags::from_tags(tags).ok()?.to_installinator()?,
+        hash,
+        file_name: Utf8Path::new(target_name).file_name()?.to_string(),
+    })
+}
 
 pub(crate) async fn read_zone_layer_info<R: Read + Send + 'static>(
     reader: R,

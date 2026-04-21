@@ -2,6 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+use std::error::Error;
 use std::fmt::Display;
 
 use anyhow::Result;
@@ -39,7 +40,7 @@ impl Args {
 
         repo.verify_targets(self.threads).await?;
 
-        let problems = repo.check_problems();
+        let problems = repo.check_problems().await;
         ensure!(
             problems.is_empty(),
             "found compatibility problems:\n{}",
@@ -58,6 +59,11 @@ impl Display for WriteProblems<'_> {
         let mut nl = "";
         for problem in self.0 {
             write!(f, "{nl}- {problem}")?;
+            let mut source = problem.source();
+            while let Some(s) = source {
+                write!(f, ": {s}")?;
+                source = s.source();
+            }
             nl = "\n";
         }
         Ok(())

@@ -15,7 +15,6 @@ use tokio::task::JoinSet;
 use tufaceous_artifact::ArtifactHash;
 use tufaceous_artifact::ArtifactVersion;
 use tufaceous_artifact::ArtifactVersionError;
-use tufaceous_artifact::InstallinatorArtifact;
 use tufaceous_artifact::InstallinatorDocument;
 use tufaceous_artifact::KnownArtifactTags;
 use tufaceous_artifact::Metadata;
@@ -493,17 +492,14 @@ pub(crate) fn generate_installinator_document(
     let mut document = InstallinatorDocument::empty(version.clone());
     for (artifact, hash) in artifacts {
         let artifact = artifact.as_ref();
-        if let Some(tags) = artifact.known_tags()
-            && let Some(kind) = tags.to_installinator()
-            && let Some(file_name) =
-                Utf8Path::new(&artifact.target_name).file_name()
-            && let Ok(hash) = hash.as_ref().try_into().map(ArtifactHash)
-        {
-            document.artifacts.insert(InstallinatorArtifact {
-                file_name: file_name.to_owned(),
-                kind,
+        if let Ok(hash) = hash.as_ref().try_into().map(ArtifactHash)
+            && let Some(artifact) = crate::util::installinator_artifact(
+                artifact.tags.clone(),
                 hash,
-            });
+                &artifact.target_name,
+            )
+        {
+            document.artifacts.insert(artifact);
         }
     }
     let source = BytesSource::json(&document)

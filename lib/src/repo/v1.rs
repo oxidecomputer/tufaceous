@@ -13,7 +13,6 @@ use bytes::Buf;
 use bytes::Bytes;
 use bytes::BytesMut;
 use camino::FromPathBufError;
-use camino::Utf8Path;
 use camino::Utf8PathBuf;
 use flate2::bufread::GzDecoder;
 use futures_util::Stream;
@@ -37,7 +36,6 @@ use tufaceous_artifact::Artifact;
 use tufaceous_artifact::ArtifactHash;
 use tufaceous_artifact::ArtifactSet;
 use tufaceous_artifact::ArtifactVersion;
-use tufaceous_artifact::InstallinatorArtifact;
 use tufaceous_artifact::InstallinatorDocument;
 use tufaceous_artifact::KnownArtifactTags;
 use tufaceous_artifact::OsBoard;
@@ -59,6 +57,7 @@ use crate::repo::read_target;
 use crate::repo::read_target_json;
 use crate::repo::read_target_vec;
 use crate::repo::sha256_length;
+use crate::util::ArtifactExt;
 
 #[derive(Debug, Clone)]
 pub(crate) struct Unpacked {
@@ -585,19 +584,8 @@ async fn generate_installinator_document(
 ) -> Result<(), Error> {
     let target_name = format!("{original_target}/v2.json");
     let mut document = InstallinatorDocument::empty(version.clone());
-    for artifact in artifacts.iter() {
-        if let Some(tags) = artifact.known_tags()
-            && let Some(kind) = tags.to_installinator()
-            && let Some(file_name) =
-                Utf8Path::new(&artifact.target_name).file_name()
-        {
-            document.artifacts.insert(InstallinatorArtifact {
-                file_name: file_name.to_owned(),
-                kind,
-                hash: artifact.hash,
-            });
-        }
-    }
+    document.artifacts =
+        artifacts.iter().filter_map(Artifact::to_installinator).collect();
 
     let mut json = serde_json::to_string_pretty(&document)
         .map_err(ErrorKind::SerializeInstallinator)?;

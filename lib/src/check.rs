@@ -5,7 +5,10 @@
 use std::collections::BTreeMap;
 
 use daft::Diffable;
+use futures_util::TryStreamExt;
+use tufaceous_artifact::ArtifactVersion;
 use tufaceous_artifact::DisplayTags;
+use tufaceous_artifact::InstallinatorDocument;
 use tufaceous_artifact::KnownArtifactTags;
 use tufaceous_artifact::OsBoard;
 use tufaceous_artifact::OsPhase1Tags;
@@ -21,7 +24,7 @@ impl Repository {
     /// This must *not* be used to determine whether to accept a repository by
     /// the control plane; it assumes that the current version of Tufaceous is
     /// the same one that was used to generate the repository.
-    pub fn check_problems(&self) -> Vec<CheckProblem> {
+    pub async fn check_problems(&self) -> Vec<CheckProblem> {
         let mut problems = Vec::new();
 
         for artifact in self.artifacts() {
@@ -105,6 +108,24 @@ impl Repository {
             }
         }
 
+        if let Ok(artifact) =
+            self.artifacts().get(&KnownArtifactTags::InstallinatorDocument)
+            && let Ok(stream) = self.read_target(&artifact.target_name).await
+            && let Ok(bytes) = stream.map_ok(Vec::from).try_concat().await
+            && let Ok(doc) = serde_json::from_slice::<InstallinatorDocument>(
+                &bytes,
+            )
+            .map_err(|source| {
+                problems.push(CheckProblem::DeserializeInstallinator(source));
+            })
+            && doc.system_version.as_str() != self.system_version().to_string()
+        {
+            problems.push(CheckProblem::InstallinatorVersion {
+                doc_version: doc.system_version.clone(),
+                system_version: self.system_version().clone(),
+            });
+        }
+
         problems
     }
 }
@@ -113,6 +134,20 @@ impl Repository {
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
 pub enum CheckProblem {
+    /// The Installinator document could not be parsed.
+    #[error("failed to deserialize Installinator document")]
+    DeserializeInstallinator(#[source] serde_json::Error),
+
+    /// The Installinator document has the wrong system version.
+    #[error(
+        "Installinator document has version {doc_version} \
+        but the system version is {system_version}"
+    )]
+    InstallinatorVersion {
+        doc_version: ArtifactVersion,
+        system_version: semver::Version,
+    },
+
     /// An artifact matching these tags was not found.
     #[error("no artifact matching {}", .0.display())]
     MissingArtifact(KnownArtifactTags),
