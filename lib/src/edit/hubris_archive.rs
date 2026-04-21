@@ -118,8 +118,8 @@ impl Input<TargetSource<'static>> {
             return Ok(ControlFlow::Continue(input));
         };
         // HACK: We are reading the `image-name` file in the archive, which
-        // appears to be "a" or "b" if it's an ROT image, "default" if it's
-        // an SP image, and nonexistent if it's an ROT bootloader image. This
+        // appears to be "a" or "b" if it's an RoT image, "default" if it's
+        // an SP image, and nonexistent if it's an RoT bootloader image. This
         // seems fragile. Ideally this can be in the caboose someday (see
         // sprot-release#74).
         match archive.image_name().as_deref() {

@@ -89,6 +89,11 @@ impl<'a> RepositoryEditor<'a> {
         Ok(self.insert_input(input))
     }
 
+    /// Add a fake measurement corpus to the repository.
+    ///
+    /// `hashes` specifies the number of SHA256 hashes to list in the CoRIM
+    /// document. This can be used to create different documents at the same
+    /// version.
     pub fn fake_measurement_corpus(
         self,
         hashes: usize,
@@ -118,6 +123,7 @@ impl<'a> RepositoryEditor<'a> {
         Ok(self.insert_input(input))
     }
 
+    /// Add a fake OS image to the repository.
     pub fn fake_os_image(self, variant: OsVariant) -> Result<Self, Error> {
         let input = Input::fake_os_images(
             variant,
@@ -127,15 +133,22 @@ impl<'a> RepositoryEditor<'a> {
         Ok(self.insert_input(input))
     }
 
+    /// Add a Root of Trust Hubris archive to the repository.
+    ///
+    /// Tags are automatically determined based on the image caboose, except
+    /// for `slot` which must be specified.
     pub async fn rot_archive(
         self,
-        slot: RotSlot,
+        rot_slot: RotSlot,
         path: Utf8PathBuf,
     ) -> Result<Self, Error> {
         let source = FileSource::open(path).await?;
-        Ok(self.insert_input(Input::rot_archive(source, None, slot).await?))
+        Ok(self.insert_input(Input::rot_archive(source, None, rot_slot).await?))
     }
 
+    /// Add a Root of Trust Bootloader Hubris archive to the repository.
+    ///
+    /// Tags are automatically determined based on the image caboose.
     pub async fn rot_bootloader_archive(
         self,
         path: Utf8PathBuf,
@@ -145,11 +158,17 @@ impl<'a> RepositoryEditor<'a> {
             .insert_input(Input::rot_bootloader_archive(source, None).await?))
     }
 
+    /// Add a Service Processor Hubris archive to the repository.
+    ///
+    /// Tags are automatically determined based on the image caboose.
     pub async fn sp_archive(self, path: Utf8PathBuf) -> Result<Self, Error> {
         let source = FileSource::open(path).await?;
         Ok(self.insert_input(Input::sp_archive(source, None).await?))
     }
 
+    /// Add a fake Root of Trust Hubris archive to the repository.
+    ///
+    /// This will generate a fake Hubris archive with the appropriate tags.
     pub fn fake_rot_archive(self, tags: RotTags) -> Result<Self, Error> {
         let input = Input::fake_rot_archive(
             tags,
@@ -159,6 +178,9 @@ impl<'a> RepositoryEditor<'a> {
         Ok(self.insert_input(input))
     }
 
+    /// Add a fake Root of Trust Bootloader Hubris archive to the repository.
+    ///
+    /// This will generate a fake Hubris archive with the appropriate tags.
     pub fn fake_rot_bootloader_archive(
         self,
         tags: RotBootloaderTags,
@@ -171,16 +193,27 @@ impl<'a> RepositoryEditor<'a> {
         Ok(self.insert_input(input))
     }
 
+    /// Add a fake Service Processor Hubris archive to the repository.
+    ///
+    /// This will generate a fake Hubris archive with the appropriate tags.
     pub fn fake_sp_archive(self, tags: SpTags) -> Result<Self, Error> {
         let input =
             Input::fake_sp_archive(tags, self.artifact_version.clone()?, None)?;
         Ok(self.insert_input(input))
     }
 
+    /// Add a zone image to the repository.
+    ///
+    /// The `zone_name` tag is automatically determined based on the layer
+    /// metadata (the `oxide.json` file that starts zone tarballs).
     pub async fn zone_image(self, path: Utf8PathBuf) -> Result<Self, Error> {
         Ok(self.insert_input(Input::zone_image(path).await?))
     }
 
+    /// Add a fake zone image to the repository.
+    ///
+    /// This will generate a tarball containing a matching `oxide.json` layer
+    /// metadata file.
     pub fn fake_zone_image(
         self,
         zone_name: String,
@@ -245,6 +278,7 @@ impl<'a> RepositoryEditor<'a> {
         Ok(self)
     }
 
+    /// Remove a target with the given target name.
     pub fn remove_target(mut self, target_name: &str) -> Self {
         self.targets.remove(target_name);
         self.artifacts.remove(target_name);
@@ -299,15 +333,22 @@ impl<'a> RepositoryEditor<'a> {
         Ok(editor)
     }
 
+    /// Set the repository-level metadata.
     pub fn metadata(mut self, metadata: &Metadata) -> Self {
         self.metadata = metadata.to_map();
         self
     }
 
+    /// Create a `RepositoryEditor` from a loaded repository.
+    ///
+    /// This creates an editor with references to all of the artifacts and
+    /// targets in the original repository.
     pub fn from_repo(repo: &'a Repository) -> Result<Self, Error> {
         Self::new(repo.system_version().clone()).import_repo(repo)
     }
 
+    /// Import all of the artifacts and targets from a repository into this
+    /// editor.
     pub fn import_repo(mut self, repo: &'a Repository) -> Result<Self, Error> {
         if repo.is_v1() {
             return Err(ErrorKind::ImportV1Repo.into());
@@ -341,6 +382,7 @@ impl<'a> RepositoryEditor<'a> {
         Ok(self)
     }
 
+    /// Finalize the artifacts and targets, returning an [`UnsignedRepository`].
     pub async fn finish(self) -> Result<UnsignedRepository<'a>, Error> {
         // Un-nest `self.artifacts`, returning an error if we have multiple
         // artifact definitions for a single target name.

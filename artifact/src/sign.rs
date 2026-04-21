@@ -55,7 +55,7 @@ static CA_MAP: LazyLock<HashMap<&str, &str>> =
 ///
 /// Used in [`RotTags`] and [`RotBootloaderTags`].
 ///
-/// This is usually a lowercase hexadecimal string of the ROT Key Table Hash
+/// This is usually a lowercase hexadecimal string of the RoT Key Table Hash
 /// (RKTH) that is used to identify the CA, but this is not enforced by the
 /// library.
 ///

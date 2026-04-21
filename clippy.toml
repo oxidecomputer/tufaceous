@@ -1,1 +1,1 @@
-doc-valid-idents = ["OpenAPI", ".."]
+doc-valid-idents = ["CoRIM", "OpenAPI", "RoT", ".."]

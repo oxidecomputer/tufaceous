@@ -142,7 +142,7 @@ pub(crate) async fn from_loaded(
                     {
                         info!(
                             log,
-                            "skipping duplicate ROT bootloader image";
+                            "skipping duplicate RoT bootloader image";
                             "existing" => &artifact.target_name,
                             "skipped" => &target,
                         );
@@ -437,7 +437,7 @@ impl CompositeArtifact {
                 {
                     info!(
                         log,
-                        "skipping duplicate ROT image";
+                        "skipping duplicate RoT image";
                         "existing" => &artifact.target_name,
                         "skipped" => &target_name,
                     );

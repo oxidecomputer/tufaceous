@@ -28,7 +28,7 @@ pub enum KnownArtifactTags {
     /// writing during mupdate and sled recovery.
     InstallinatorDocument,
 
-    /// CORIM manifest for remote attestation.
+    /// CoRIM manifest for remote attestation.
     MeasurementCorpus,
 
     /// Phase 1 OS image, written to flash. Differs based on the target board.
@@ -201,7 +201,7 @@ pub struct RotTags {
     /// not fully made it through manufacturing yet.
     #[serde(skip_serializing_if = "RotSign::is_none")]
     pub rot_sign: RotSign,
-    /// ROT images are compiled for two different locations in flash; this
+    /// RoT images are compiled for two different locations in flash; this
     /// identifies which slot this image belongs to.
     pub rot_slot: RotSlot,
 }
@@ -212,7 +212,7 @@ impl From<RotTags> for KnownArtifactTags {
     }
 }
 
-/// ROT slot artifact tag (A or B).
+/// RoT slot artifact tag (A or B).
 #[derive(
     Debug,
     Clone,
