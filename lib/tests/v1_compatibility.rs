@@ -41,7 +41,7 @@ async fn v1_fake() -> Result<(), Error> {
         KnownArtifactTags::MeasurementCorpus,
     ];
     for os_variant in [OsVariant::Host, OsVariant::Recovery] {
-        for os_board in [OsBoard::Cosmo, OsBoard::Gimlet] {
+        for os_board in [OsBoard::COSMO, OsBoard::GIMLET] {
             expected.push(OsPhase1Tags { os_board, os_variant }.into());
         }
         expected.push(OsPhase2Tags { os_variant }.into());

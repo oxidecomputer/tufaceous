@@ -474,14 +474,14 @@ impl CompositeArtifact {
                 COSMO_PHASE_1_PATH,
                 KnownArtifactTags::OsPhase1(OsPhase1Tags {
                     os_variant,
-                    os_board: OsBoard::Cosmo,
+                    os_board: OsBoard::COSMO,
                 }),
             ),
             (
                 GIMLET_PHASE_1_PATH,
                 KnownArtifactTags::OsPhase1(OsPhase1Tags {
                     os_variant,
-                    os_board: OsBoard::Gimlet,
+                    os_board: OsBoard::GIMLET,
                 }),
             ),
             (

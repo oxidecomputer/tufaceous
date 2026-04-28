@@ -93,7 +93,7 @@ impl Repository {
         // to work.
         let mut expected = vec![KnownArtifactTags::InstallinatorDocument];
         for os_variant in [OsVariant::Host, OsVariant::Recovery] {
-            for os_board in [OsBoard::Cosmo, OsBoard::Gimlet] {
+            for os_board in [OsBoard::COSMO, OsBoard::GIMLET] {
                 expected.push(KnownArtifactTags::OsPhase1(OsPhase1Tags {
                     os_board,
                     os_variant,

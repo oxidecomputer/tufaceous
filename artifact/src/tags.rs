@@ -162,28 +162,26 @@ pub enum OsVariant {
 }
 display_serialize!(OsVariant);
 
-/// OS board artifact tag (gimlet or cosmo).
+/// OS board artifact tag (gimlet, cosmo, etc).
 #[derive(
-    Debug,
-    Clone,
-    Copy,
-    PartialEq,
-    Eq,
-    PartialOrd,
-    Ord,
-    Hash,
-    Deserialize,
-    Serialize,
+    Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Deserialize, Serialize,
 )]
 #[cfg_attr(any(test, feature = "proptest"), derive(test_strategy::Arbitrary))]
-#[serde(rename_all = "snake_case")]
-pub enum OsBoard {
-    /// First-generation SP3 compute board.
-    Gimlet,
-    /// Second-generation SP5 compute board.
-    Cosmo,
+#[serde(transparent)]
+pub struct OsBoard(pub Cow<'static, str>);
+
+impl OsBoard {
+    /// First-generation SP3 compute sled.
+    pub const GIMLET: Self = Self(Cow::Borrowed("gimlet"));
+    /// Second-generation SP5 compute sled.
+    pub const COSMO: Self = Self(Cow::Borrowed("cosmo"));
 }
-display_serialize!(OsBoard);
+
+impl Display for OsBoard {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        Display::fmt(&self.0, f)
+    }
+}
 
 /// The inner value of [`KnownArtifactTags::Rot`].
 #[derive(
