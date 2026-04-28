@@ -1560,7 +1560,8 @@ dependencies = [
 [[package]]
 name = "olpc-cjson"
 version = "0.1.4"
-source = "git+https://github.com/awslabs/tough.git?branch=develop#c9a9865dc2d64a65c9930ad5daf4930e556662c5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "696183c9b5fe81a7715d074fd632e8bd46f4ccc0231a3ed7fc580a80de5f7083"
 dependencies = [
  "serde",
  "serde_json",
@@ -2795,8 +2796,9 @@ dependencies = [
 
 [[package]]
 name = "tough"
-version = "0.21.0"
-source = "git+https://github.com/awslabs/tough.git?branch=develop#c9a9865dc2d64a65c9930ad5daf4930e556662c5"
+version = "0.22.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8031cff0872dd1c6312370515a6be8098f6ea5512f1bad725016046fc725f272"
 dependencies = [
  "async-recursion",
  "async-trait",
