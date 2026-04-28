@@ -14,7 +14,7 @@ use tufaceous_artifact::OsPhase1Tags;
 use tufaceous_artifact::OsPhase2Tags;
 use tufaceous_artifact::OsVariant;
 use tufaceous_artifact::RotBootloaderTags;
-use tufaceous_artifact::RotSign;
+use tufaceous_artifact::RotKeyTableHash;
 use tufaceous_artifact::RotSlot;
 use tufaceous_artifact::RotTags;
 use tufaceous_artifact::SpTags;
@@ -46,12 +46,12 @@ async fn v1_fake() -> Result<(), Error> {
         }
         expected.push(OsPhase2Tags { os_variant }.into());
     }
-    for rot_sign in ["sign-gimlet", "sign-psc", "sign-switch"] {
+    for rot_rkth in ["sign-gimlet", "sign-psc", "sign-switch"] {
         for rot_slot in [RotSlot::A, RotSlot::B] {
             expected.push(
                 RotTags {
                     rot_board: "SimRot".into(),
-                    rot_sign: RotSign(Some(rot_sign.into())),
+                    rot_rkth: RotKeyTableHash(Some(rot_rkth.into())),
                     rot_slot,
                 }
                 .into(),
@@ -60,7 +60,7 @@ async fn v1_fake() -> Result<(), Error> {
         expected.push(
             RotBootloaderTags {
                 rot_board: "SimRot".into(),
-                rot_sign: RotSign(Some(rot_sign.into())),
+                rot_rkth: RotKeyTableHash(Some(rot_rkth.into())),
             }
             .into(),
         );

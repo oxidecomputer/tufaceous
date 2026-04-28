@@ -12,8 +12,8 @@ mod hubris;
 mod installinator;
 mod map;
 mod metadata;
+mod rkth;
 mod set;
-mod sign;
 mod tags;
 mod version;
 
@@ -22,8 +22,8 @@ pub use artifact::*;
 pub use hubris::*;
 pub use installinator::*;
 pub use metadata::*;
+pub use rkth::*;
 pub use set::ArtifactSet;
-pub use sign::*;
 pub use tags::*;
 pub use version::*;
 

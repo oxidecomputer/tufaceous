@@ -10,7 +10,7 @@ use hubtools::HubrisArchiveBuilder;
 use tufaceous_artifact::ArtifactVersion;
 use tufaceous_artifact::ReadCabooseError;
 use tufaceous_artifact::RotBootloaderTags;
-use tufaceous_artifact::RotSign;
+use tufaceous_artifact::RotKeyTableHash;
 use tufaceous_artifact::RotSlot;
 use tufaceous_artifact::RotTags;
 use tufaceous_artifact::SpTags;
@@ -149,7 +149,7 @@ impl Input<BytesSource> {
     ) -> Result<Self, Error> {
         let data = CabooseData {
             board: &tags.rot_board,
-            sign: &tags.rot_sign,
+            sign: &tags.rot_rkth,
             commit: "this-is-a-fake-rot",
             version: interior_version.unwrap_or(&version),
         };
@@ -164,7 +164,7 @@ impl Input<BytesSource> {
     ) -> Result<Self, Error> {
         let data = CabooseData {
             board: &tags.rot_board,
-            sign: &tags.rot_sign,
+            sign: &tags.rot_rkth,
             commit: "this-is-a-fake-rot-bootloader",
             version: interior_version.unwrap_or(&version),
         };
@@ -179,7 +179,7 @@ impl Input<BytesSource> {
     ) -> Result<Self, Error> {
         let data = CabooseData {
             board: &tags.sp_board,
-            sign: &RotSign(None),
+            sign: &RotKeyTableHash(None),
             commit: "this-is-a-fake-sp",
             version: interior_version.unwrap_or(&version),
         };
@@ -190,7 +190,7 @@ impl Input<BytesSource> {
 
 struct CabooseData<'a> {
     board: &'a str,
-    sign: &'a RotSign,
+    sign: &'a RotKeyTableHash,
     commit: &'static str,
     version: &'a ArtifactVersion,
 }

@@ -8,8 +8,8 @@ use hubtools::Caboose;
 use hubtools::CabooseError;
 
 use crate::KnownArtifactTags;
+use crate::RotKeyTableHash;
 use crate::RotBootloaderTags;
-use crate::RotSign;
 use crate::RotSlot;
 use crate::RotTags;
 use crate::SpTags;
@@ -29,7 +29,7 @@ impl RotTags {
     ) -> Result<Self, ReadCabooseError> {
         Ok(Self {
             rot_board: read_board(caboose)?,
-            rot_sign: RotSign(read_sign(caboose)?),
+            rot_rkth: RotKeyTableHash(read_sign(caboose)?),
             rot_slot: slot,
         })
     }
@@ -46,7 +46,7 @@ impl RotBootloaderTags {
     pub fn from_caboose(caboose: &Caboose) -> Result<Self, ReadCabooseError> {
         Ok(Self {
             rot_board: read_board(caboose)?,
-            rot_sign: RotSign(read_sign(caboose)?),
+            rot_rkth: RotKeyTableHash(read_sign(caboose)?),
         })
     }
 }

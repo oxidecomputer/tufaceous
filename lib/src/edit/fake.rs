@@ -5,8 +5,8 @@
 use tufaceous_artifact::ArtifactSet;
 use tufaceous_artifact::ArtifactVersion;
 use tufaceous_artifact::OsVariant;
+use tufaceous_artifact::RotKeyTableHash;
 use tufaceous_artifact::RotBootloaderTags;
-use tufaceous_artifact::RotSign;
 use tufaceous_artifact::RotSlot;
 use tufaceous_artifact::RotTags;
 use tufaceous_artifact::SpTags;
@@ -90,7 +90,7 @@ impl Input<BytesSource> {
             inputs.push(Self::fake_rot_archive(
                 RotTags {
                     rot_board: "SimRot".into(),
-                    rot_sign: RotSign(Some(FAKE_SIGN.into())),
+                    rot_rkth: RotKeyTableHash(Some(FAKE_SIGN.into())),
                     rot_slot: slot,
                 },
                 version.clone(),
@@ -100,7 +100,7 @@ impl Input<BytesSource> {
         inputs.push(Self::fake_rot_bootloader_archive(
             RotBootloaderTags {
                 rot_board: "SimRot".into(),
-                rot_sign: RotSign(Some(FAKE_SIGN.into())),
+                rot_rkth: RotKeyTableHash(Some(FAKE_SIGN.into())),
             },
             version.clone(),
             interior_version,

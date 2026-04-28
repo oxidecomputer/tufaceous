@@ -119,7 +119,7 @@ impl<Source> Input<Source> {
                 let target_name = format!(
                     "rot/{board}-{sign}-{version}-slot-{slot}.zip",
                     board = tags.rot_board,
-                    sign = tags.rot_sign,
+                    sign = tags.rot_rkth,
                     slot = tags.rot_slot
                 );
                 vec![Output::new(target_name, version, tags.into(), source)]
@@ -128,7 +128,7 @@ impl<Source> Input<Source> {
                 let target_name = format!(
                     "rot-bootloader/{board}-{sign}-{version}.zip",
                     board = tags.rot_board,
-                    sign = tags.rot_sign
+                    sign = tags.rot_rkth
                 );
                 vec![Output::new(target_name, version, tags.into(), source)]
             }

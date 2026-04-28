@@ -9,7 +9,7 @@ use std::fmt::Display;
 use serde::Deserialize;
 use serde::Serialize;
 
-use crate::RotSign;
+use crate::RotKeyTableHash;
 use crate::installinator::InstallinatorArtifactKind;
 
 /// Sets of artifact tags known to the control plane.
@@ -193,14 +193,13 @@ display_serialize!(OsBoard);
 pub struct RotTags {
     /// The `BORD` field in the caboose (such as `oxide-rot-1`).
     pub rot_board: String,
-    /// The `SIGN` field in the caboose. This is the Root Key Table Hash
-    /// (RKTH).
+    /// The RoT Key Table Hash (RKTH). This is the `SIGN` field in the caboose.
     ///
     /// For unsigned images this will not be present; this will generally
     /// never occur in release repos but can be useful on hardware that has
     /// not fully made it through manufacturing yet.
-    #[serde(skip_serializing_if = "RotSign::is_none")]
-    pub rot_sign: RotSign,
+    #[serde(skip_serializing_if = "RotKeyTableHash::is_none")]
+    pub rot_rkth: RotKeyTableHash,
     /// RoT images are compiled for two different locations in flash; this
     /// identifies which slot this image belongs to.
     pub rot_slot: RotSlot,
@@ -249,8 +248,8 @@ pub struct RotBootloaderTags {
     /// For unsigned images this will not be present; this will generally
     /// never occur in release repos but can be useful on hardware that has
     /// not fully made it through manufacturing yet.
-    #[serde(skip_serializing_if = "RotSign::is_none")]
-    pub rot_sign: RotSign,
+    #[serde(skip_serializing_if = "RotKeyTableHash::is_none")]
+    pub rot_rkth: RotKeyTableHash,
 }
 
 impl From<RotBootloaderTags> for KnownArtifactTags {
@@ -346,7 +345,7 @@ mod tests {
     use test_strategy::proptest;
 
     use crate::KnownArtifactTags;
-    use crate::RotSign;
+    use crate::RotKeyTableHash;
     use crate::RotSlot;
     use crate::RotTags;
 
@@ -357,27 +356,27 @@ mod tests {
     }
 
     #[test]
-    fn rot_sign() {
+    fn rot_rkth() {
         let mut tags = BTreeMap::from([
             ("kind".to_owned(), "rot".to_owned()),
             ("rot_board".to_owned(), "oxide-rot-1".to_owned()),
-            // rot_sign not included
+            // rot_rkth not included
             ("rot_slot".to_owned(), "a".to_owned()),
         ]);
         assert_eq!(
             KnownArtifactTags::from_tags(tags.clone()).unwrap(),
             KnownArtifactTags::Rot(RotTags {
                 rot_board: "oxide-rot-1".to_owned(),
-                rot_sign: RotSign(None),
+                rot_rkth: RotKeyTableHash(None),
                 rot_slot: RotSlot::A
             })
         );
-        tags.insert("rot_sign".to_owned(), "meow".to_owned());
+        tags.insert("rot_rkth".to_owned(), "meow".to_owned());
         assert_eq!(
             KnownArtifactTags::from_tags(tags).unwrap(),
             KnownArtifactTags::Rot(RotTags {
                 rot_board: "oxide-rot-1".to_owned(),
-                rot_sign: RotSign(Some("meow".to_owned())),
+                rot_rkth: RotKeyTableHash(Some("meow".to_owned())),
                 rot_slot: RotSlot::A
             })
         );

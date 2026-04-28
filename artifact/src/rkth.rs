@@ -51,13 +51,12 @@ const CA_LIST: [(&str, &str); 9] = [
 static CA_MAP: LazyLock<HashMap<&str, &str>> =
     LazyLock::new(|| HashMap::from(CA_LIST));
 
-/// Value of the `SIGN` field of a Hubris caboose.
+/// The RoT Key Table Hash, which identifies a CA that signed a Hubris image.
 ///
 /// Used in [`RotTags`] and [`RotBootloaderTags`].
 ///
-/// This is usually a lowercase hexadecimal string of the RoT Key Table Hash
-/// (RKTH) that is used to identify the CA, but this is not enforced by the
-/// library.
+/// This is usually a lowercase hexadecimal string, but this is not enforced by
+/// the library.
 ///
 /// [`RotTags`]: crate::RotTags
 /// [`RotBootloaderTags`]: crate::RotBootloaderTags
@@ -66,9 +65,9 @@ static CA_MAP: LazyLock<HashMap<&str, &str>> =
 )]
 #[cfg_attr(any(test, feature = "proptest"), derive(test_strategy::Arbitrary))]
 #[serde(transparent)]
-pub struct RotSign(pub Option<String>);
+pub struct RotKeyTableHash(pub Option<String>);
 
-impl RotSign {
+impl RotKeyTableHash {
     /// Returns a friendly name for the CA this RKTH represents, if one is
     /// known. Returns `None` otherwise.
     pub fn friendly_ca_name(&self) -> Option<&'static str> {
@@ -81,13 +80,13 @@ impl RotSign {
     }
 }
 
-impl Debug for RotSign {
+impl Debug for RotKeyTableHash {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         Debug::fmt(&self.0, f)
     }
 }
 
-impl Display for RotSign {
+impl Display for RotKeyTableHash {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self.0.as_deref() {
             Some(inner) => {
@@ -103,8 +102,8 @@ impl Display for RotSign {
 mod tests {
     use std::collections::HashSet;
 
-    use crate::sign::CA_LIST;
-    use crate::sign::CA_MAP;
+    use crate::rkth::CA_LIST;
+    use crate::rkth::CA_MAP;
 
     #[test]
     fn ensure_consistency() {
