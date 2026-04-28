@@ -420,7 +420,7 @@ impl CompositeArtifact {
                 let capacity = usize::try_from(length).unwrap_or_default();
                 let mut vec = Vec::with_capacity(capacity);
                 reader.read_to_end(&mut vec).map(|_| vec).map_err(|source| {
-                    ErrorKind::ReadFile { source, path: None }
+                    Error::from(ErrorKind::ReadFile { source, path: None })
                 })
             })
             .await??;

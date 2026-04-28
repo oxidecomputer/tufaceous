@@ -118,10 +118,7 @@ mod tests {
         let values = CA_MAP.values().collect::<HashSet<_>>();
         assert_eq!(values.len(), CA_LIST.len());
         // CA_LIST is ordered by friendly name
-        for window in CA_LIST.windows(2) {
-            let [(_, v1), (_, v2)] = window else {
-                panic!("slice::windows is broken")
-            };
+        for [(_, v1), (_, v2)] in CA_LIST.array_windows() {
             assert!(v1 < v2, "{v1} incorrectly placed before {v2} in CA_LIST");
         }
     }

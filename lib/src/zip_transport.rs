@@ -59,6 +59,7 @@ use std::fs::File;
 use std::io::Cursor;
 use std::io::Read;
 use std::sync::Arc;
+use std::sync::LazyLock;
 
 use bytes::Bytes;
 use bytes::BytesMut;
@@ -72,8 +73,7 @@ use rawzip::FileReader;
 use rawzip::ReaderAt;
 use rawzip::ZipArchive;
 use rawzip::ZipArchiveEntryWayfinder;
-use rawzip::path::RawPath;
-use rawzip::path::ZipFilePath;
+use rawzip::ZipFileHeaderRecord;
 use slog::Logger;
 use slog::warn;
 use tokio::sync::mpsc;
@@ -120,20 +120,6 @@ pub struct ZipTransport<T: ReaderAt + Debug + Send + Sync + 'static> {
 struct Inner<T: ReaderAt + Debug + Send + Sync + 'static> {
     archive: ZipArchive<T>,
     entries: HashMap<Url, Entry>,
-}
-
-#[derive(Debug, Clone, Copy)]
-enum Entry {
-    File(EntryData),
-    Dir,
-    Symlink,
-    Duplicate,
-}
-
-#[derive(Debug, Clone, Copy)]
-struct EntryData {
-    compression_method: CompressionMethod,
-    wayfinder: ZipArchiveEntryWayfinder,
 }
 
 // Manually implemented, as the derive macro adds an unnecessary `T: Clone`.
@@ -187,46 +173,33 @@ impl<T: ReaderAt + Debug + Send + Sync + 'static> ZipTransport<T> {
     ) -> Result<Self, Error> {
         let mut buffer =
             buffer.unwrap_or_else(|| vec![0; rawzip::RECOMMENDED_BUFFER_SIZE]);
-        let expected = archive.entries_hint();
-        let mut actual: u64 = 0;
-        let mut all_entries = Vec::new();
+
         let mut entries = HashMap::new();
+        // Keep a list of all central directory entries (regardless of whether
+        // the path is valid) to check for an unexpected number of entries, or
+        // overlapping file ranges.
+        let mut all_entries = Vec::new();
+
         let mut records = archive.entries(&mut buffer);
         while let Some(record) =
             try_archive_path!(records.next_entry(), ReadZip, archive_path)
         {
-            actual += 1;
-            all_entries.push((
-                record.wayfinder(),
-                record.file_path().as_bytes().to_vec(),
-            ));
-
-            let Some(url) = path_to_url(record.file_path(), log) else {
-                continue;
-            };
-            match entries.entry(url) {
-                std::collections::hash_map::Entry::Occupied(mut e) => {
-                    e.insert(Entry::Duplicate);
-                }
-                std::collections::hash_map::Entry::Vacant(e) => {
-                    if record.is_dir() {
-                        e.insert(Entry::Dir);
-                    } else if record.mode().is_symlink() {
-                        e.insert(Entry::Symlink);
-                    } else {
-                        let data = EntryData {
-                            compression_method: record.compression_method(),
-                            wayfinder: record.wayfinder(),
-                        };
-                        e.insert(Entry::File(data));
-                    }
-                }
+            all_entries.push(RawEntry::from(&record));
+            if let Some((url, entry)) = Entry::new(&record, log) {
+                entries
+                    .entry(url)
+                    .and_modify(|e| *e = Entry::Duplicate)
+                    .or_insert(entry);
             }
         }
 
-        if expected != actual {
+        // First check: the number of entries in the central directory matches
+        // the value in the EOCD record.
+        let actual =
+            u64::try_from(all_entries.len()).expect("usize fits in u64");
+        if archive.entries_hint() != actual {
             return Err(ErrorKind::ZipEntryCount {
-                expected,
+                expected: archive.entries_hint(),
                 actual,
                 archive_path,
             }
@@ -234,7 +207,7 @@ impl<T: ReaderAt + Debug + Send + Sync + 'static> ZipTransport<T> {
         }
 
         let mut ranges = Vec::new();
-        for (wayfinder, raw_path) in all_entries {
+        for RawEntry { raw_path, wayfinder } in all_entries {
             let entry = try_archive_path!(
                 archive.get_entry(wayfinder),
                 ReadZip,
@@ -245,6 +218,8 @@ impl<T: ReaderAt + Debug + Send + Sync + 'static> ZipTransport<T> {
                 ReadZip,
                 archive_path
             );
+            // Check that the path in the central directory matches the header
+            // that comes before the file data range.
             if raw_path != header.file_path().as_bytes() {
                 return Err(ErrorKind::ZipPathMismatch {
                     central: raw_path,
@@ -269,10 +244,9 @@ impl<T: ReaderAt + Debug + Send + Sync + 'static> ZipTransport<T> {
         }
         // Check that no file ranges overlap with each other.
         ranges.sort_by_key(|(range, _)| range.start);
-        for window in ranges.windows(2) {
-            let [(earlier, earlier_path), (later, later_path)] = window else {
-                panic!("slice::windows is broken")
-            };
+        for [(earlier, earlier_path), (later, later_path)] in
+            ranges.array_windows()
+        {
             if earlier.end > later.start {
                 return Err(ErrorKind::ZipOverlappingRanges {
                     earlier_path: earlier_path.clone(),
@@ -397,6 +371,83 @@ impl<T: ReaderAt + Debug + Send + Sync + 'static> Transport
     }
 }
 
+#[derive(Debug, Clone, Copy)]
+enum Entry {
+    File(EntryData),
+    Dir,
+    Symlink,
+    Duplicate,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct EntryData {
+    compression_method: CompressionMethod,
+    wayfinder: ZipArchiveEntryWayfinder,
+}
+
+impl Entry {
+    fn new(
+        record: &ZipFileHeaderRecord<'_>,
+        log: &Logger,
+    ) -> Option<(Url, Self)> {
+        static BASE_URL: LazyLock<Url> = LazyLock::new(|| {
+            Url::parse("zip:///").expect("`zip:///` is a valid URL")
+        });
+
+        let path = record.file_path();
+        let path = path
+            .try_normalize()
+            .inspect_err(|err| {
+                warn!(
+                    log,
+                    "ignoring invalid path in zip archive";
+                    "path" => path.as_bytes().escape_ascii().to_string(),
+                    "error" => err.to_string(),
+                );
+            })
+            .ok()?;
+        let url = BASE_URL
+            .join(path.as_str())
+            .inspect_err(|err| {
+                warn!(
+                    log,
+                    "ignoring invalid path in zip archive";
+                    "path" => path.as_str(),
+                    "error" => err.to_string(),
+                );
+            })
+            .ok()?;
+
+        let entry = if record.is_dir() {
+            Entry::Dir
+        } else if record.mode().is_symlink() {
+            Entry::Symlink
+        } else {
+            Entry::File(EntryData {
+                compression_method: record.compression_method(),
+                wayfinder: record.wayfinder(),
+            })
+        };
+
+        Some((url, entry))
+    }
+}
+
+#[derive(Debug)]
+struct RawEntry {
+    raw_path: Vec<u8>,
+    wayfinder: ZipArchiveEntryWayfinder,
+}
+
+impl<'a> From<&'a ZipFileHeaderRecord<'a>> for RawEntry {
+    fn from(record: &'a ZipFileHeaderRecord<'a>) -> Self {
+        Self {
+            raw_path: record.file_path().as_bytes().to_vec(),
+            wayfinder: record.wayfinder(),
+        }
+    }
+}
+
 /// Possible source errors of [`ZipTransport::fetch`].
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
@@ -438,31 +489,4 @@ impl ZipTransportError {
         };
         TransportError::new_with_cause(kind, url, self)
     }
-}
-
-fn path_to_url(path: ZipFilePath<RawPath<'_>>, log: &Logger) -> Option<Url> {
-    path.try_normalize()
-        .inspect_err(|err| {
-            warn!(
-                log,
-                "ignoring invalid path in zip archive";
-                "path" => path.as_bytes().escape_ascii().to_string(),
-                "error" => err.to_string(),
-            );
-        })
-        .ok()
-        .and_then(|path| {
-            Url::parse("zip:///")
-                .expect("`zip:///` is a valid URL")
-                .join(path.as_str())
-                .inspect_err(|err| {
-                    warn!(
-                        log,
-                        "ignoring invalid path in zip archive";
-                        "path" => path.as_str(),
-                        "error" => err.to_string(),
-                    );
-                })
-                .ok()
-        })
 }
