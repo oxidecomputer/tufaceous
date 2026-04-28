@@ -68,6 +68,11 @@ static CA_MAP: LazyLock<HashMap<&str, &str>> =
 pub struct RotKeyTableHash(pub Option<String>);
 
 impl RotKeyTableHash {
+    /// Create a `RotKeyTableHash` from an array of 32 bytes.
+    pub fn from_bytes(hash: [u8; 32]) -> Self {
+        Self(Some(hex::encode(hash)))
+    }
+
     /// Returns a friendly name for the CA this RKTH represents, if one is
     /// known. Returns `None` otherwise.
     pub fn friendly_ca_name(&self) -> Option<&'static str> {
