@@ -5,8 +5,8 @@
 use tufaceous_artifact::ArtifactSet;
 use tufaceous_artifact::ArtifactVersion;
 use tufaceous_artifact::OsVariant;
-use tufaceous_artifact::RotKeyTableHash;
 use tufaceous_artifact::RotBootloaderTags;
+use tufaceous_artifact::RotKeyTableHash;
 use tufaceous_artifact::RotSlot;
 use tufaceous_artifact::RotTags;
 use tufaceous_artifact::SpTags;

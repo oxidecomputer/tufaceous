@@ -8,8 +8,8 @@ use hubtools::Caboose;
 use hubtools::CabooseError;
 
 use crate::KnownArtifactTags;
-use crate::RotKeyTableHash;
 use crate::RotBootloaderTags;
+use crate::RotKeyTableHash;
 use crate::RotSlot;
 use crate::RotTags;
 use crate::SpTags;
