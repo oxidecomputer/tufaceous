@@ -88,6 +88,12 @@ use url::Url;
 use crate::error::Error;
 use crate::error::ErrorKind;
 
+macro_rules! try_archive_path {
+    ($result:expr, $kind:ident, $path:expr) => {
+        $crate::error::try_path!($result, $kind, archive_path: $path)
+    };
+}
+
 // The length of the end-of-central-directory record if the comment is zero
 // bytes. Archives with a "comment" (data after the EOCD) are rejected.
 const EOCD_MAX_SEARCH_SPACE: u64 = 22;
@@ -141,8 +147,10 @@ impl<T: AsRef<[u8]> + Debug + Send + Sync + 'static> ZipTransport<Cursor<T>> {
     pub fn from_slice(data: T, log: &Logger) -> Result<Self, Error> {
         let archive = ZipArchive::with_max_search_space(EOCD_MAX_SEARCH_SPACE)
             .locate_in_slice(data)
-            .map_err(|(_, error)| error)
-            .upgrade(None)?;
+            .map_err(|(_, source)| ErrorKind::ReadZip {
+                source,
+                archive_path: None,
+            })?;
         Self::from_impl_blocking(archive.into_zip_archive(), None, None, log)
     }
 }
@@ -157,11 +165,13 @@ impl ZipTransport<FileReader> {
         tokio::task::spawn_blocking(move || {
             let archive_path = archive_path;
             let mut buffer = vec![0; rawzip::RECOMMENDED_BUFFER_SIZE];
-            let archive =
+            let archive = try_archive_path!(
                 ZipArchive::with_max_search_space(EOCD_MAX_SEARCH_SPACE)
                     .locate_in_file(file, &mut buffer)
-                    .map_err(|(_, error)| error)
-                    .upgrade(archive_path.as_ref())?;
+                    .map_err(|(_, error)| error),
+                ReadZip,
+                archive_path
+            );
             Self::from_impl_blocking(archive, archive_path, Some(buffer), &log)
         })
         .await?
@@ -183,7 +193,7 @@ impl<T: ReaderAt + Debug + Send + Sync + 'static> ZipTransport<T> {
         let mut entries = HashMap::new();
         let mut records = archive.entries(&mut buffer);
         while let Some(record) =
-            records.next_entry().upgrade(archive_path.as_ref())?
+            try_archive_path!(records.next_entry(), ReadZip, archive_path)
         {
             actual += 1;
             all_entries.push((
@@ -225,11 +235,16 @@ impl<T: ReaderAt + Debug + Send + Sync + 'static> ZipTransport<T> {
 
         let mut ranges = Vec::new();
         for (wayfinder, raw_path) in all_entries {
-            let entry =
-                archive.get_entry(wayfinder).upgrade(archive_path.as_ref())?;
-            let header = entry
-                .local_header(&mut buffer)
-                .upgrade(archive_path.as_ref())?;
+            let entry = try_archive_path!(
+                archive.get_entry(wayfinder),
+                ReadZip,
+                archive_path
+            );
+            let header = try_archive_path!(
+                entry.local_header(&mut buffer),
+                ReadZip,
+                archive_path
+            );
             if raw_path != header.file_path().as_bytes() {
                 return Err(ErrorKind::ZipPathMismatch {
                     central: raw_path,
@@ -337,15 +352,14 @@ impl<T: ReaderAt + Debug + Send + Sync + 'static> ZipTransport<T> {
                     .await
                 {
                     Ok(Ok(bytes)) => Ok(Some((bytes, (outer_tx, task, url)))),
-                    Ok(Err(error)) => Err(error.upgrade(url)),
+                    Ok(Err(error)) => Err(error.into_tough_error(url)),
                     Err(()) => {
                         // The task hung up. If we're still here, then the task
                         // reached EOF. await the task and return.
                         match task.await {
                             Ok(()) => Ok(None),
-                            Err(error) => {
-                                Err(ZipTransportError::from(error).upgrade(url))
-                            }
+                            Err(error) => Err(ZipTransportError::from(error)
+                                .into_tough_error(url)),
                         }
                     }
                 }
@@ -370,31 +384,15 @@ impl<T: ReaderAt + Debug + Send + Sync + 'static> Transport
                 Ok(Box::pin(self.clone().stream(entry_data, url)))
             }
             Some(Entry::Dir) => {
-                Err(ZipTransportError::IsADirectory.upgrade(url))
+                Err(ZipTransportError::IsADirectory.into_tough_error(url))
             }
             Some(Entry::Symlink) => {
-                Err(ZipTransportError::IsASymlink.upgrade(url))
+                Err(ZipTransportError::IsASymlink.into_tough_error(url))
             }
             Some(Entry::Duplicate) => {
-                Err(ZipTransportError::Duplicate.upgrade(url))
+                Err(ZipTransportError::Duplicate.into_tough_error(url))
             }
-            None => Err(ZipTransportError::FileNotFound.upgrade(url)),
-        }
-    }
-}
-
-trait ResultExt<T> {
-    fn upgrade(self, archive_path: Option<&Utf8PathBuf>) -> Result<T, Error>;
-}
-
-impl<T> ResultExt<T> for Result<T, rawzip::Error> {
-    fn upgrade(self, archive_path: Option<&Utf8PathBuf>) -> Result<T, Error> {
-        match self {
-            Ok(v) => Ok(v),
-            Err(source) => Err(ErrorKind::ReadZip {
-                source,
-                archive_path: archive_path.cloned(),
-            })?,
+            None => Err(ZipTransportError::FileNotFound.into_tough_error(url)),
         }
     }
 }
@@ -425,7 +423,7 @@ pub enum ZipTransportError {
 }
 
 impl ZipTransportError {
-    fn upgrade(self, url: Url) -> TransportError {
+    fn into_tough_error(self, url: Url) -> TransportError {
         let kind = match &self {
             ZipTransportError::FileNotFound => TransportErrorKind::FileNotFound,
 

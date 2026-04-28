@@ -14,21 +14,25 @@ use std::ops::Range;
 use crate::ZipTransportError;
 use camino::Utf8PathBuf;
 use tough::TransportErrorKind;
+use tufaceous_artifact::DisplayTags;
 
 macro_rules! try_path {
     ($result:expr, $kind:ident, $path:expr) => {
+        $crate::error::try_path!($result, $kind, path: $path)
+    };
+
+    ($result:expr, $kind:ident, $field:ident: $path:expr) => {
         match $result {
             Ok(value) => value,
             Err(source) => {
                 return Err(
-                    ErrorKind::$kind { source, path: $path.into() }.into()
+                    ErrorKind::$kind { source, $field: $path.into() }.into()
                 )
             }
         }
     };
 }
 pub(crate) use try_path;
-use tufaceous_artifact::DisplayTags;
 
 #[derive(Debug, thiserror::Error)]
 #[error(transparent)]
