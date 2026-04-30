@@ -1829,9 +1829,9 @@ dependencies = [
 
 [[package]]
 name = "rawzip"
-version = "0.4.2"
+version = "0.4.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "27cc19f82b641448e861623f52a6a6413bbc0595b62a9d45bf31ccdf18aab72c"
+checksum = "9d9575f44c8cf85bc843ad666dcdf20d05a7753772bef56eb2a5140282b32150"
 
 [[package]]
 name = "redox_syscall"
