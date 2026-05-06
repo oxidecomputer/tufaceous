@@ -38,7 +38,9 @@ impl Metadata {
     }
 
     /// Serialize structured metadata into a string mapping.
-    pub fn to_map(&self) -> BTreeMap<String, String> {
+    pub fn to_map(
+        &self,
+    ) -> Result<BTreeMap<String, String>, serde_json::Error> {
         crate::map::to_map(self)
     }
 }
@@ -61,12 +63,12 @@ mod tests {
 
     #[test]
     fn default_is_empty() {
-        assert!(Metadata::default().to_map().is_empty());
+        assert!(Metadata::default().to_map().unwrap().is_empty());
     }
 
     #[proptest]
     fn metadata_roundtrip(metadata: Metadata) {
-        let map = metadata.to_map();
+        let map = metadata.to_map().unwrap();
         assert_eq!(Metadata::from_map(map).unwrap(), metadata);
     }
 }

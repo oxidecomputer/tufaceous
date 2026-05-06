@@ -86,7 +86,7 @@ impl<'a> RepositoryEditor<'a> {
     ) -> Result<Self, Error> {
         let source = FileSource::open(path).await?;
         let input = Input::measurement_corpus(source, None).await?;
-        Ok(self.insert_input(input))
+        self.insert_input(input)
     }
 
     /// Add a fake measurement corpus to the repository.
@@ -100,7 +100,7 @@ impl<'a> RepositoryEditor<'a> {
         version: ArtifactVersion,
     ) -> Result<Self, Error> {
         let input = Input::fake_measurement_corpus(hashes, version, None)?;
-        Ok(self.insert_input(input))
+        self.insert_input(input)
     }
 
     /// Add an OS image to the repository.
@@ -120,7 +120,7 @@ impl<'a> RepositoryEditor<'a> {
             self.artifact_version.clone()?,
         )
         .await?;
-        Ok(self.insert_input(input))
+        self.insert_input(input)
     }
 
     /// Add a fake OS image to the repository.
@@ -130,7 +130,7 @@ impl<'a> RepositoryEditor<'a> {
             self.artifact_version.clone()?,
             None,
         );
-        Ok(self.insert_input(input))
+        self.insert_input(input)
     }
 
     /// Add a Root of Trust Hubris archive to the repository.
@@ -143,7 +143,7 @@ impl<'a> RepositoryEditor<'a> {
         path: Utf8PathBuf,
     ) -> Result<Self, Error> {
         let source = FileSource::open(path).await?;
-        Ok(self.insert_input(Input::rot_archive(source, None, rot_slot).await?))
+        self.insert_input(Input::rot_archive(source, None, rot_slot).await?)
     }
 
     /// Add a Root of Trust Bootloader Hubris archive to the repository.
@@ -154,8 +154,7 @@ impl<'a> RepositoryEditor<'a> {
         path: Utf8PathBuf,
     ) -> Result<Self, Error> {
         let source = FileSource::open(path).await?;
-        Ok(self
-            .insert_input(Input::rot_bootloader_archive(source, None).await?))
+        self.insert_input(Input::rot_bootloader_archive(source, None).await?)
     }
 
     /// Add a Service Processor Hubris archive to the repository.
@@ -163,7 +162,7 @@ impl<'a> RepositoryEditor<'a> {
     /// Tags are automatically determined based on the image caboose.
     pub async fn sp_archive(self, path: Utf8PathBuf) -> Result<Self, Error> {
         let source = FileSource::open(path).await?;
-        Ok(self.insert_input(Input::sp_archive(source, None).await?))
+        self.insert_input(Input::sp_archive(source, None).await?)
     }
 
     /// Add a fake Root of Trust Hubris archive to the repository.
@@ -175,7 +174,7 @@ impl<'a> RepositoryEditor<'a> {
             self.artifact_version.clone()?,
             None,
         )?;
-        Ok(self.insert_input(input))
+        self.insert_input(input)
     }
 
     /// Add a fake Root of Trust Bootloader Hubris archive to the repository.
@@ -190,7 +189,7 @@ impl<'a> RepositoryEditor<'a> {
             self.artifact_version.clone()?,
             None,
         )?;
-        Ok(self.insert_input(input))
+        self.insert_input(input)
     }
 
     /// Add a fake Service Processor Hubris archive to the repository.
@@ -199,7 +198,7 @@ impl<'a> RepositoryEditor<'a> {
     pub fn fake_sp_archive(self, tags: SpTags) -> Result<Self, Error> {
         let input =
             Input::fake_sp_archive(tags, self.artifact_version.clone()?, None)?;
-        Ok(self.insert_input(input))
+        self.insert_input(input)
     }
 
     /// Add a zone image to the repository.
@@ -207,7 +206,7 @@ impl<'a> RepositoryEditor<'a> {
     /// The `zone_name` tag is automatically determined based on the layer
     /// metadata (the `oxide.json` file that starts zone tarballs).
     pub async fn zone_image(self, path: Utf8PathBuf) -> Result<Self, Error> {
-        Ok(self.insert_input(Input::zone_image(path).await?))
+        self.insert_input(Input::zone_image(path).await?)
     }
 
     /// Add a fake zone image to the repository.
@@ -225,7 +224,7 @@ impl<'a> RepositoryEditor<'a> {
             self.artifact_version.clone()?,
             None,
         )?;
-        Ok(self.insert_input(input))
+        self.insert_input(input)
     }
 
     /// Attempt to guess the artifact kind at `path` and add it to the
@@ -238,14 +237,14 @@ impl<'a> RepositoryEditor<'a> {
         path: Utf8PathBuf,
     ) -> Result<Self, Error> {
         let input = Input::guess(path, self.artifact_version.clone()?).await?;
-        Ok(self.insert_input(input))
+        self.insert_input(input)
     }
 
-    fn insert_input<T>(mut self, input: Input<T>) -> Self
+    fn insert_input<T>(mut self, input: Input<T>) -> Result<Self, Error>
     where
         T: Into<TargetSource<'a>>,
     {
-        for output in input.outputs() {
+        for output in input.outputs()? {
             if let Some(artifact) = output.to_artifact_schema() {
                 self.artifacts
                     .entry(artifact.target_name.clone())
@@ -257,7 +256,7 @@ impl<'a> RepositoryEditor<'a> {
                 .or_default()
                 .push(output.source.into());
         }
-        self
+        Ok(self)
     }
 
     /// Add a non-artifact target to the repository.
@@ -293,16 +292,22 @@ impl<'a> RepositoryEditor<'a> {
         version: ArtifactVersion,
         tags: &KnownArtifactTags,
         length: u64,
-    ) -> Self {
+    ) -> Result<Self, Error> {
         let prefix = format!("{target_name}\n{version}\n{tags:?}\n");
         self.targets
             .entry(target_name.clone())
             .or_default()
             .push(BytesSource::fake_padded(prefix, length).into());
         self.artifacts.entry(target_name.clone()).or_default().insert(
-            ArtifactSchema { target_name, version, tags: tags.to_tags() },
+            ArtifactSchema {
+                target_name,
+                version,
+                tags: tags
+                    .to_tags()
+                    .map_err(ErrorKind::ConvertKnownTagsToMap)?,
+            },
         );
-        self
+        Ok(self)
     }
 
     /// Create a fake repository for testing purposes.
@@ -310,7 +315,7 @@ impl<'a> RepositoryEditor<'a> {
         let mut editor = Self::new(system_version);
         let version = editor.artifact_version.clone()?;
         for input in Input::fake(&version, None)? {
-            editor = editor.insert_input(input);
+            editor = editor.insert_input(input)?;
         }
         Ok(editor)
     }
@@ -328,15 +333,16 @@ impl<'a> RepositoryEditor<'a> {
     ) -> Result<Self, Error> {
         let mut editor = Self::new(system_version);
         for input in Input::fake(artifact_version, Some(interior_version))? {
-            editor = editor.insert_input(input);
+            editor = editor.insert_input(input)?;
         }
         Ok(editor)
     }
 
     /// Set the repository-level metadata.
-    pub fn metadata(mut self, metadata: &Metadata) -> Self {
-        self.metadata = metadata.to_map();
-        self
+    pub fn metadata(mut self, metadata: &Metadata) -> Result<Self, Error> {
+        self.metadata =
+            metadata.to_map().map_err(ErrorKind::ConvertMetadataToMap)?;
+        Ok(self)
     }
 
     /// Create a `RepositoryEditor` from a loaded repository.
@@ -546,10 +552,10 @@ pub(crate) fn generate_installinator_document(
     }
     let source = BytesSource::json(&document)
         .map_err(ErrorKind::SerializeInstallinator)?;
-    Ok(Output::new(
+    Output::new(
         target_name,
         version,
-        KnownArtifactTags::InstallinatorDocument,
+        &KnownArtifactTags::InstallinatorDocument,
         source,
-    ))
+    )
 }

@@ -42,7 +42,7 @@ impl ArtifactSetExt for ArtifactSet {
     fn fake(version: ArtifactVersion) -> Result<Self, Error> {
         let mut artifacts = ArtifactSet::default();
         for input in Input::fake(&version, None)? {
-            for output in input.outputs() {
+            for output in input.outputs()? {
                 artifacts.extend(output.into_artifact());
             }
         }

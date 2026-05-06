@@ -16,8 +16,7 @@ use crate::installinator::InstallinatorArtifactKind;
 //
 // NOTE: This struct must serialize and deserialize from a mapping of
 // string keys to string values. The `tags_roundtrip` test covers this
-// (crate::map::to_map panics when debug assertions are enabled if this does
-// not hold).
+// (crate::map::to_map returns an error if this does not hold).
 #[derive(
     Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Deserialize, Serialize,
 )]
@@ -52,11 +51,6 @@ pub enum KnownArtifactTags {
 }
 
 impl KnownArtifactTags {
-    /// Returns an adapter for displaying the tags as a human-readable string.
-    pub fn display(&self) -> DisplayTags<'static> {
-        self.to_tags().into()
-    }
-
     /// Resolves known tags from a tag mapping.
     ///
     /// # Errors
@@ -70,7 +64,9 @@ impl KnownArtifactTags {
     }
 
     /// Converts these known tags to a tag mapping.
-    pub fn to_tags(&self) -> BTreeMap<String, String> {
+    pub fn to_tags(
+        &self,
+    ) -> Result<BTreeMap<String, String>, serde_json::Error> {
         crate::map::to_map(self)
     }
 
@@ -91,6 +87,13 @@ impl KnownArtifactTags {
             }
             _ => None,
         }
+    }
+}
+
+impl Display for KnownArtifactTags {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let tags = self.to_tags().map_err(|_| std::fmt::Error)?;
+        DisplayTags::from(tags).fmt(f)
     }
 }
 
@@ -347,9 +350,12 @@ mod tests {
     use crate::RotSlot;
     use crate::RotTags;
 
+    /// [`KnownArtifactTags::to_tags`] is not allowed to fail (but is marked
+    /// fallible because it's Serde under the hood); its result must round trip
+    /// back to the same value when deserialized.
     #[proptest]
     fn tags_roundtrip(tags: KnownArtifactTags) {
-        let map = tags.to_tags();
+        let map = tags.to_tags().unwrap();
         assert_eq!(KnownArtifactTags::from_tags(map).unwrap(), tags);
     }
 

@@ -44,13 +44,13 @@ impl Repository {
             }
         }
 
-        match self.structured_metadata() {
-            Some(structured_metadata) => {
-                // Serialize the metadata back to a mapping and verify there
-                // are no unexpected changes.
-                let map = structured_metadata.to_map();
-                if self.metadata() != &map {
-                    let diff = self.metadata().diff(&map);
+        match self
+            .structured_metadata()
+            .and_then(|structured_metadata| structured_metadata.to_map().ok())
+        {
+            Some(metadata) => {
+                if self.metadata() != &metadata {
+                    let diff = self.metadata().diff(&metadata);
                     for (key, leaf) in diff.modified() {
                         problems.push(CheckProblem::UnexpectedMetadataDiff {
                             key: key.clone(),
@@ -149,7 +149,7 @@ pub enum CheckProblem {
     },
 
     /// An artifact matching these tags was not found.
-    #[error("no artifact matching {}", .0.display())]
+    #[error("no artifact matching {0}")]
     MissingArtifact(KnownArtifactTags),
 
     /// An artifact's target name is not in the repository.
@@ -160,7 +160,7 @@ pub enum CheckProblem {
     MissingTarget { target_name: String },
 
     /// Multiple artifacts for these tags were not expected.
-    #[error("multiple artifacts found matching {}", .0.display())]
+    #[error("multiple artifacts found matching {0}")]
     MultipleArtifacts(KnownArtifactTags),
 
     /// The repository metadata is unexpectedly different from the parsed

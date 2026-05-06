@@ -171,7 +171,7 @@ pub(crate) async fn from_loaded(
                     &mut unpacked,
                     OsVariant::Host,
                     &version,
-                );
+                )?;
                 continue;
             }
             V1KnownArtifactKind::Trampoline => {
@@ -180,7 +180,7 @@ pub(crate) async fn from_loaded(
                     &mut unpacked,
                     OsVariant::Recovery,
                     &version,
-                );
+                )?;
                 continue;
             }
 
@@ -206,7 +206,7 @@ pub(crate) async fn from_loaded(
         };
 
         let target_name = target;
-        let tags = tags.to_tags();
+        let tags = tags.to_tags().map_err(ErrorKind::ConvertKnownTagsToMap)?;
         artifacts.insert(Artifact { target_name, version, tags, hash, length });
     }
 
@@ -451,7 +451,9 @@ impl CompositeArtifact {
             artifacts.insert(Artifact {
                 target_name: target_name.clone(),
                 version: version.clone(),
-                tags: tags.to_tags(),
+                tags: tags
+                    .to_tags()
+                    .map_err(ErrorKind::ConvertKnownTagsToMap)?,
                 hash,
                 length,
             });
@@ -468,7 +470,7 @@ impl CompositeArtifact {
         unpacked: &mut Unpacked,
         os_variant: OsVariant,
         version: &ArtifactVersion,
-    ) {
+    ) -> Result<(), Error> {
         for (file_name, tags) in [
             (
                 COSMO_PHASE_1_PATH,
@@ -497,12 +499,15 @@ impl CompositeArtifact {
             artifacts.insert(Artifact {
                 target_name: target_name.clone(),
                 version: version.clone(),
-                tags: tags.to_tags(),
+                tags: tags
+                    .to_tags()
+                    .map_err(ErrorKind::ConvertKnownTagsToMap)?,
                 hash: entry.hash,
                 length: entry.length,
             });
             unpacked.entries.insert(target_name, entry);
         }
+        Ok(())
     }
 
     async fn read_control_plane(
@@ -523,13 +528,14 @@ impl CompositeArtifact {
             )
             .await?;
             let file = file.into_inner();
+            let tags =
+                KnownArtifactTags::Zone(ZoneTags { zone_name: layer_info.pkg });
             artifacts.insert(Artifact {
                 target_name: target_name.clone(),
                 version: layer_info.version,
-                tags: KnownArtifactTags::Zone(ZoneTags {
-                    zone_name: layer_info.pkg,
-                })
-                .to_tags(),
+                tags: tags
+                    .to_tags()
+                    .map_err(ErrorKind::ConvertKnownTagsToMap)?,
                 hash,
                 length,
             });
@@ -600,7 +606,9 @@ async fn generate_installinator_document(
     artifacts.insert(Artifact {
         target_name: target_name.clone(),
         version,
-        tags: KnownArtifactTags::InstallinatorDocument.to_tags(),
+        tags: KnownArtifactTags::InstallinatorDocument
+            .to_tags()
+            .map_err(ErrorKind::ConvertKnownTagsToMap)?,
         hash: unpacked_artifact.hash,
         length: unpacked_artifact.length,
     });

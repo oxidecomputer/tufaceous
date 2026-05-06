@@ -112,7 +112,7 @@ async fn empty_artifact() -> Result<(), Error> {
             "1.0.0".parse().unwrap(),
             &KnownArtifactTags::InstallinatorDocument,
             0,
-        )
+        )?
         .finish()
         .await?
         .generate_root()

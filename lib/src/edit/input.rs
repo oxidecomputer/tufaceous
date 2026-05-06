@@ -24,6 +24,8 @@ use crate::COSMO_PHASE_1_PATH;
 use crate::GIMLET_PHASE_1_PATH;
 use crate::PHASE_2_PATH;
 use crate::edit::source::BytesSource;
+use crate::error::Error;
+use crate::error::ErrorKind;
 use crate::schema::ArtifactSchema;
 
 #[derive(Debug)]
@@ -67,15 +69,15 @@ pub(crate) enum Input<Source> {
 }
 
 impl<Source> Input<Source> {
-    pub(crate) fn outputs(self) -> Vec<Output<Source>> {
-        match self {
+    pub(crate) fn outputs(self) -> Result<Vec<Output<Source>>, Error> {
+        Ok(match self {
             Input::MeasurementCorpus { source, corim_id, sha256, version } => {
                 let target_name = format!(
                     "measurements/{corim_id}-{}.cbor",
                     hex::encode(sha256)
                 );
                 let tags = KnownArtifactTags::MeasurementCorpus;
-                vec![Output::new(target_name, version, tags, source)]
+                vec![Output::new(target_name, version, &tags, source)?]
             }
             Input::OsImages {
                 cosmo_phase_1,
@@ -90,23 +92,23 @@ impl<Source> Input<Source> {
                 vec.push(Output::new(
                     base.join(COSMO_PHASE_1_PATH).into(),
                     version.clone(),
-                    OsPhase1Tags { os_board: OsBoard::COSMO, os_variant }
+                    &OsPhase1Tags { os_board: OsBoard::COSMO, os_variant }
                         .into(),
                     cosmo_phase_1,
-                ));
+                )?);
                 vec.push(Output::new(
                     base.join(GIMLET_PHASE_1_PATH).into(),
                     version.clone(),
-                    OsPhase1Tags { os_board: OsBoard::GIMLET, os_variant }
+                    &OsPhase1Tags { os_board: OsBoard::GIMLET, os_variant }
                         .into(),
                     gimlet_phase_1,
-                ));
+                )?);
                 vec.push(Output::new(
                     base.join(PHASE_2_PATH).into(),
                     version,
-                    OsPhase2Tags { os_variant }.into(),
+                    &OsPhase2Tags { os_variant }.into(),
                     phase_2,
-                ));
+                )?);
                 for (file_name, source) in extra_targets {
                     vec.push(Output::extra(
                         base.join(file_name).into(),
@@ -122,7 +124,7 @@ impl<Source> Input<Source> {
                     sign = tags.rot_rkth,
                     slot = tags.rot_slot
                 );
-                vec![Output::new(target_name, version, tags.into(), source)]
+                vec![Output::new(target_name, version, &tags.into(), source)?]
             }
             Input::RotBootloader { source, tags, version } => {
                 let target_name = format!(
@@ -130,12 +132,17 @@ impl<Source> Input<Source> {
                     board = tags.rot_board,
                     sign = tags.rot_rkth
                 );
-                vec![Output::new(target_name, version, tags.into(), source)]
+                vec![Output::new(target_name, version, &tags.into(), source)?]
             }
             Input::Sp { source, tags, name, version } => {
                 let target_name = format!("sp/{name}-{version}.zip");
                 if tags.sp_board.as_str() == name {
-                    vec![Output::new(target_name, version, tags.into(), source)]
+                    vec![Output::new(
+                        target_name,
+                        version,
+                        &tags.into(),
+                        source,
+                    )?]
                 } else {
                     // This is likely a lab image. As of writing these are
                     // stored in the TUF repo for manufacturing but are
@@ -148,9 +155,9 @@ impl<Source> Input<Source> {
             }
             Input::Zone { source, file_name, tags, version } => {
                 let target_name = format!("zones/{file_name}");
-                vec![Output::new(target_name, version, tags.into(), source)]
+                vec![Output::new(target_name, version, &tags.into(), source)?]
             }
-        }
+        })
     }
 }
 
@@ -163,7 +170,7 @@ pub(crate) struct Output<Source> {
 
 #[derive(Debug)]
 pub(crate) struct ArtifactData {
-    tags: KnownArtifactTags,
+    tags: BTreeMap<String, String>,
     version: ArtifactVersion,
 }
 
@@ -171,14 +178,15 @@ impl<Source> Output<Source> {
     pub(crate) fn new(
         target_name: String,
         version: ArtifactVersion,
-        tags: KnownArtifactTags,
+        tags: &KnownArtifactTags,
         source: Source,
-    ) -> Self {
-        Output {
+    ) -> Result<Self, Error> {
+        let tags = tags.to_tags().map_err(ErrorKind::ConvertKnownTagsToMap)?;
+        Ok(Output {
             target_name,
             source,
             artifact_data: Some(ArtifactData { tags, version }),
-        }
+        })
     }
 
     fn extra(target_name: String, source: Source) -> Self {
@@ -190,7 +198,7 @@ impl<Source> Output<Source> {
         Some(ArtifactSchema {
             target_name: self.target_name.clone(),
             version: data.version.clone(),
-            tags: data.tags.to_tags(),
+            tags: data.tags.clone(),
         })
     }
 }
@@ -205,7 +213,7 @@ impl Output<BytesSource> {
         Some(Artifact {
             target_name: self.target_name,
             version: data.version,
-            tags: data.tags.to_tags(),
+            tags: data.tags,
             hash: ArtifactHash(hasher.finalize().into()),
             length: self.source.length(),
         })

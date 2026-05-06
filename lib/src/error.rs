@@ -179,6 +179,11 @@ pub enum ErrorKind {
     ArtifactVersion(#[from] tufaceous_artifact::ArtifactVersionError),
     #[error("failed to guess what kind of artifact {path} is")]
     GuessArtifact { path: Utf8PathBuf },
+    #[error(
+        "failed to convert metadata structure into mapping \
+        (please report this logic error in Tufaceous)"
+    )]
+    ConvertMetadataToMap(#[source] serde_json::Error),
     #[error("target name collision on {target_name}")]
     TargetNameCollision { target_name: String },
     #[error(
@@ -200,6 +205,11 @@ pub enum ErrorKind {
     #[error("failed to parse signing root")]
     ParseSigningRoot(#[source] serde_json::Error),
 
+    #[error(
+        "failed to convert known tags structure into mapping \
+        (please report this logic error in Tufaceous)"
+    )]
+    ConvertKnownTagsToMap(#[source] serde_json::Error),
     #[error("failed to read composite artifact {target}")]
     ReadCompositeArtifact { source: std::io::Error, target: String },
     #[error("failed to read oxide.json from {path}")]
@@ -231,6 +241,7 @@ impl ErrorKind {
             | ErrorKind::TargetNotFound { .. }
             | ErrorKind::ParseTargetJson { .. }
             | ErrorKind::ArtifactVersion(_)
+            | ErrorKind::ConvertKnownTagsToMap(_)
             | ErrorKind::ReadCompositeArtifact { .. }
             | ErrorKind::ReadZoneOxideJson { .. } => true,
 
@@ -255,6 +266,7 @@ impl ErrorKind {
             | ErrorKind::SerializeRoot(_)
             | ErrorKind::RoleVerify(_)
             | ErrorKind::GuessArtifact { .. }
+            | ErrorKind::ConvertMetadataToMap(_)
             | ErrorKind::TargetNameCollision { .. }
             | ErrorKind::DisallowedTagCollision { .. }
             | ErrorKind::SerializeArtifacts(_)
