@@ -82,9 +82,7 @@ impl Repository {
         // For all tags we expect to see a single artifact, except for
         // MeasurementCorpus.
         for (tags, iter) in self.artifacts().known() {
-            if !matches!(tags, KnownArtifactTags::MeasurementCorpus)
-                && iter.len() > 1
-            {
+            if iter.len() > 1 && !tags.allow_multiple_artifacts() {
                 problems.push(CheckProblem::MultipleArtifacts(tags.clone()));
             }
         }

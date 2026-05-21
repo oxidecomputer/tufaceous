@@ -409,7 +409,7 @@ impl<'a> RepositoryEditor<'a> {
         let mut seen_tags = HashMap::new();
         for (target_name, artifact) in &artifacts {
             if let Some(tags) = artifact.known_tags()
-                && matches!(tags, KnownArtifactTags::MeasurementCorpus)
+                && tags.allow_multiple_artifacts()
             {
                 continue;
             }

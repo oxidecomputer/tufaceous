@@ -22,6 +22,7 @@ use crate::installinator::InstallinatorArtifactKind;
 )]
 #[cfg_attr(any(test, feature = "proptest"), derive(test_strategy::Arbitrary))]
 #[serde(tag = "kind", rename_all = "snake_case")]
+#[non_exhaustive]
 pub enum KnownArtifactTags {
     /// JSON document describing the artifacts Installinator is responsible for
     /// writing during mupdate and sled recovery.
@@ -85,7 +86,37 @@ impl KnownArtifactTags {
                     zone_name: zone_name.clone(),
                 })
             }
-            _ => None,
+
+            KnownArtifactTags::InstallinatorDocument
+            | KnownArtifactTags::OsPhase1(_)
+            | KnownArtifactTags::OsPhase2(OsPhase2Tags {
+                os_variant: OsVariant::Recovery,
+            })
+            | KnownArtifactTags::Rot(_)
+            | KnownArtifactTags::RotBootloader(_)
+            | KnownArtifactTags::Sp(_) => None,
+        }
+    }
+
+    /// Returns `true` if this tag set is allowed to appear in the repository
+    /// more than once.
+    ///
+    /// # ⚠️ Causality Hazard ⚠️
+    ///
+    /// This definition is subject to change in future repositories. Do **not**
+    /// use this to enforce logic if you are possibly reading a repository made
+    /// by a different version of Tufaceous.
+    pub fn allow_multiple_artifacts(&self) -> bool {
+        match self {
+            KnownArtifactTags::MeasurementCorpus => true,
+
+            KnownArtifactTags::InstallinatorDocument
+            | KnownArtifactTags::OsPhase1(_)
+            | KnownArtifactTags::OsPhase2(_)
+            | KnownArtifactTags::Rot(_)
+            | KnownArtifactTags::RotBootloader(_)
+            | KnownArtifactTags::Sp(_)
+            | KnownArtifactTags::Zone(_) => false,
         }
     }
 }
