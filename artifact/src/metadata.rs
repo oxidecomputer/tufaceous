@@ -22,6 +22,9 @@ use serde::Serialize;
 // 1. Wrap all fields in [`Option`] and mark with
 //    `#[serde(skip_serializing_if = "Option::is_none")]`.
 // 2. Mark nested structs with `#[serde(flatten)]`.
+//
+// If you add metadata, please add to the list in the
+// `deserialize_previously_valid` test below.
 #[derive(Debug, Default, Clone, PartialEq, Eq, Deserialize, Serialize)]
 #[cfg_attr(any(test, feature = "proptest"), derive(test_strategy::Arbitrary))]
 pub struct Metadata {
@@ -53,12 +56,12 @@ mod tests {
 
     use crate::Metadata;
 
-    /// **Do not change this test when adding new metadata.** This structure
-    /// must be capable of deserializing older metadata, and the oldest metadata
-    /// is no metadata at all.
     #[test]
-    fn deserialize_from_empty() {
-        Metadata::from_map(BTreeMap::new()).unwrap();
+    fn deserialize_previously_valid() {
+        #[expect(clippy::single_element_loop)]
+        for previously_valid in [BTreeMap::new()] {
+            Metadata::from_map(previously_valid).unwrap();
+        }
     }
 
     #[test]
