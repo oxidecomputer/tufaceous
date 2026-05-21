@@ -22,6 +22,8 @@ pub struct Args {
 impl Args {
     pub async fn run(self) -> Result<()> {
         let repo = RepositoryLoader::new()
+            // TODO after v2 merge: Create a LoadOptions struct for configuring
+            // expiration enforcement and trust store behavior.
             .expiration_enforcement(ExpirationEnforcement::Unsafe)
             .trust_store_behavior(TrustStoreBehavior::UnsafeBlindFaith)
             .load_zip_path(self.repo.clone(), &crate::LOG)
