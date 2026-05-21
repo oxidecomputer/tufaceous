@@ -96,8 +96,8 @@ impl ArtifactSet {
     /// Returns the set of all artifacts matching `tags`.
     ///
     /// If you are not certain that you want all matching artifacts, prefer
-    /// [`ArtifactSet::get`] instead. The control plane must not randomly choose
-    /// from matching artifacts when it expects only one.
+    /// [`ArtifactSet::get_only`] instead. The control plane must not randomly
+    /// choose from matching artifacts when it expects only one.
     pub fn get_all(&self, tags: &KnownArtifactTags) -> &BTreeSet<Artifact> {
         static EMPTY: BTreeSet<Artifact> = BTreeSet::new();
         self.known.get(tags).unwrap_or(&EMPTY)
@@ -263,7 +263,7 @@ impl<'a> Iterator for Iter<'a> {
     }
 }
 
-/// Returned by [`ArtifactSet::get`] when there is not exactly one matching
+/// Returned by [`ArtifactSet::get_only`] when there is not exactly one matching
 /// artifact.
 #[derive(Debug, thiserror::Error)]
 pub enum GetError {
