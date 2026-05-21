@@ -79,7 +79,10 @@ impl ArtifactSet {
     /// # Errors
     ///
     /// Returns an error if there is not exactly one artifact matching `tags`.
-    pub fn get(&self, tags: &KnownArtifactTags) -> Result<&Artifact, GetError> {
+    pub fn get_only(
+        &self,
+        tags: &KnownArtifactTags,
+    ) -> Result<&Artifact, GetError> {
         let set = self.known.get(tags).ok_or(GetError::NotFound)?;
         if set.len() == 1
             && let Some(artifact) = set.first()

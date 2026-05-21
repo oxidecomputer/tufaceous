@@ -103,13 +103,16 @@ impl Repository {
                 .push(KnownArtifactTags::OsPhase2(OsPhase2Tags { os_variant }));
         }
         for tags in expected {
-            if matches!(self.artifacts().get(&tags), Err(GetError::NotFound)) {
+            if matches!(
+                self.artifacts().get_only(&tags),
+                Err(GetError::NotFound)
+            ) {
                 problems.push(CheckProblem::MissingArtifact(tags));
             }
         }
 
         if let Ok(artifact) =
-            self.artifacts().get(&KnownArtifactTags::InstallinatorDocument)
+            self.artifacts().get_only(&KnownArtifactTags::InstallinatorDocument)
             && let Ok(stream) = self.read_target(&artifact.target_name).await
             && let Ok(bytes) = stream.map_ok(Vec::from).try_concat().await
             && let Ok(doc) = serde_json::from_slice::<InstallinatorDocument>(

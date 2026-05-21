@@ -73,7 +73,7 @@ async fn v1_fake() -> Result<(), Error> {
     }
     let seen = expected
         .iter()
-        .map(|tags| repo.artifacts().get(tags).unwrap().clone())
+        .map(|tags| repo.artifacts().get_only(tags).unwrap().clone())
         .collect::<ArtifactSet>();
     // And there should be no unexpected artifacts:
     assert_eq!(&seen, repo.artifacts());

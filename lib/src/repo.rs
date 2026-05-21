@@ -242,7 +242,7 @@ impl Repository {
         self: &Arc<Self>,
         tags: &KnownArtifactTags,
     ) -> Result<ArtifactHandle, GetError> {
-        let artifact = self.artifacts.get(tags)?.clone();
+        let artifact = self.artifacts.get_only(tags)?.clone();
         Ok(ArtifactHandle { artifact, repo: Arc::clone(self) })
     }
 
