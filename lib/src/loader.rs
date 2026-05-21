@@ -318,8 +318,6 @@ impl RepositoryLoader {
                         repo,
                         log,
                         trust_root,
-                        None,
-                        None,
                         self.v1_compatibility,
                     )
                     .await;

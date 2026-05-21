@@ -46,11 +46,16 @@ pub struct Repository {
     inner: tough::Repository,
     system_version: Version,
     trust_root: Vec<u8>,
-    pub(crate) archive_path: Option<Utf8PathBuf>,
-    pub(crate) archive_sha256: Option<[u8; 32]>,
     artifacts: ArtifactSet,
     metadata: BTreeMap<String, String>,
     v1_unpacked: Option<v1::Unpacked>,
+
+    // These are set directly by the ZIP archive convenience methods in the
+    // loader module.
+    // TODO after v2 merge: Move the loader module under this repo module so
+    // that this doesn't need to be pub(crate).
+    pub(crate) archive_path: Option<Utf8PathBuf>,
+    pub(crate) archive_sha256: Option<[u8; 32]>,
 }
 
 impl Repository {
@@ -105,8 +110,6 @@ impl Repository {
         repo: tough::Repository,
         log: &Logger,
         trust_root: Vec<u8>,
-        archive_path: Option<Utf8PathBuf>,
-        archive_sha256: Option<[u8; 32]>,
         v1_compatibility: bool,
     ) -> Result<Self, Error> {
         let Some(ArtifactSetSchema { system_version, artifacts, metadata }) =
@@ -119,12 +122,12 @@ impl Repository {
                 return Ok(Repository {
                     inner: repo,
                     trust_root,
-                    archive_path,
-                    archive_sha256,
                     system_version,
                     artifacts,
                     metadata: BTreeMap::new(),
                     v1_unpacked: Some(v1_unpacked),
+                    archive_path: None,
+                    archive_sha256: None,
                 });
             }
 
@@ -144,12 +147,12 @@ impl Repository {
         Ok(Repository {
             inner: repo,
             trust_root,
-            archive_path,
-            archive_sha256,
             system_version,
             artifacts,
             metadata,
             v1_unpacked: None,
+            archive_path: None,
+            archive_sha256: None,
         })
     }
 
