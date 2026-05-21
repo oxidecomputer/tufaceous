@@ -21,9 +21,12 @@ use crate::Repository;
 impl Repository {
     /// Check the repository for consistency and other problems.
     ///
-    /// This must *not* be used to determine whether to accept a repository by
-    /// the control plane; it assumes that the current version of Tufaceous is
-    /// the same one that was used to generate the repository.
+    /// # ⚠️ Causality Hazard ⚠️
+    ///
+    /// The definition of a well-formed repository is subject to change. This
+    /// must **not** be used for repositories that may have been created by
+    /// another version of Tufaceous, such as when the control plane decides to
+    /// accept a repository.
     pub async fn check_problems(&self) -> Vec<CheckProblem> {
         let mut problems = Vec::new();
 
