@@ -142,25 +142,20 @@ impl<T: AsRef<[u8]> + Debug + Send + Sync + 'static> ZipTransport<Cursor<T>> {
 }
 
 impl ZipTransport<FileReader> {
-    pub async fn from_file(
+    pub fn from_file_blocking(
         file: File,
         archive_path: Option<Utf8PathBuf>,
         log: &Logger,
     ) -> Result<Self, Error> {
-        let log = log.clone();
-        tokio::task::spawn_blocking(move || {
-            let archive_path = archive_path;
-            let mut buffer = vec![0; rawzip::RECOMMENDED_BUFFER_SIZE];
-            let archive = try_archive_path!(
-                ZipArchive::with_max_search_space(EOCD_MAX_SEARCH_SPACE)
-                    .locate_in_file(file, &mut buffer)
-                    .map_err(|(_, error)| error),
-                ReadZip,
-                archive_path
-            );
-            Self::from_impl_blocking(archive, archive_path, Some(buffer), &log)
-        })
-        .await?
+        let mut buffer = vec![0; rawzip::RECOMMENDED_BUFFER_SIZE];
+        let archive = try_archive_path!(
+            ZipArchive::with_max_search_space(EOCD_MAX_SEARCH_SPACE)
+                .locate_in_file(file, &mut buffer)
+                .map_err(|(_, error)| error),
+            ReadZip,
+            archive_path
+        );
+        Self::from_impl_blocking(archive, archive_path, Some(buffer), log)
     }
 }
 

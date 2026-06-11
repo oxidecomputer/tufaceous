@@ -188,25 +188,32 @@ impl RepositoryLoader {
         archive_path: Option<Utf8PathBuf>,
         log: &Logger,
     ) -> Result<Repository, Error> {
-        let (file, sha256) = if self.compute_archive_sha256 {
+        let (sha256, transport) = {
             let archive_path = archive_path.clone();
+            let log = log.clone();
+            let compute_archive_sha256 = self.compute_archive_sha256;
             tokio::task::spawn_blocking(move || {
-                let mut hasher = IoWrapper(Sha256::new());
-                try_path!(
-                    file.rewind()
-                        .and_then(|()| std::io::copy(&mut file, &mut hasher)),
-                    ReadFile,
-                    archive_path
-                );
-                Ok::<_, Error>((file, Some(hasher.0.finalize().0)))
+                let sha256 = if compute_archive_sha256 {
+                    let mut hasher = IoWrapper(Sha256::new());
+                    try_path!(
+                        file.rewind().and_then(|()| std::io::copy(
+                            &mut file,
+                            &mut hasher
+                        )),
+                        ReadFile,
+                        archive_path
+                    );
+                    Some(hasher.0.finalize().0)
+                } else {
+                    None
+                };
+                let transport =
+                    ZipTransport::from_file_blocking(file, archive_path, &log)?;
+                Ok::<_, Error>((sha256, transport))
             })
             .await??
-        } else {
-            (file, None)
         };
 
-        let transport =
-            ZipTransport::from_file(file, archive_path.clone(), log).await?;
         let mut repo = self.zip_base_urls().load(transport, log).await?;
         repo.archive_path = archive_path;
         repo.archive_sha256 = sha256;
