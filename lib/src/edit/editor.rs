@@ -277,6 +277,23 @@ impl<'a> RepositoryEditor<'a> {
         Ok(self)
     }
 
+    /// Remove artifacts matching the given tags.
+    pub fn remove_artifacts(
+        mut self,
+        filter: &KnownArtifactTags,
+    ) -> Result<Self, Error> {
+        let filter =
+            filter.to_tags().map_err(ErrorKind::ConvertKnownTagsToMap)?;
+        let removed = self.artifacts.extract_if(|_, artifacts| {
+            artifacts.retain(|artifact| artifact.tags != filter);
+            artifacts.is_empty() // extract_if: remove from map if true
+        });
+        for (target_name, _) in removed {
+            self.targets.remove(&target_name);
+        }
+        Ok(self)
+    }
+
     /// Remove a target with the given target name.
     pub fn remove_target(mut self, target_name: &str) -> Self {
         self.targets.remove(target_name);
@@ -356,10 +373,12 @@ impl<'a> RepositoryEditor<'a> {
     /// Import all of the artifacts and targets from a repository into this
     /// editor.
     pub fn import_repo(mut self, repo: &'a Repository) -> Result<Self, Error> {
-        if repo.is_v1() {
-            return Err(ErrorKind::ImportV1Repo.into());
+        for artifact in repo.to_artifact_schema()? {
+            self.artifacts
+                .entry(artifact.target_name.clone())
+                .or_default()
+                .insert(artifact);
         }
-
         for (target_name, target) in repo.targets() {
             if target_name.raw() == ArtifactSetSchema::TARGET_NAME {
                 continue;
@@ -373,16 +392,6 @@ impl<'a> RepositoryEditor<'a> {
                 }
                 .into(),
             );
-        }
-        for artifact in repo.artifacts() {
-            self.artifacts
-                .entry(artifact.target_name.clone())
-                .or_default()
-                .insert(ArtifactSchema {
-                    target_name: artifact.target_name.clone(),
-                    version: artifact.version.clone(),
-                    tags: artifact.tags.clone(),
-                });
         }
         self.metadata = repo.metadata().clone();
         Ok(self)

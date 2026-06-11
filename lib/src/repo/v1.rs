@@ -2,6 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::io::BufRead;
 use std::io::BufReader;
@@ -13,6 +14,7 @@ use bytes::Buf;
 use bytes::Bytes;
 use bytes::BytesMut;
 use camino::FromPathBufError;
+use camino::Utf8Path;
 use camino::Utf8PathBuf;
 use flate2::bufread::GzDecoder;
 use futures_util::Stream;
@@ -53,33 +55,49 @@ use crate::error::DebugByteString;
 use crate::error::Error;
 use crate::error::ErrorKind;
 use crate::error::try_path;
+use crate::repo::ArtifactData;
 use crate::repo::read_target;
 use crate::repo::read_target_json;
 use crate::repo::read_target_vec;
-use crate::repo::sha256_length;
+use crate::repo::target_meta_skip;
 use crate::util::ArtifactExt;
 
-#[derive(Debug, Clone)]
-pub(crate) struct Unpacked {
-    pub(crate) entries: HashMap<String, UnpackedArtifact>,
+pub(super) struct PartialRepository {
+    pub(super) system_version: Version,
+    pub(super) artifacts: ArtifactSet,
+    pub(super) artifact_data: BTreeMap<Artifact, ArtifactData>,
+}
+
+impl PartialRepository {
+    fn insert(&mut self, artifact: Artifact, data: ArtifactData) {
+        self.artifacts.insert(artifact.clone());
+        self.artifact_data.insert(artifact, data);
+    }
+
+    fn original_target_name(&self, artifact: &Artifact) -> Option<&str> {
+        self.artifact_data.get(artifact).map(ArtifactData::original_target_name)
+    }
 }
 
 #[expect(clippy::too_many_lines)]
 pub(crate) async fn from_loaded(
     repo: &tough::Repository,
     log: &Logger,
-) -> Result<Option<(Version, ArtifactSet, Unpacked)>, Error> {
+) -> Result<Option<PartialRepository>, Error> {
     let Some(V1ArtifactSetSchema { system_version, artifacts: v1_artifacts }) =
         read_target_json(repo, V1ArtifactSetSchema::TARGET_NAME).await?
     else {
         return Ok(None);
     };
 
-    let mut artifacts = ArtifactSet::default();
-    let mut unpacked = Unpacked { entries: HashMap::new() };
+    let mut partial = PartialRepository {
+        system_version,
+        artifacts: ArtifactSet::default(),
+        artifact_data: BTreeMap::new(),
+    };
     let mut installinator_document = None;
     for V1Artifact { version, kind, target } in v1_artifacts {
-        let Some((hash, length)) = sha256_length(repo, log, &target) else {
+        let Some((hash, length)) = target_meta_skip(repo, log, &target) else {
             continue;
         };
         let kind = match kind {
@@ -135,15 +153,15 @@ pub(crate) async fn from_loaded(
                     &target,
                     KnownArtifactTags::from_rot_bootloader_caboose,
                 )?;
-                if artifacts.get_all(&tags).iter().any(|artifact| {
-                    if let Some(existing) =
-                        sha256_length(repo, log, &artifact.target_name)
-                        && (hash, length) == existing
-                    {
+                if partial.artifacts.get_all(&tags).iter().any(|artifact| {
+                    if hash == artifact.hash && length == artifact.length {
+                        let existing = partial
+                            .original_target_name(artifact)
+                            .unwrap_or("???");
                         info!(
                             log,
                             "skipping duplicate RoT bootloader image";
-                            "existing" => &artifact.target_name,
+                            "existing" => &existing,
                             "skipped" => &target,
                         );
                         true
@@ -160,15 +178,14 @@ pub(crate) async fn from_loaded(
             | V1KnownArtifactKind::SwitchRot => {
                 CompositeArtifact::unpack(repo, target)
                     .await?
-                    .read_rot(log, &mut artifacts, &mut unpacked, version)
+                    .read_rot(log, &mut partial, version)
                     .await?;
                 continue;
             }
 
             V1KnownArtifactKind::Host => {
                 CompositeArtifact::unpack(repo, target).await?.read_os_image(
-                    &mut artifacts,
-                    &mut unpacked,
+                    &mut partial,
                     OsVariant::Host,
                     &version,
                 )?;
@@ -176,8 +193,7 @@ pub(crate) async fn from_loaded(
             }
             V1KnownArtifactKind::Trampoline => {
                 CompositeArtifact::unpack(repo, target).await?.read_os_image(
-                    &mut artifacts,
-                    &mut unpacked,
+                    &mut partial,
                     OsVariant::Recovery,
                     &version,
                 )?;
@@ -195,7 +211,7 @@ pub(crate) async fn from_loaded(
             V1KnownArtifactKind::ControlPlane => {
                 CompositeArtifact::unpack(repo, target)
                     .await?
-                    .read_control_plane(&mut artifacts, &mut unpacked)
+                    .read_control_plane(&mut partial)
                     .await?;
                 continue;
             }
@@ -205,28 +221,24 @@ pub(crate) async fn from_loaded(
             }
         };
 
-        let target_name = target;
         let tags = tags.to_tags().map_err(ErrorKind::ConvertKnownTagsToMap)?;
-        artifacts.insert(Artifact { target_name, version, tags, hash, length });
+        partial.insert(
+            Artifact { version, tags, hash, length },
+            ArtifactData::Target { target_name: target },
+        );
     }
 
     if let Some((version, target)) = installinator_document {
-        generate_installinator_document(
-            &mut artifacts,
-            &mut unpacked,
-            version,
-            target,
-        )
-        .await?;
+        generate_installinator_document(&mut partial, version, target).await?;
     }
-    Ok(Some((system_version, artifacts, unpacked)))
+    Ok(Some(partial))
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct UnpackedArtifact {
-    file: Arc<FileReader>,
-    hash: ArtifactHash,
-    length: u64,
+pub(super) struct UnpackedArtifact {
+    pub(super) file: Arc<FileReader>,
+    pub(super) hash: ArtifactHash,
+    pub(super) length: u64,
 }
 
 impl UnpackedArtifact {
@@ -402,8 +414,7 @@ impl CompositeArtifact {
     async fn read_rot(
         mut self,
         log: &Logger,
-        artifacts: &mut ArtifactSet,
-        unpacked: &mut Unpacked,
+        partial: &mut PartialRepository,
         version: ArtifactVersion,
     ) -> Result<(), Error> {
         for slot in [RotSlot::A, RotSlot::B] {
@@ -424,21 +435,21 @@ impl CompositeArtifact {
             })
             .await??;
 
-            let target_name = format!("{}/{path}", self.original_target_name);
-            let tags = caboose_tags(image, &target_name, |caboose| {
-                KnownArtifactTags::from_rot_caboose(caboose, slot)
-            })?;
-            if artifacts.get_all(&tags).iter().any(|artifact| {
-                if let Some(existing) =
-                    unpacked.entries.get(&artifact.target_name)
-                    && hash == existing.hash
-                    && length == existing.length
-                {
+            let tags = caboose_tags(
+                image,
+                &format!("{}/{path}", self.original_target_name),
+                |caboose| KnownArtifactTags::from_rot_caboose(caboose, slot),
+            )?;
+            if partial.artifacts.get_all(&tags).iter().any(|artifact| {
+                if hash == artifact.hash && length == artifact.length {
+                    let existing =
+                        partial.original_target_name(artifact).unwrap_or("???");
                     info!(
                         log,
                         "skipping duplicate RoT image";
-                        "existing" => &artifact.target_name,
-                        "skipped" => &target_name,
+                        "existing_target" => &existing,
+                        "skipped_target" => &self.original_target_name,
+                        "skipped_inner_file" => &path.as_str(),
                     );
                     true
                 } else {
@@ -447,26 +458,28 @@ impl CompositeArtifact {
             }) {
                 continue;
             }
-            artifacts.insert(Artifact {
-                target_name: target_name.clone(),
-                version: version.clone(),
-                tags: tags
-                    .to_tags()
-                    .map_err(ErrorKind::ConvertKnownTagsToMap)?,
-                hash,
-                length,
-            });
-            unpacked
-                .entries
-                .insert(target_name, UnpackedArtifact { file, hash, length });
+            partial.insert(
+                Artifact {
+                    version: version.clone(),
+                    tags: tags
+                        .to_tags()
+                        .map_err(ErrorKind::ConvertKnownTagsToMap)?,
+                    hash,
+                    length,
+                },
+                ArtifactData::V1Unpacked {
+                    file,
+                    original_target_name: self.original_target_name.clone(),
+                    inner_path: path,
+                },
+            );
         }
         Ok(())
     }
 
     fn read_os_image(
         mut self,
-        artifacts: &mut ArtifactSet,
-        unpacked: &mut Unpacked,
+        partial: &mut PartialRepository,
         os_variant: OsVariant,
         version: &ArtifactVersion,
     ) -> Result<(), Error> {
@@ -494,53 +507,57 @@ impl CompositeArtifact {
             let Some(entry) = self.entries.remove(&path) else {
                 continue;
             };
-            let target_name = format!("{}/{path}", self.original_target_name);
-            artifacts.insert(Artifact {
-                target_name: target_name.clone(),
-                version: version.clone(),
-                tags: tags
-                    .to_tags()
-                    .map_err(ErrorKind::ConvertKnownTagsToMap)?,
-                hash: entry.hash,
-                length: entry.length,
-            });
-            unpacked.entries.insert(target_name, entry);
+            partial.insert(
+                Artifact {
+                    version: version.clone(),
+                    tags: tags
+                        .to_tags()
+                        .map_err(ErrorKind::ConvertKnownTagsToMap)?,
+                    hash: entry.hash,
+                    length: entry.length,
+                },
+                ArtifactData::V1Unpacked {
+                    file: entry.file,
+                    original_target_name: self.original_target_name.clone(),
+                    inner_path: path,
+                },
+            );
         }
         Ok(())
     }
 
     async fn read_control_plane(
         self,
-        artifacts: &mut ArtifactSet,
-        unpacked: &mut Unpacked,
+        partial: &mut PartialRepository,
     ) -> Result<(), Error> {
         for (tar_path, UnpackedArtifact { file, hash, length }) in self.entries
         {
             if !tar_path.starts_with("zones/") {
                 continue;
             }
-            let target_name =
-                format!("{}/{tar_path}", self.original_target_name);
             let (file, layer_info) = crate::util::read_zone_layer_info(
                 RangeReader::new(file, 0..length),
-                target_name.clone().into(),
+                Utf8Path::new(&self.original_target_name).join(&tar_path),
             )
             .await?;
             let file = file.into_inner();
             let tags =
                 KnownArtifactTags::Zone(ZoneTags { zone_name: layer_info.pkg });
-            artifacts.insert(Artifact {
-                target_name: target_name.clone(),
-                version: layer_info.version,
-                tags: tags
-                    .to_tags()
-                    .map_err(ErrorKind::ConvertKnownTagsToMap)?,
-                hash,
-                length,
-            });
-            unpacked
-                .entries
-                .insert(target_name, UnpackedArtifact { file, hash, length });
+            partial.insert(
+                Artifact {
+                    version: layer_info.version,
+                    tags: tags
+                        .to_tags()
+                        .map_err(ErrorKind::ConvertKnownTagsToMap)?,
+                    hash,
+                    length,
+                },
+                ArtifactData::V1Unpacked {
+                    file,
+                    original_target_name: self.original_target_name.clone(),
+                    inner_path: tar_path,
+                },
+            );
         }
         Ok(())
     }
@@ -582,15 +599,20 @@ impl BufRead for MpscReader {
 }
 
 async fn generate_installinator_document(
-    artifacts: &mut ArtifactSet,
-    unpacked: &mut Unpacked,
+    partial: &mut PartialRepository,
     version: ArtifactVersion,
-    original_target: String,
+    original_target_name: String,
 ) -> Result<(), Error> {
-    let target_name = format!("{original_target}/v2.json");
     let mut document = InstallinatorDocument::empty(version.clone());
-    document.artifacts =
-        artifacts.iter().filter_map(Artifact::to_installinator).collect();
+    for (artifact, data) in &partial.artifact_data {
+        let target_name = match data {
+            ArtifactData::Target { target_name } => target_name,
+            ArtifactData::V1Unpacked { inner_path, .. } => inner_path.as_str(),
+        };
+        if let Some(installinator) = artifact.to_installinator(target_name) {
+            document.artifacts.insert(installinator);
+        }
+    }
 
     let mut json = serde_json::to_string_pretty(&document)
         .map_err(ErrorKind::SerializeInstallinator)?;
@@ -602,16 +624,21 @@ async fn generate_installinator_document(
     })
     .await??;
 
-    artifacts.insert(Artifact {
-        target_name: target_name.clone(),
-        version,
-        tags: KnownArtifactTags::InstallinatorDocument
-            .to_tags()
-            .map_err(ErrorKind::ConvertKnownTagsToMap)?,
-        hash: unpacked_artifact.hash,
-        length: unpacked_artifact.length,
-    });
-    unpacked.entries.insert(target_name, unpacked_artifact);
+    partial.insert(
+        Artifact {
+            version,
+            tags: KnownArtifactTags::InstallinatorDocument
+                .to_tags()
+                .map_err(ErrorKind::ConvertKnownTagsToMap)?,
+            hash: unpacked_artifact.hash,
+            length: unpacked_artifact.length,
+        },
+        ArtifactData::V1Unpacked {
+            file: unpacked_artifact.file,
+            original_target_name,
+            inner_path: "v2.json".into(),
+        },
+    );
     Ok(())
 }
 

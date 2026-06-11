@@ -2,6 +2,8 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+use std::collections::HashMap;
+
 use tufaceous_artifact::ArtifactSet;
 use tufaceous_artifact::ArtifactVersion;
 use tufaceous_artifact::OsVariant;
@@ -40,7 +42,7 @@ pub trait ArtifactSetExt: Sized {
 
 impl ArtifactSetExt for ArtifactSet {
     fn fake(version: ArtifactVersion) -> Result<Self, Error> {
-        let mut artifacts = ArtifactSet::default();
+        let mut artifacts = HashMap::new();
         for input in Input::fake(&version, None)? {
             for output in input.outputs()? {
                 artifacts.extend(output.into_artifact());
@@ -48,10 +50,10 @@ impl ArtifactSetExt for ArtifactSet {
         }
         artifacts.extend(
             generate_installinator_document(
-                artifacts.iter().map(|artifact| {
+                artifacts.iter().map(|(target_name, artifact)| {
                     (
                         ArtifactSchema {
-                            target_name: artifact.target_name.clone(),
+                            target_name: target_name.clone(),
                             version: artifact.version.clone(),
                             tags: artifact.tags.clone(),
                         },
@@ -62,7 +64,7 @@ impl ArtifactSetExt for ArtifactSet {
             )?
             .into_artifact(),
         );
-        Ok(artifacts)
+        Ok(artifacts.into_values().collect())
     }
 }
 

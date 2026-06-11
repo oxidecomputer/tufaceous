@@ -17,6 +17,10 @@ use tufaceous_artifact::OsVariant;
 use tufaceous_artifact::artifact_set::GetError;
 
 use crate::Repository;
+use crate::repo::ArtifactData;
+use crate::repo::InvalidTargetError;
+use crate::repo::target_meta;
+use crate::repo::target_meta_inner;
 
 impl Repository {
     /// Check the repository for consistency and other problems.
@@ -27,21 +31,37 @@ impl Repository {
     /// must **not** be used for repositories that may have been created by
     /// another version of Tufaceous, such as when the control plane decides to
     /// accept a repository.
+    #[allow(clippy::too_many_lines)]
     pub async fn check_problems(&self) -> Vec<CheckProblem> {
         let mut problems = Vec::new();
 
-        for artifact in self.artifacts() {
-            // Check that all targets listed in `artifacts-v2.json` actually
-            // exist in the repository.
-            if !self.contains_target(&artifact.target_name) {
-                problems.push(CheckProblem::MissingTarget {
-                    target_name: artifact.target_name.clone(),
+        for (target_name, target) in self.targets() {
+            if target_name.raw() != target_name.resolved() {
+                problems.push(CheckProblem::BadTargetName {
+                    target_name: target_name.raw().to_owned(),
                 });
+            }
+            if let Err(error) = target_meta_inner(target) {
+                problems.push(CheckProblem::from_invalid_target(
+                    error,
+                    target_name.raw().to_owned(),
+                ));
+            }
+        }
+
+        for (artifact, data) in &self.artifact_data {
+            if let ArtifactData::Target { target_name } = data
+                && let Err(error) = target_meta(&self.inner, target_name)
+            {
+                problems.push(CheckProblem::from_invalid_target(
+                    error,
+                    target_name.to_owned(),
+                ));
             }
             // Check that no artifact contains unknown tags.
             if artifact.known_tags().is_none() {
                 problems.push(CheckProblem::UnknownTags {
-                    target_name: artifact.target_name.clone(),
+                    target_name: data.original_target_name().to_owned(),
                     tags: artifact.tags.clone(),
                 });
             }
@@ -114,7 +134,7 @@ impl Repository {
 
         if let Ok(artifact) =
             self.artifacts().get_only(&KnownArtifactTags::InstallinatorDocument)
-            && let Ok(stream) = self.read_target(&artifact.target_name).await
+            && let Ok(stream) = self.read_artifact(artifact).await
             && let Ok(bytes) = stream.map_ok(Vec::from).try_concat().await
             && let Ok(doc) = serde_json::from_slice::<InstallinatorDocument>(
                 &bytes,
@@ -163,6 +183,17 @@ pub enum CheckProblem {
     )]
     MissingTarget { target_name: String },
 
+    /// A target name in the repository is not well-formed.
+    #[error("target name {target_name} is not well-formed")]
+    BadTargetName { target_name: String },
+
+    /// A SHA-256 checksum in the TUF repository metadata has an invalid length.
+    #[error(
+        "target {target_name} has SHA-256 checksum {} with invalid length",
+        hex::encode(.sha256)
+    )]
+    TargetHashLengthMismatch { target_name: String, sha256: Vec<u8> },
+
     /// Multiple artifacts for these tags were not expected.
     #[error("multiple artifacts found matching {0}")]
     MultipleArtifacts(KnownArtifactTags),
@@ -193,4 +224,21 @@ pub enum CheckProblem {
         DisplayTags::from(.tags)
     )]
     UnknownTags { target_name: String, tags: BTreeMap<String, String> },
+}
+
+impl CheckProblem {
+    fn from_invalid_target(
+        source: InvalidTargetError,
+        target_name: String,
+    ) -> Self {
+        match source {
+            InvalidTargetError::NameRejected => {
+                Self::BadTargetName { target_name }
+            }
+            InvalidTargetError::NotFound => Self::MissingTarget { target_name },
+            InvalidTargetError::ChecksumLength { sha256 } => {
+                Self::TargetHashLengthMismatch { target_name, sha256 }
+            }
+        }
+    }
 }

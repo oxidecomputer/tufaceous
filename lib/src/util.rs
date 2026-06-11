@@ -25,12 +25,18 @@ use crate::error::ErrorKind;
 use crate::error::try_path;
 
 pub(crate) trait ArtifactExt {
-    fn to_installinator(&self) -> Option<InstallinatorArtifact>;
+    fn to_installinator(
+        &self,
+        target_name: &str,
+    ) -> Option<InstallinatorArtifact>;
 }
 
 impl ArtifactExt for Artifact {
-    fn to_installinator(&self) -> Option<InstallinatorArtifact> {
-        installinator_artifact(self.tags.clone(), self.hash, &self.target_name)
+    fn to_installinator(
+        &self,
+        target_name: &str,
+    ) -> Option<InstallinatorArtifact> {
+        installinator_artifact(self.tags.clone(), self.hash, target_name)
     }
 }
 
@@ -114,4 +120,14 @@ impl DirEntry {
             .file_name()
             .expect("path created through DirEntry must have a file name")
     }
+}
+
+pub(crate) fn error_chain(mut error: &dyn std::error::Error) -> String {
+    let mut s = error.to_string();
+    while let Some(source) = error.source() {
+        s.push_str(": ");
+        s.push_str(&source.to_string());
+        error = source;
+    }
+    s
 }

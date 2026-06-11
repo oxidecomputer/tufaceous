@@ -26,13 +26,6 @@ use crate::KnownArtifactTags;
     Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Deserialize, Serialize,
 )]
 pub struct Artifact {
-    /// The TUF target name, if this value is associated with a loaded
-    /// repository.
-    ///
-    /// If you are instantiating this struct from other records (such as a
-    /// database), you can use `String::new()` here.
-    pub target_name: String,
-
     /// The version of the artifact.
     pub version: ArtifactVersion,
 

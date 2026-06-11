@@ -14,6 +14,7 @@ use std::ops::Range;
 use crate::ZipTransportError;
 use camino::Utf8PathBuf;
 use tough::TransportErrorKind;
+use tufaceous_artifact::Artifact;
 use tufaceous_artifact::DisplayTags;
 
 macro_rules! try_path {
@@ -170,6 +171,15 @@ pub enum ErrorKind {
     UrlJoin { source: url::ParseError, url: &'static str, base: String },
     #[error("no trust roots provided to load repository")]
     NoTrustRoots,
+    #[error(
+        "artifact ({tags} version={version} hash={hash} length={length}) \
+        not found",
+        tags = .0.display_tags(),
+        version = .0.version,
+        hash = .0.hash,
+        length = .0.length,
+    )]
+    ArtifactNotFound(Artifact),
     #[error("target {target_name} not found")]
     TargetNotFound { target_name: String },
     #[error("failed to parse target {target}")]
@@ -238,6 +248,7 @@ impl ErrorKind {
             | ErrorKind::TargetsBaseUrlUnset
             | ErrorKind::UrlJoin { .. }
             | ErrorKind::NoTrustRoots
+            | ErrorKind::ArtifactNotFound { .. }
             | ErrorKind::TargetNotFound { .. }
             | ErrorKind::ParseTargetJson { .. }
             | ErrorKind::ArtifactVersion(_)
@@ -380,9 +391,6 @@ impl Debug for DebugByteString<'_> {
 
 #[cfg(test)]
 mod tests {
-    use std::error::Error as _;
-    use std::fmt::Write;
-
     use crate::error::Error;
     use crate::error::ErrorKind;
 
@@ -392,15 +400,8 @@ mod tests {
             source: std::io::Error::from(std::io::ErrorKind::NotFound),
             path: Some("/nowhere/in/particular".into()),
         });
-        let mut chain = err.to_string();
-        let mut source = err.source();
-        while let Some(err) = source {
-            write!(chain, ": {err}").unwrap();
-            source = err.source();
-        }
-
         assert_eq!(
-            chain,
+            crate::util::error_chain(&err),
             "failed to open file /nowhere/in/particular: entity not found"
         );
     }

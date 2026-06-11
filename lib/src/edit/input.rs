@@ -202,18 +202,20 @@ impl<Source> Output<Source> {
 }
 
 impl Output<BytesSource> {
-    pub(crate) fn into_artifact(self) -> Option<Artifact> {
+    pub(crate) fn into_artifact(self) -> Option<(String, Artifact)> {
         let data = self.artifact_data?;
         let mut hasher = Sha256::new();
         for bytes in self.source.iter_bytes() {
             hasher.update(bytes);
         }
-        Some(Artifact {
-            target_name: self.target_name,
-            version: data.version,
-            tags: data.tags,
-            hash: ArtifactHash(hasher.finalize().0),
-            length: self.source.length(),
-        })
+        Some((
+            self.target_name,
+            Artifact {
+                version: data.version,
+                tags: data.tags,
+                hash: ArtifactHash(hasher.finalize().0),
+                length: self.source.length(),
+            },
+        ))
     }
 }

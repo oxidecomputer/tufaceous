@@ -37,7 +37,7 @@ async fn it_works() -> Result<(), Error> {
         .load_zip_buffer(zip, &log)
         .await?;
     for artifact in repo.artifacts() {
-        repo.read_target(&artifact.target_name)
+        repo.read_artifact(artifact)
             .await?
             .map_ok(|bytes| bytes.to_vec())
             .try_concat()
@@ -127,7 +127,7 @@ async fn empty_artifact() -> Result<(), Error> {
     let artifacts = repo.artifacts().iter().collect::<Vec<_>>();
     assert_eq!(artifacts.len(), 1);
     let data = repo
-        .read_target(&artifacts[0].target_name)
+        .read_artifact(artifacts[0])
         .await?
         .map_ok(|bytes| bytes.to_vec())
         .try_concat()

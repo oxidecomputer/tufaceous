@@ -2,6 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+mod check;
 mod v1;
 
 use std::collections::BTreeMap;
@@ -14,6 +15,7 @@ use camino::Utf8Path;
 use camino::Utf8PathBuf;
 use futures_util::Stream;
 use futures_util::TryStreamExt;
+use rawzip::FileReader;
 use semver::Version;
 use serde::de::DeserializeOwned;
 use slog::Logger;
@@ -22,7 +24,6 @@ use tokio::sync::Semaphore;
 use tokio::sync::TryAcquireError;
 use tokio::task::JoinSet;
 use tough::TargetName;
-use tough::schema::Hashes;
 use tough::schema::Target;
 use tufaceous_artifact::Artifact;
 use tufaceous_artifact::ArtifactHash;
@@ -34,6 +35,7 @@ use tufaceous_artifact::artifact_set::GetError;
 use crate::RepositoryLoader;
 use crate::error::Error;
 use crate::error::ErrorKind;
+pub use crate::repo::check::CheckProblem;
 use crate::schema::ArtifactSchema;
 use crate::schema::ArtifactSetSchema;
 
@@ -47,8 +49,8 @@ pub struct Repository {
     system_version: Version,
     trust_root: Vec<u8>,
     artifacts: ArtifactSet,
+    artifact_data: BTreeMap<Artifact, ArtifactData>,
     metadata: BTreeMap<String, String>,
-    v1_unpacked: Option<v1::Unpacked>,
 
     // These are set directly by the ZIP archive convenience methods in the
     // loader module.
@@ -116,16 +118,15 @@ impl Repository {
             read_target_json(&repo, ArtifactSetSchema::TARGET_NAME).await?
         else {
             if v1_compatibility
-                && let Some((system_version, artifacts, v1_unpacked)) =
-                    v1::from_loaded(&repo, log).await?
+                && let Some(partial) = v1::from_loaded(&repo, log).await?
             {
                 return Ok(Repository {
                     inner: repo,
                     trust_root,
-                    system_version,
-                    artifacts,
+                    system_version: partial.system_version,
+                    artifacts: partial.artifacts,
+                    artifact_data: partial.artifact_data,
                     metadata: BTreeMap::new(),
-                    v1_unpacked: Some(v1_unpacked),
                     archive_path: None,
                     archive_sha256: None,
                 });
@@ -137,11 +138,16 @@ impl Repository {
             .into());
         };
 
-        let artifacts = artifacts
+        let (artifacts, artifact_data) = artifacts
             .into_iter()
             .filter_map(|ArtifactSchema { target_name, version, tags }| {
-                let (hash, length) = sha256_length(&repo, log, &target_name)?;
-                Some(Artifact { target_name, version, tags, hash, length })
+                let (hash, length) =
+                    target_meta_skip(&repo, log, &target_name)?;
+                let artifact = Artifact { version, tags, hash, length };
+                Some((
+                    artifact.clone(),
+                    (artifact, ArtifactData::Target { target_name }),
+                ))
             })
             .collect();
         Ok(Repository {
@@ -149,8 +155,8 @@ impl Repository {
             trust_root,
             system_version,
             artifacts,
+            artifact_data,
             metadata,
-            v1_unpacked: None,
             archive_path: None,
             archive_sha256: None,
         })
@@ -188,6 +194,32 @@ impl Repository {
         &self.artifacts
     }
 
+    /// Returns an [`ArtifactSchema`] for the artifacts in the repository.
+    ///
+    /// This is used by [`crate::edit::RepositoryEditor::import_repo`].
+    ///
+    /// # Errors
+    ///
+    /// If this was a v1 repository, returns an error; we don't have a valid
+    /// target name for unpacked artifacts.
+    pub(crate) fn to_artifact_schema(
+        &self,
+    ) -> Result<Vec<ArtifactSchema>, Error> {
+        self.artifact_data
+            .iter()
+            .map(|(artifact, data)| match data {
+                ArtifactData::Target { target_name } => Ok(ArtifactSchema {
+                    target_name: target_name.clone(),
+                    version: artifact.version.clone(),
+                    tags: artifact.tags.clone(),
+                }),
+                ArtifactData::V1Unpacked { .. } => {
+                    Err(ErrorKind::ImportV1Repo.into())
+                }
+            })
+            .collect()
+    }
+
     pub fn metadata(&self) -> &BTreeMap<String, String> {
         &self.metadata
     }
@@ -196,39 +228,44 @@ impl Repository {
         Metadata::from_map(self.metadata.clone()).ok()
     }
 
-    pub fn is_v1(&self) -> bool {
-        self.v1_unpacked.is_some()
-    }
-
-    pub(crate) fn contains_target(&self, target: &str) -> bool {
-        if let Ok(target_name) = target.parse()
-            && self.targets().contains_key(&target_name)
-        {
-            true
-        } else if let Some(unpacked) = &self.v1_unpacked
-            && unpacked.entries.contains_key(target)
-        {
-            true
-        } else {
-            false
+    pub async fn read_artifact(
+        &self,
+        artifact: &Artifact,
+    ) -> Result<TargetStream, Error> {
+        let data = self
+            .artifact_data
+            .get(artifact)
+            .ok_or_else(|| ErrorKind::ArtifactNotFound(artifact.clone()))?;
+        match data {
+            ArtifactData::Target { target_name } => {
+                self.read_target(target_name).await
+            }
+            ArtifactData::V1Unpacked { file, .. } => {
+                let unpacked = v1::UnpackedArtifact {
+                    file: file.clone(),
+                    hash: artifact.hash,
+                    length: artifact.length,
+                };
+                Ok(Box::pin(unpacked.stream()))
+            }
         }
     }
 
+    /// Read a target from the underlying TUF repository by its target name.
+    ///
+    /// If you have an [`Artifact`], use [`Self::read_artifact`].
     pub async fn read_target(
         &self,
-        target: &str,
+        target_name: &str,
     ) -> Result<TargetStream, Error> {
-        if let Some(stream) = read_target(&self.inner, target).await? {
-            return Ok(Box::pin(stream));
+        if let Some(stream) = read_target(&self.inner, target_name).await? {
+            Ok(Box::pin(stream))
+        } else {
+            Err(ErrorKind::TargetNotFound {
+                target_name: target_name.to_owned(),
+            }
+            .into())
         }
-
-        if let Some(unpacked) = &self.v1_unpacked
-            && let Some(entry) = unpacked.entries.get(target).cloned()
-        {
-            return Ok(Box::pin(entry.stream()));
-        }
-
-        Err(ErrorKind::TargetNotFound { target_name: target.to_owned() }.into())
     }
 
     /// Returns an [`ArtifactHandle`] for the one (and only one) artifact
@@ -325,6 +362,33 @@ impl Repository {
     }
 }
 
+/// While we have v1 compatibility, artifacts might come from the underlying
+/// `tough::Repository` or from an unpacked file on disk. When we drop all v1
+/// compatibility code we can remove this indirection.
+#[derive(Debug, Clone)]
+enum ArtifactData {
+    /// The artifact is read from the underlying `tough::Repository`.
+    Target { target_name: String },
+    /// The artifact was unpacked from a composite artifact in a v1 repository,
+    /// and is read from a temporary file on disk.
+    V1Unpacked {
+        file: Arc<FileReader>,
+        original_target_name: String,
+        inner_path: Utf8PathBuf,
+    },
+}
+
+impl ArtifactData {
+    fn original_target_name(&self) -> &str {
+        match self {
+            ArtifactData::Target { target_name } => target_name,
+            ArtifactData::V1Unpacked { original_target_name, .. } => {
+                original_target_name
+            }
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct ArtifactHandle {
     artifact: Artifact,
@@ -341,7 +405,7 @@ impl ArtifactHandle {
     }
 
     pub async fn stream(&self) -> Result<TargetStream, Error> {
-        self.repo.read_target(&self.artifact.target_name).await
+        self.repo.read_artifact(&self.artifact).await
     }
 }
 
@@ -384,43 +448,54 @@ async fn read_target_json<T: DeserializeOwned>(
     })
 }
 
-fn sha256_length(
+fn target_meta_inner(
+    target: &Target,
+) -> Result<(ArtifactHash, u64), InvalidTargetError> {
+    Ok((
+        ArtifactHash(target.hashes.sha256.as_ref().try_into().map_err(
+            |_| InvalidTargetError::ChecksumLength {
+                sha256: target.hashes.sha256.to_vec(),
+            },
+        )?),
+        target.length,
+    ))
+}
+
+fn target_meta(
+    repo: &tough::Repository,
+    target_name: &str,
+) -> Result<(ArtifactHash, u64), InvalidTargetError> {
+    let name = TargetName::new(target_name)
+        .map_err(|_| InvalidTargetError::NameRejected)?;
+    let Some(target) = repo.targets().signed.targets.get(&name) else {
+        return Err(InvalidTargetError::NotFound);
+    };
+    target_meta_inner(target)
+}
+
+fn target_meta_skip(
     repo: &tough::Repository,
     log: &Logger,
     target_name: &str,
 ) -> Option<(ArtifactHash, u64)> {
-    let parsed_name = TargetName::new(target_name)
+    target_meta(repo, target_name)
         .inspect_err(|error| {
             warn!(
                 log,
                 "skipping artifact";
                 "target_name" => &target_name,
-                "error" => error.to_string(),
+                "error" => crate::util::error_chain(&error),
             );
         })
-        .ok()?;
-    let Some(target) = repo.targets().signed.targets.get(&parsed_name) else {
-        warn!(
-            log,
-            "skipping artifact";
-            "target_name" => &target_name,
-            "error" => "target not found",
-        );
-        return None;
-    };
-    let Hashes { sha256, .. } = &target.hashes;
-    let sha256 = sha256
-        .as_ref()
-        .try_into()
-        .inspect_err(|_| {
-            warn!(
-                log,
-                "skipping artifact";
-                "target_name" => &target_name,
-                "error" => "incorrect checksum length",
-                "sha256" => hex::encode(sha256),
-            );
-        })
-        .ok()?;
-    Some((ArtifactHash(sha256), target.length))
+        .ok()
+}
+
+#[derive(Debug, thiserror::Error)]
+enum InvalidTargetError {
+    #[error("target name rejected by tough")]
+    NameRejected,
+    #[error("target not found")]
+    NotFound,
+    #[error("incorrect sha256 length for {:?}", hex::encode(.sha256))]
+    ChecksumLength { sha256: Vec<u8> },
 }
