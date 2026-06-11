@@ -195,8 +195,7 @@ impl<T: ReaderAt + Debug + Send + Sync + 'static> ZipTransport<T> {
 
         // First check: the number of entries in the central directory matches
         // the value in the EOCD record.
-        let actual =
-            u64::try_from(all_entries.len()).expect("usize fits in u64");
+        let actual = usize64!(all_entries.len());
         if archive.entries_hint() != actual {
             return Err(ErrorKind::ZipEntryCount {
                 expected: archive.entries_hint(),

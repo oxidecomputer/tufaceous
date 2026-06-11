@@ -116,7 +116,7 @@ impl BytesSource {
                 if let Ok(length) = usize::try_from(length) {
                     bytes.truncate(length);
                 }
-                length - u64::try_from(bytes.len()).expect("usize fits in u64")
+                length - usize64!(bytes.len())
             }
             None => 0,
         };
@@ -140,9 +140,7 @@ impl BytesSource {
     }
 
     pub(crate) fn length(&self) -> u64 {
-        self.fake_length.unwrap_or_else(|| {
-            self.bytes.len().try_into().expect("usize fits in u64")
-        })
+        self.fake_length.unwrap_or_else(|| usize64!(self.bytes.len()))
     }
 
     async fn sha256(&mut self) -> ArtifactHash {
@@ -221,8 +219,7 @@ impl FileSource {
             .try_fold(
                 (0u64, Sha256::new()),
                 |(mut length, mut hasher), bytes| {
-                    length +=
-                        u64::try_from(bytes.len()).expect("usize fits in u64");
+                    length += usize64!(bytes.len());
                     hasher.update(&bytes);
                     if let Some(vec) = vec.as_mut() {
                         vec.extend_from_slice(&bytes);
@@ -293,7 +290,7 @@ impl FileSource {
                     if n == 0 {
                         return Ok(None);
                     }
-                    offset += u64::try_from(n).expect("usize fits in u64");
+                    offset += usize64!(n);
                     buf.truncate(n);
                     Ok(Some((buf.split().freeze(), (inner, buf, offset))))
                 })

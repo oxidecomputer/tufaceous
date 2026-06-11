@@ -265,7 +265,7 @@ impl UnpackedArtifact {
             })?;
             hasher.update(buf);
             reader.consume(len);
-            length += u64::try_from(len).expect("usize fits in u64");
+            length += usize64!(len);
         }
         let file = Arc::new(file.into());
         let hash = ArtifactHash(hasher.finalize().0);
@@ -309,8 +309,7 @@ impl UnpackedArtifact {
                     );
                 }
                 hasher.update(&bytes);
-                bytes_read +=
-                    u64::try_from(bytes.len()).expect("usize fits in u64");
+                bytes_read += usize64!(bytes.len());
                 Ok(Some((bytes, (this, buf, hasher, bytes_read))))
             },
         )
