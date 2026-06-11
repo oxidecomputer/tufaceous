@@ -106,11 +106,11 @@ const EOCD_MAX_SEARCH_SPACE: u64 = 22;
 ///
 /// Convenience methods for setting the correct transport
 /// and base URLs for loading Tufaceous-generated
-/// repositories are [`RepositoryLoader::load_zip_slice`] and
+/// repositories are [`RepositoryLoader::load_zip_buffer`] and
 /// [`RepositoryLoader::load_zip_file`].
 ///
-/// [`RepositoryLoader::load_zip_slice`]: [`crate::RepositoryLoader::load_zip_slice`]
-/// [`RepositoryLoader::load_zip_file`]: [`crate::RepositoryLoader::load_zip_file`]
+/// [`RepositoryLoader::load_zip_buffer`]: crate::RepositoryLoader::load_zip_buffer
+/// [`RepositoryLoader::load_zip_file`]: crate::RepositoryLoader::load_zip_file
 #[derive(Debug)]
 pub struct ZipTransport<T: ReaderAt + Debug + Send + Sync + 'static> {
     inner: Arc<Inner<T>>,
