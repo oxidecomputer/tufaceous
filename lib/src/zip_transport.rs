@@ -184,6 +184,15 @@ impl<T: ReaderAt + Debug + Send + Sync + 'static> ZipTransport<T> {
         while let Some(record) =
             try_archive_path!(records.next_entry(), ReadZip, archive_path)
         {
+            if usize64!(all_entries.len()) >= archive.entries_hint() {
+                return Err(ErrorKind::ZipEntryCount {
+                    expected: archive.entries_hint(),
+                    actual: None,
+                    archive_path,
+                }
+                .into());
+            }
+
             all_entries.push(RawEntry::from(&record));
             if let Some((url, entry)) = Entry::new(&record, log) {
                 entries
@@ -199,7 +208,7 @@ impl<T: ReaderAt + Debug + Send + Sync + 'static> ZipTransport<T> {
         if archive.entries_hint() != actual {
             return Err(ErrorKind::ZipEntryCount {
                 expected: archive.entries_hint(),
-                actual,
+                actual: Some(actual),
                 archive_path,
             }
             .into());

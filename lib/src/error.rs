@@ -72,11 +72,12 @@ pub enum ErrorKind {
     #[error(
         "zip archive{archive_path}'s end of central directory record \
         expects {expected} entries, but found {actual} entries",
-        archive_path = SpacePath(archive_path)
+        archive_path = SpacePath(archive_path),
+        actual = OrMore(actual),
     )]
     ZipEntryCount {
         expected: u64,
-        actual: u64,
+        actual: Option<u64>,
         archive_path: Option<Utf8PathBuf>,
     },
     #[error(
@@ -373,6 +374,17 @@ impl Display for SpacePath<'_> {
         match self.0 {
             Some(path) => write!(f, " {path}"),
             None => Ok(()),
+        }
+    }
+}
+
+struct OrMore<'a>(&'a Option<u64>);
+
+impl Display for OrMore<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self.0 {
+            Some(value) => write!(f, "{value}"),
+            None => write!(f, "more"),
         }
     }
 }
