@@ -982,9 +982,10 @@ dependencies = [
 
 [[package]]
 name = "hubtools"
-version = "0.4.6"
-source = "git+https://github.com/oxidecomputer/hubtools.git?branch=main#3b72a550f2b5ec7ad489b8822b26239b7176bfdd"
+version = "0.4.7"
+source = "git+https://github.com/oxidecomputer/hubtools.git?rev=2b1ef9b38d75563ea800baa3b17327eec17b1b7a#2b1ef9b38d75563ea800baa3b17327eec17b1b7a"
 dependencies = [
+ "digest",
  "hex",
  "lpc55_areas",
  "lpc55_sign",
@@ -1704,7 +1705,7 @@ dependencies = [
 [[package]]
 name = "rats-corim"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/rats-corim.git?branch=main#f0d5d5168d3d31487a56df32c676b0c6240bcc6b"
+source = "git+https://github.com/oxidecomputer/rats-corim.git?rev=f0d5d5168d3d31487a56df32c676b0c6240bcc6b#f0d5d5168d3d31487a56df32c676b0c6240bcc6b"
 dependencies = [
  "ciborium",
  "ciborium-io",

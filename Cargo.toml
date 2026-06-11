@@ -29,10 +29,10 @@ expectorate = "1.1.0"
 flate2 = "1.0.35"
 futures-util = "0.3.31"
 hex = "0.4.3"
-hubtools = { git = "https://github.com/oxidecomputer/hubtools.git", branch = "main" }
+hubtools = { git = "https://github.com/oxidecomputer/hubtools.git", rev = "2b1ef9b38d75563ea800baa3b17327eec17b1b7a" }
 memchr = "2.7.4"
 proptest = "1.5.0"
-rats-corim = { git = "https://github.com/oxidecomputer/rats-corim.git", branch = "main" }
+rats-corim = { git = "https://github.com/oxidecomputer/rats-corim.git", rev = "f0d5d5168d3d31487a56df32c676b0c6240bcc6b" }
 rawzip = "0.4.4"
 regex = "1.11.1"
 schemars = "0.8.21"
