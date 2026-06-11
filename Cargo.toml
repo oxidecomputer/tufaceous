@@ -18,6 +18,7 @@ anyhow = "1.0.96"
 assert_cmd = "2.0.16"
 atomicwrites = "0.4.4"
 aws-lc-rs = "1.16.2"
+byte-wrapper = { version = "0.1.0", default-features = false, features = ["alloc", "hex", "serde"] }
 bytes = "1.11.1"
 camino = "1.1.9"
 camino-tempfile = "1.1.1"
@@ -25,6 +26,7 @@ chrono = { version = "0.4.40", default-features = false, features = ["std"] }
 ciborium = "0.2.2"
 clap = { version = "4.5.31", features = ["cargo", "derive", "wrap_help"] }
 daft = { version = "0.1.1", features = ["derive"] }
+digest-io = "0.1.0"
 expectorate = "1.1.0"
 flate2 = "1.0.35"
 futures-util = "0.3.31"
@@ -38,9 +40,8 @@ regex = "1.11.1"
 schemars = "0.8.21"
 semver = { version = "1.0.25", features = ["serde"] }
 serde = { version = "1.0.218", features = ["derive"] }
-serde_human_bytes = { git = "https://github.com/oxidecomputer/serde_human_bytes.git", branch = "main" }
 serde_json = "1.0.139"
-sha2 = "0.10.8"
+sha2 = "0.11.0"
 slog = "2.7.0"
 slog-async = "2.8.0"
 slog-envlogger = "2.2.0"

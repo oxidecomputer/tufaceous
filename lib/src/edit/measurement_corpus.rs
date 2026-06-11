@@ -93,7 +93,7 @@ impl Input<BytesSource> {
             .map_err(ErrorKind::SerializeFakeMeasurementCorpus)?;
         Ok(Input::MeasurementCorpus {
             corim_id: corim.id,
-            sha256: ArtifactHash(Sha256::digest(&bytes).into()),
+            sha256: ArtifactHash(Sha256::digest(&bytes).0),
             source: BytesSource::new(bytes),
             version,
         })

@@ -72,10 +72,8 @@ impl<Source> Input<Source> {
     pub(crate) fn outputs(self) -> Result<Vec<Output<Source>>, Error> {
         Ok(match self {
             Input::MeasurementCorpus { source, corim_id, sha256, version } => {
-                let target_name = format!(
-                    "measurements/{corim_id}-{}.cbor",
-                    hex::encode(sha256)
-                );
+                let target_name =
+                    format!("measurements/{corim_id}-{sha256}.cbor",);
                 let tags = KnownArtifactTags::MeasurementCorpus;
                 vec![Output::new(target_name, version, &tags, source)?]
             }
@@ -214,7 +212,7 @@ impl Output<BytesSource> {
             target_name: self.target_name,
             version: data.version,
             tags: data.tags,
-            hash: ArtifactHash(hasher.finalize().into()),
+            hash: ArtifactHash(hasher.finalize().0),
             length: self.source.length(),
         })
     }

@@ -256,7 +256,7 @@ impl UnpackedArtifact {
             length += u64::try_from(len).expect("usize fits in u64");
         }
         let file = Arc::new(file.into());
-        let hash = ArtifactHash(hasher.finalize().into());
+        let hash = ArtifactHash(hasher.finalize().0);
         Ok(Self { file, hash, length })
     }
 
@@ -280,8 +280,7 @@ impl UnpackedArtifact {
                 .await??;
                 let bytes = buf.split().freeze();
                 if bytes.is_empty() {
-                    let msg = if this.hash
-                        != ArtifactHash(hasher.finalize().into())
+                    let msg = if this.hash != ArtifactHash(hasher.finalize().0)
                     {
                         "invalid checksum"
                     } else if this.length != bytes_read {

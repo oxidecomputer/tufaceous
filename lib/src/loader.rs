@@ -7,6 +7,7 @@ use std::io::Seek;
 
 use bytes::Bytes;
 use camino::Utf8PathBuf;
+use digest_io::IoWrapper;
 use futures_util::Stream;
 use futures_util::TryStreamExt;
 use futures_util::pin_mut;
@@ -190,14 +191,14 @@ impl RepositoryLoader {
         let (file, sha256) = if self.compute_archive_sha256 {
             let archive_path = archive_path.clone();
             tokio::task::spawn_blocking(move || {
-                let mut hasher = Sha256::new();
+                let mut hasher = IoWrapper(Sha256::new());
                 try_path!(
                     file.rewind()
                         .and_then(|()| std::io::copy(&mut file, &mut hasher)),
                     ReadFile,
                     archive_path
                 );
-                Ok::<_, Error>((file, Some(hasher.finalize().into())))
+                Ok::<_, Error>((file, Some(hasher.0.finalize().0)))
             })
             .await??
         } else {

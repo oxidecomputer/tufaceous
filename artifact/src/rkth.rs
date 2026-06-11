@@ -7,6 +7,7 @@ use std::fmt::Debug;
 use std::fmt::Display;
 use std::sync::LazyLock;
 
+use byte_wrapper::HexArray;
 use serde::Deserialize;
 use serde::Serialize;
 
@@ -70,7 +71,7 @@ pub struct RotKeyTableHash(pub Option<String>);
 impl RotKeyTableHash {
     /// Create a `RotKeyTableHash` from an array of 32 bytes.
     pub fn from_bytes(hash: [u8; 32]) -> Self {
-        Self(Some(hex::encode(hash)))
+        Self(Some(HexArray(hash).to_string()))
     }
 
     /// Returns a friendly name for the CA this RKTH represents, if one is

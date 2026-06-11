@@ -7,8 +7,9 @@ use std::fmt::Debug;
 use std::fmt::Display;
 use std::str::FromStr;
 
+use byte_wrapper::HexArray;
+use byte_wrapper::ParseHexError;
 use daft::Diffable;
-use hex::FromHexError;
 use serde::Deserialize;
 use serde::Serialize;
 
@@ -91,54 +92,38 @@ impl Artifact {
 #[cfg_attr(feature = "proptest", derive(test_strategy::Arbitrary))]
 #[serde(transparent)]
 pub struct ArtifactHash(
-    #[serde(with = "serde_human_bytes::hex_array")]
+    #[serde(with = "HexArray::<32>")]
     #[cfg_attr(
         feature = "schemars",
-        schemars(schema_with = "hex_schema::<32>")
+        schemars(schema_with = "HexArray::<32>::json_schema")
     )]
     pub [u8; 32],
 );
 
 impl AsRef<[u8]> for ArtifactHash {
     fn as_ref(&self) -> &[u8] {
-        &self.0
+        self.0.as_slice()
     }
 }
 
 impl Debug for ArtifactHash {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_tuple("ArtifactHash").field(&hex::encode(self.0)).finish()
+        f.debug_tuple("ArtifactHash").field(&HexArray(self.0)).finish()
     }
 }
 
 impl Display for ArtifactHash {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        Display::fmt(&hex::encode(self.0), f)
+        Display::fmt(&HexArray(self.0), f)
     }
 }
 
 impl FromStr for ArtifactHash {
-    type Err = FromHexError;
+    type Err = ParseHexError;
 
     fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
-        let mut out = [0u8; 32];
-        hex::decode_to_slice(s, &mut out)?;
-        Ok(Self(out))
+        s.parse()
     }
-}
-
-/// Produce an OpenAPI schema describing a hex array of a specific length (e.g.,
-/// a hash digest).
-#[cfg(feature = "schemars")]
-fn hex_schema<const N: usize>(
-    generator: &mut schemars::SchemaGenerator,
-) -> schemars::schema::Schema {
-    use schemars::JsonSchema;
-
-    let mut schema: schemars::schema::SchemaObject =
-        <String>::json_schema(generator).into();
-    schema.format = Some(format!("hex string ({N} bytes)"));
-    schema.into()
 }
 
 #[cfg(test)]

@@ -9,16 +9,15 @@ rust-version = "1.94"
 [features]
 hubtools = ["dep:hubtools"]
 proptest = ["dep:proptest", "dep:test-strategy"]
-schemars = ["dep:schemars"]
+schemars = ["dep:schemars", "byte-wrapper/schemars08"]
 
 [dependencies]
+byte-wrapper.workspace = true
 daft.workspace = true
-hex.workspace = true
 hubtools = { workspace = true, optional = true }
 proptest = { workspace = true, optional = true }
 schemars = { workspace = true, optional = true }
 serde.workspace = true
-serde_human_bytes.workspace = true
 serde_json.workspace = true
 test-strategy = { workspace = true, optional = true }
 thiserror.workspace = true

@@ -154,7 +154,7 @@ impl BytesSource {
         while let Some(Ok(bytes)) = stream.next().await {
             hasher.update(&bytes);
         }
-        *self.sha256.insert(ArtifactHash(hasher.finalize().into()))
+        *self.sha256.insert(ArtifactHash(hasher.finalize().0))
     }
 
     pub(crate) async fn into_target(mut self) -> Target<'static> {
@@ -231,7 +231,7 @@ impl FileSource {
                 },
             )
             .await?;
-        let sha256 = ArtifactHash(hasher.finalize().into());
+        let sha256 = ArtifactHash(hasher.finalize().0);
         Ok({
             let mut guard = self.inner.length_sha256.lock().expect("poisoned");
             *guard.insert((length, sha256))
