@@ -33,8 +33,9 @@ impl Args {
         } else {
             RepositoryEditor::new(self.version)
         }?;
-        editor = editor
-            .set_generate_installinator_document(!self.no_installinator_document);
+        editor = editor.set_generate_installinator_document(
+            !self.no_installinator_document,
+        );
         for path in self.artifacts {
             editor = editor.guess_artifact(path).await?;
         }
