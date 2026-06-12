@@ -92,7 +92,7 @@ impl Input<BytesSource> {
             inputs.push(Self::fake_rot_archive(
                 RotTags {
                     rot_board: "SimRot".into(),
-                    rot_rkth: RotKeyTableHash(Some(FAKE_SIGN.into())),
+                    rot_rkth: Some(RotKeyTableHash::new(FAKE_SIGN)),
                     rot_slot: slot,
                 },
                 version.clone(),
@@ -102,7 +102,7 @@ impl Input<BytesSource> {
         inputs.push(Self::fake_rot_bootloader_archive(
             RotBootloaderTags {
                 rot_board: "SimRot".into(),
-                rot_rkth: RotKeyTableHash(Some(FAKE_SIGN.into())),
+                rot_rkth: Some(RotKeyTableHash::new(FAKE_SIGN)),
             },
             version.clone(),
             interior_version,

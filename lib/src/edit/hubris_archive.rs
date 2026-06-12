@@ -179,7 +179,7 @@ impl Input<BytesSource> {
     ) -> Result<Self, Error> {
         let data = CabooseData {
             board: &tags.sp_board,
-            sign: &RotKeyTableHash(None),
+            sign: &None,
             commit: "this-is-a-fake-sp",
             version: interior_version.unwrap_or(&version),
         };
@@ -190,7 +190,7 @@ impl Input<BytesSource> {
 
 struct CabooseData<'a> {
     board: &'a str,
-    sign: &'a RotKeyTableHash,
+    sign: &'a Option<RotKeyTableHash>,
     commit: &'static str,
     version: &'a ArtifactVersion,
 }
@@ -202,8 +202,8 @@ impl CabooseData<'_> {
             .name(self.board)
             .git_commit(self.commit)
             .version(self.version.to_string());
-        if let Some(sign) = self.sign.0.as_ref() {
-            builder = builder.sign(sign);
+        if let Some(sign) = self.sign {
+            builder = builder.sign(sign.as_str());
         }
         let caboose = builder.build();
 

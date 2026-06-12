@@ -29,7 +29,7 @@ impl RotTags {
     ) -> Result<Self, ReadCabooseError> {
         Ok(Self {
             rot_board: read_board(caboose)?,
-            rot_rkth: RotKeyTableHash(read_sign(caboose)?),
+            rot_rkth: read_sign(caboose)?,
             rot_slot: slot,
         })
     }
@@ -46,7 +46,7 @@ impl RotBootloaderTags {
     pub fn from_caboose(caboose: &Caboose) -> Result<Self, ReadCabooseError> {
         Ok(Self {
             rot_board: read_board(caboose)?,
-            rot_rkth: RotKeyTableHash(read_sign(caboose)?),
+            rot_rkth: read_sign(caboose)?,
         })
     }
 }
@@ -120,9 +120,11 @@ fn read_board(caboose: &Caboose) -> Result<String, ReadCabooseError> {
     Ok(utf8(caboose.board()?, "BORD")?.to_owned())
 }
 
-fn read_sign(caboose: &Caboose) -> Result<Option<String>, ReadCabooseError> {
+fn read_sign(
+    caboose: &Caboose,
+) -> Result<Option<RotKeyTableHash>, ReadCabooseError> {
     match caboose.sign() {
-        Ok(sign) => Ok(Some(utf8(sign, "SIGN")?.to_owned())),
+        Ok(sign) => Ok(Some(RotKeyTableHash::new(utf8(sign, "SIGN")?))),
         Err(CabooseError::MissingTag { .. }) => Ok(None),
         Err(error) => Err(error.into()),
     }

@@ -16,6 +16,7 @@ use tufaceous_artifact::OsPhase1Tags;
 use tufaceous_artifact::OsPhase2Tags;
 use tufaceous_artifact::OsVariant;
 use tufaceous_artifact::RotBootloaderTags;
+use tufaceous_artifact::RotKeyTableHash;
 use tufaceous_artifact::RotTags;
 use tufaceous_artifact::SpTags;
 use tufaceous_artifact::ZoneTags;
@@ -119,7 +120,10 @@ impl<Source> Input<Source> {
                 let target_name = format!(
                     "rot/{board}-{sign}-{version}-slot-{slot}.zip",
                     board = tags.rot_board,
-                    sign = tags.rot_rkth,
+                    sign = tags
+                        .rot_rkth
+                        .as_ref()
+                        .map_or("unsigned", RotKeyTableHash::as_str),
                     slot = tags.rot_slot
                 );
                 vec![Output::new(target_name, version, &tags.into(), source)?]
@@ -128,7 +132,10 @@ impl<Source> Input<Source> {
                 let target_name = format!(
                     "rot-bootloader/{board}-{sign}-{version}.zip",
                     board = tags.rot_board,
-                    sign = tags.rot_rkth
+                    sign = tags
+                        .rot_rkth
+                        .as_ref()
+                        .map_or("unsigned", RotKeyTableHash::as_str),
                 );
                 vec![Output::new(target_name, version, &tags.into(), source)?]
             }

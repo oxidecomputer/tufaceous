@@ -51,7 +51,7 @@ async fn v1_fake() -> Result<(), Error> {
             expected.push(
                 RotTags {
                     rot_board: "SimRot".into(),
-                    rot_rkth: RotKeyTableHash(Some(rot_rkth.into())),
+                    rot_rkth: Some(RotKeyTableHash::new(rot_rkth)),
                     rot_slot,
                 }
                 .into(),
@@ -60,7 +60,7 @@ async fn v1_fake() -> Result<(), Error> {
         expected.push(
             RotBootloaderTags {
                 rot_board: "SimRot".into(),
-                rot_rkth: RotKeyTableHash(Some(rot_rkth.into())),
+                rot_rkth: Some(RotKeyTableHash::new(rot_rkth)),
             }
             .into(),
         );

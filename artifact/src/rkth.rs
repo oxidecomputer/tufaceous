@@ -66,23 +66,34 @@ static CA_MAP: LazyLock<HashMap<&str, &str>> =
 )]
 #[cfg_attr(any(test, feature = "proptest"), derive(test_strategy::Arbitrary))]
 #[serde(transparent)]
-pub struct RotKeyTableHash(pub Option<String>);
+pub struct RotKeyTableHash(pub String);
 
 impl RotKeyTableHash {
+    /// Create a `RotKeyTableHash` from a string.
+    pub fn new(s: impl Into<String>) -> Self {
+        Self(s.into())
+    }
+
+    /// Returns a string slice of the underlying string.
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+
     /// Create a `RotKeyTableHash` from an array of 32 bytes.
     pub fn from_bytes(hash: [u8; 32]) -> Self {
-        Self(Some(HexArray(hash).to_string()))
+        Self(HexArray(hash).to_string())
     }
 
     /// Returns a friendly name for the CA this RKTH represents, if one is
     /// known. Returns `None` otherwise.
     pub fn friendly_ca_name(&self) -> Option<&'static str> {
-        let inner = self.0.as_deref()?;
-        CA_MAP.get(inner).copied()
+        CA_MAP.get(self.as_str()).copied()
     }
+}
 
-    pub(crate) fn is_none(&self) -> bool {
-        self.0.is_none()
+impl AsRef<str> for RotKeyTableHash {
+    fn as_ref(&self) -> &str {
+        self.as_str()
     }
 }
 
@@ -94,13 +105,7 @@ impl Debug for RotKeyTableHash {
 
 impl Display for RotKeyTableHash {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self.0.as_deref() {
-            Some(inner) => {
-                let s = CA_MAP.get(inner).copied().unwrap_or(inner);
-                write!(f, "{s}")
-            }
-            None => write!(f, "unsigned"),
-        }
+        write!(f, "{}", self.friendly_ca_name().unwrap_or(self.as_str()))
     }
 }
 

@@ -230,8 +230,8 @@ pub struct RotTags {
     /// For unsigned images this will not be present; this will generally
     /// never occur in release repos but can be useful on hardware that has
     /// not fully made it through manufacturing yet.
-    #[serde(skip_serializing_if = "RotKeyTableHash::is_none")]
-    pub rot_rkth: RotKeyTableHash,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub rot_rkth: Option<RotKeyTableHash>,
     /// RoT images are compiled for two different locations in flash; this
     /// identifies which slot this image belongs to.
     pub rot_slot: RotSlot,
@@ -280,8 +280,8 @@ pub struct RotBootloaderTags {
     /// For unsigned images this will not be present; this will generally
     /// never occur in release repos but can be useful on hardware that has
     /// not fully made it through manufacturing yet.
-    #[serde(skip_serializing_if = "RotKeyTableHash::is_none")]
-    pub rot_rkth: RotKeyTableHash,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub rot_rkth: Option<RotKeyTableHash>,
 }
 
 impl From<RotBootloaderTags> for KnownArtifactTags {
@@ -402,7 +402,7 @@ mod tests {
             KnownArtifactTags::from_tags(tags.clone()).unwrap(),
             KnownArtifactTags::Rot(RotTags {
                 rot_board: "oxide-rot-1".to_owned(),
-                rot_rkth: RotKeyTableHash(None),
+                rot_rkth: None,
                 rot_slot: RotSlot::A
             })
         );
@@ -411,7 +411,7 @@ mod tests {
             KnownArtifactTags::from_tags(tags).unwrap(),
             KnownArtifactTags::Rot(RotTags {
                 rot_board: "oxide-rot-1".to_owned(),
-                rot_rkth: RotKeyTableHash(Some("meow".to_owned())),
+                rot_rkth: Some(RotKeyTableHash::new("meow")),
                 rot_slot: RotSlot::A
             })
         );
