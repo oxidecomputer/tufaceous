@@ -60,8 +60,7 @@ impl Input<TargetSource<'static>> {
                     // we read the entire thing it'd still be a CoRIM manifest.
                     None
                 }
-                Err(error) => {
-                    eprintln!("{error:?}");
+                Err(_) => {
                     return Ok(ControlFlow::Continue(input));
                 }
             };
