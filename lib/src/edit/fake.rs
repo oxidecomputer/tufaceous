@@ -57,7 +57,7 @@ impl ArtifactSetExt for ArtifactSet {
                             version: artifact.version.clone(),
                             tags: artifact.tags.clone(),
                         },
-                        &artifact.hash,
+                        artifact.hash,
                     )
                 }),
                 version,

@@ -33,7 +33,7 @@ use crate::error::try_path;
 #[derive(Debug)]
 pub(crate) struct Target<'a> {
     pub(crate) length: u64,
-    pub(crate) sha256: Vec<u8>,
+    pub(crate) sha256: ArtifactHash,
     pub(crate) source: TargetSource<'a>,
 }
 
@@ -158,7 +158,7 @@ impl BytesSource {
     pub(crate) async fn into_target(mut self) -> Target<'static> {
         Target {
             length: self.length(),
-            sha256: self.sha256().await.0.to_vec(),
+            sha256: self.sha256().await,
             source: self.into(),
         }
     }
@@ -207,7 +207,7 @@ impl FileSource {
             Some(inner) => inner,
             None => self.read_impl(None).await?,
         };
-        Ok(Target { length, sha256: sha256.0.to_vec(), source: self.into() })
+        Ok(Target { length, sha256, source: self.into() })
     }
 
     async fn read_impl(
@@ -309,12 +309,17 @@ pub(crate) struct RepositorySource<'a> {
 }
 
 impl<'a> RepositorySource<'a> {
-    pub(crate) fn into_target(self) -> Target<'a> {
-        Target {
-            length: self.length,
-            sha256: self.sha256.clone(),
-            source: self.into(),
-        }
+    pub(crate) fn into_target(self) -> Result<Target<'a>, Error> {
+        let sha256 = match self.sha256.as_slice().try_into() {
+            Ok(sha256) => ArtifactHash(sha256),
+            Err(_) => {
+                return Err(ErrorKind::InvalidImportedHashLength {
+                    target_name: self.target_name,
+                }
+                .into());
+            }
+        };
+        Ok(Target { length: self.length, sha256, source: self.into() })
     }
 
     pub(crate) fn stream(&self) -> impl Stream<Item = Result<Bytes, Error>> {

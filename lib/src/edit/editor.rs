@@ -441,7 +441,7 @@ impl<'a> RepositoryEditor<'a> {
                         tasks.spawn(future);
                     }
                     TargetSource::Repository(source) => {
-                        all_targets.push((target_name, source.into_target()));
+                        all_targets.push((target_name, source.into_target()?));
                     }
                 }
             }
@@ -460,7 +460,7 @@ impl<'a> RepositoryEditor<'a> {
             let output = generate_installinator_document(
                 artifacts.values().filter_map(|artifact| {
                     let target = targets.0.get(&artifact.target_name)?;
-                    Some((artifact, target.sha256.as_slice()))
+                    Some((artifact, target.sha256))
                 }),
                 self.artifact_version.clone(),
             )?;
@@ -524,20 +524,18 @@ impl<'a> TargetMap<'a> {
 }
 
 pub(crate) fn generate_installinator_document(
-    artifacts: impl Iterator<Item = (impl AsRef<ArtifactSchema>, impl AsRef<[u8]>)>,
+    artifacts: impl Iterator<Item = (impl AsRef<ArtifactSchema>, ArtifactHash)>,
     version: ArtifactVersion,
 ) -> Result<Output<BytesSource>, Error> {
     let target_name = format!("installinator_document-{version}.json");
     let mut document = InstallinatorDocument::empty(version.clone());
     for (artifact, hash) in artifacts {
         let artifact = artifact.as_ref();
-        if let Ok(hash) = hash.as_ref().try_into().map(ArtifactHash)
-            && let Some(artifact) = crate::util::installinator_artifact(
-                artifact.tags.clone(),
-                hash,
-                &artifact.target_name,
-            )
-        {
+        if let Some(artifact) = crate::util::installinator_artifact(
+            artifact.tags.clone(),
+            hash,
+            &artifact.target_name,
+        ) {
             document.artifacts.insert(artifact);
         }
     }

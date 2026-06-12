@@ -155,12 +155,12 @@ impl<'a> UnsignedRepository<'a> {
         let mut sources = BTreeMap::new();
         for (target_name, Target { length, sha256, source }) in self.targets {
             let path = if consistent_snapshot {
-                format!("{}.{target_name}", hex::encode(&sha256))
+                format!("{}.{target_name}", hex::encode(sha256))
             } else {
                 target_name.clone()
             };
             let hashes = tough::schema::Hashes {
-                sha256: sha256.into(),
+                sha256: sha256.0.to_vec().into(),
                 _extra: HashMap::new(),
             };
             let target = tough::schema::Target {
