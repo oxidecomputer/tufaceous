@@ -87,7 +87,7 @@ impl<Source> Input<Source> {
                 version,
             } => {
                 let base = Utf8PathBuf::from(format!("os-{os_variant}"));
-                let mut vec = Vec::new();
+                let mut vec = Vec::with_capacity(3 + extra_targets.len());
                 vec.push(Output::new(
                     base.join(COSMO_PHASE_1_PATH).into(),
                     version.clone(),
