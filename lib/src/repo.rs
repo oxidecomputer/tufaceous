@@ -336,7 +336,7 @@ impl Repository {
                 }
                 Err(TryAcquireError::NoPermits) => {
                     if let Some(result) = set.join_next().await {
-                        result??;
+                        () = result??;
                     }
                     Arc::clone(&semaphore)
                         .acquire_owned()
@@ -355,7 +355,7 @@ impl Repository {
         }
 
         while let Some(result) = set.join_next().await {
-            result??;
+            () = result??;
         }
 
         Ok(())
