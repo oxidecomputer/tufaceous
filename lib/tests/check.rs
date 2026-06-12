@@ -27,7 +27,7 @@ async fn fake_checks_out() -> Result<(), Error> {
 async fn missing_installinator() -> Result<(), Error> {
     let log = slog::Logger::root(slog::Discard, slog::o!());
     let zip = RepositoryEditor::fake(V1)?
-        .generate_installinator_document(false)
+        .set_generate_installinator_document(false)
         .finish()
         .await?
         .generate_root()

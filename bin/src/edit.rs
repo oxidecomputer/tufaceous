@@ -42,7 +42,9 @@ impl Args {
             .load_zip_path(self.repo.clone(), &crate::LOG)
             .await?;
         let mut editor = RepositoryEditor::from_repo(&repo)?
-            .generate_installinator_document(!self.no_installinator_document);
+            .set_generate_installinator_document(
+                !self.no_installinator_document,
+            );
 
         if !self.no_installinator_document {
             editor = editor
@@ -50,7 +52,7 @@ impl Args {
         }
 
         if let Some(version) = self.version {
-            editor = editor.system_version(version)?;
+            editor = editor.set_system_version(version)?;
         }
         for target_name in &self.remove_targets {
             editor = editor.remove_target(target_name);

@@ -62,7 +62,7 @@ impl<'a> RepositoryEditor<'a> {
     }
 
     /// Change the system version of the repository.
-    pub fn system_version(
+    pub fn set_system_version(
         self,
         system_version: Version,
     ) -> Result<Self, Error> {
@@ -78,7 +78,7 @@ impl<'a> RepositoryEditor<'a> {
     ///
     /// Defaults to `true`. The document is generated during
     /// [`RepositoryEditor::finish`].
-    pub fn generate_installinator_document(
+    pub fn set_generate_installinator_document(
         self,
         generate_installinator_document: bool,
     ) -> Self {
@@ -86,7 +86,7 @@ impl<'a> RepositoryEditor<'a> {
     }
 
     /// Add a measurement corpus to the repository.
-    pub async fn measurement_corpus(
+    pub async fn add_measurement_corpus(
         self,
         path: Utf8PathBuf,
     ) -> Result<Self, Error> {
@@ -100,7 +100,7 @@ impl<'a> RepositoryEditor<'a> {
     /// `hashes` specifies the number of SHA256 hashes to list in the CoRIM
     /// document. This can be used to create different documents at the same
     /// version.
-    pub fn fake_measurement_corpus(
+    pub fn add_fake_measurement_corpus(
         self,
         hashes: usize,
         version: ArtifactVersion,
@@ -114,7 +114,7 @@ impl<'a> RepositoryEditor<'a> {
     /// `output_dir` is a path to the output directory for `helios-build image`
     /// (the `-o` argument). This directory contains `cosmo.rom`, `gimlet.rom`,
     /// and `zfs.img`.
-    pub async fn os_image_dir(
+    pub async fn add_os_image_dir(
         self,
         variant: OsVariant,
         output_dir: &Utf8Path,
@@ -130,7 +130,7 @@ impl<'a> RepositoryEditor<'a> {
     }
 
     /// Add a fake OS image to the repository.
-    pub fn fake_os_image(self, variant: OsVariant) -> Result<Self, Error> {
+    pub fn add_fake_os_image(self, variant: OsVariant) -> Result<Self, Error> {
         let input =
             Input::fake_os_images(variant, self.artifact_version.clone(), None);
         self.insert_input(input)
@@ -140,7 +140,7 @@ impl<'a> RepositoryEditor<'a> {
     ///
     /// Tags are automatically determined based on the image caboose, except
     /// for `slot` which must be specified.
-    pub async fn rot_archive(
+    pub async fn add_rot_archive(
         self,
         rot_slot: RotSlot,
         path: Utf8PathBuf,
@@ -152,7 +152,7 @@ impl<'a> RepositoryEditor<'a> {
     /// Add a Root of Trust Bootloader Hubris archive to the repository.
     ///
     /// Tags are automatically determined based on the image caboose.
-    pub async fn rot_bootloader_archive(
+    pub async fn add_rot_bootloader_archive(
         self,
         path: Utf8PathBuf,
     ) -> Result<Self, Error> {
@@ -163,7 +163,10 @@ impl<'a> RepositoryEditor<'a> {
     /// Add a Service Processor Hubris archive to the repository.
     ///
     /// Tags are automatically determined based on the image caboose.
-    pub async fn sp_archive(self, path: Utf8PathBuf) -> Result<Self, Error> {
+    pub async fn add_sp_archive(
+        self,
+        path: Utf8PathBuf,
+    ) -> Result<Self, Error> {
         let source = FileSource::open(path).await?;
         self.insert_input(Input::sp_archive(source, None).await?)
     }
@@ -171,7 +174,7 @@ impl<'a> RepositoryEditor<'a> {
     /// Add a fake Root of Trust Hubris archive to the repository.
     ///
     /// This will generate a fake Hubris archive with the appropriate tags.
-    pub fn fake_rot_archive(self, tags: RotTags) -> Result<Self, Error> {
+    pub fn add_fake_rot_archive(self, tags: RotTags) -> Result<Self, Error> {
         let input =
             Input::fake_rot_archive(tags, self.artifact_version.clone(), None)?;
         self.insert_input(input)
@@ -180,7 +183,7 @@ impl<'a> RepositoryEditor<'a> {
     /// Add a fake Root of Trust Bootloader Hubris archive to the repository.
     ///
     /// This will generate a fake Hubris archive with the appropriate tags.
-    pub fn fake_rot_bootloader_archive(
+    pub fn add_fake_rot_bootloader_archive(
         self,
         tags: RotBootloaderTags,
     ) -> Result<Self, Error> {
@@ -195,7 +198,7 @@ impl<'a> RepositoryEditor<'a> {
     /// Add a fake Service Processor Hubris archive to the repository.
     ///
     /// This will generate a fake Hubris archive with the appropriate tags.
-    pub fn fake_sp_archive(self, tags: SpTags) -> Result<Self, Error> {
+    pub fn add_fake_sp_archive(self, tags: SpTags) -> Result<Self, Error> {
         let input =
             Input::fake_sp_archive(tags, self.artifact_version.clone(), None)?;
         self.insert_input(input)
@@ -205,7 +208,10 @@ impl<'a> RepositoryEditor<'a> {
     ///
     /// The `zone_name` tag is automatically determined based on the layer
     /// metadata (the `oxide.json` file that starts zone tarballs).
-    pub async fn zone_image(self, path: Utf8PathBuf) -> Result<Self, Error> {
+    pub async fn add_zone_image(
+        self,
+        path: Utf8PathBuf,
+    ) -> Result<Self, Error> {
         self.insert_input(Input::zone_image(path).await?)
     }
 
@@ -213,7 +219,7 @@ impl<'a> RepositoryEditor<'a> {
     ///
     /// This will generate a tarball containing a matching `oxide.json` layer
     /// metadata file.
-    pub fn fake_zone_image(
+    pub fn add_fake_zone_image(
         self,
         zone_name: String,
         file_name: String,
@@ -265,7 +271,7 @@ impl<'a> RepositoryEditor<'a> {
     /// but will not be copied onto sleds for use by the control plane. This is
     /// intended for ancillary files that are useful to systems other than the
     /// control plane.
-    pub async fn extra_target(
+    pub async fn add_extra_target(
         mut self,
         target_name: String,
         path: Utf8PathBuf,
@@ -303,7 +309,7 @@ impl<'a> RepositoryEditor<'a> {
 
     /// Manually adds a fake artifact. Don't use this if building a real
     /// repository; use one of the other `fake_*` methods instead.
-    pub fn fake_artifact(
+    pub fn add_fake_artifact(
         mut self,
         target_name: String,
         version: ArtifactVersion,
@@ -356,7 +362,7 @@ impl<'a> RepositoryEditor<'a> {
     }
 
     /// Set the repository-level metadata.
-    pub fn metadata(mut self, metadata: &Metadata) -> Result<Self, Error> {
+    pub fn set_metadata(mut self, metadata: &Metadata) -> Result<Self, Error> {
         self.metadata =
             metadata.to_map().map_err(ErrorKind::ConvertMetadataToMap)?;
         Ok(self)

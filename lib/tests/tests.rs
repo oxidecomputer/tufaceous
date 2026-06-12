@@ -85,7 +85,7 @@ async fn verify_targets() -> Result<(), Error> {
 async fn no_artifacts() -> Result<(), Error> {
     let log = slog::Logger::root(slog::Discard, slog::o!());
     let zip = RepositoryEditor::new(V1)?
-        .generate_installinator_document(false)
+        .set_generate_installinator_document(false)
         .finish()
         .await?
         .generate_root()
@@ -106,8 +106,8 @@ async fn no_artifacts() -> Result<(), Error> {
 async fn empty_artifact() -> Result<(), Error> {
     let log = slog::Logger::root(slog::Discard, slog::o!());
     let zip = RepositoryEditor::new(V1)?
-        .generate_installinator_document(false)
-        .fake_artifact(
+        .set_generate_installinator_document(false)
+        .add_fake_artifact(
             "empty.img".to_owned(),
             "1.0.0".parse().unwrap(),
             &KnownArtifactTags::InstallinatorDocument,
