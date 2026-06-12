@@ -62,8 +62,15 @@ impl<'a> RepositoryEditor<'a> {
     }
 
     /// Change the system version of the repository.
-    pub fn system_version(self, system_version: Version) -> Self {
-        Self { system_version, ..self }
+    pub fn system_version(
+        self,
+        system_version: Version,
+    ) -> Result<Self, Error> {
+        Ok(Self {
+            artifact_version: ArtifactVersion::new(system_version.to_string())?,
+            system_version,
+            ..self
+        })
     }
 
     /// Sets whether an Installinator document should be generated based on the

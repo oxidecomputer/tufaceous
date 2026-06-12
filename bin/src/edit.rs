@@ -50,7 +50,7 @@ impl Args {
         }
 
         if let Some(version) = self.version {
-            editor = editor.system_version(version);
+            editor = editor.system_version(version)?;
         }
         for target_name in &self.remove_targets {
             editor = editor.remove_target(target_name);
