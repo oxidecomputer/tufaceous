@@ -36,15 +36,20 @@ pub(crate) const DEFAULT_VALIDITY: Duration =
 #[must_use]
 pub struct UnsignedRepository<'a> {
     targets: BTreeMap<String, Target<'a>>,
-    root: Option<Vec<u8>>,
+    root: Option<RequestedRoot>,
     keys: Vec<Box<dyn KeySource>>,
-    generate_root: bool,
     snapshot_version: NonZero<u64>,
     snapshot_expires: DateTime<Utc>,
     targets_version: NonZero<u64>,
     targets_expires: DateTime<Utc>,
     timestamp_version: NonZero<u64>,
     timestamp_expires: DateTime<Utc>,
+}
+
+#[derive(Debug)]
+enum RequestedRoot {
+    Root(Vec<u8>),
+    Generate,
 }
 
 impl<'a> UnsignedRepository<'a> {
@@ -59,7 +64,6 @@ impl<'a> UnsignedRepository<'a> {
             targets,
             root: None,
             keys: Vec::new(),
-            generate_root: false,
             snapshot_version: version,
             snapshot_expires: expires,
             targets_version: version,
@@ -70,11 +74,7 @@ impl<'a> UnsignedRepository<'a> {
     }
 
     pub fn root(self, root: impl AsRef<[u8]>) -> Self {
-        Self {
-            root: Some(root.as_ref().to_vec()),
-            generate_root: false,
-            ..self
-        }
+        Self { root: Some(RequestedRoot::Root(root.as_ref().to_vec())), ..self }
     }
 
     pub fn key(mut self, key: impl KeySource + 'static) -> Self {
@@ -83,7 +83,7 @@ impl<'a> UnsignedRepository<'a> {
     }
 
     pub fn generate_root(self) -> Self {
-        Self { root: None, generate_root: true, ..self }
+        Self { root: Some(RequestedRoot::Generate), ..self }
     }
 
     pub fn snapshot_version(self, snapshot_version: NonZero<u64>) -> Self {
@@ -111,22 +111,29 @@ impl<'a> UnsignedRepository<'a> {
     }
 
     pub async fn sign(mut self) -> Result<SignedRepository<'a>, Error> {
-        let (root, consistent_snapshot) = if let Some(root) = self.root {
-            let parsed_root: Signed<Root> = serde_json::from_slice(&root)
-                .map_err(ErrorKind::ParseSigningRoot)?;
-            (root, parsed_root.signed.consistent_snapshot)
-        } else if self.generate_root {
-            if self.keys.is_empty() {
-                self.keys.push(Box::new(Ed25519Key::generate()?));
+        let (root, consistent_snapshot) = match self.root {
+            Some(RequestedRoot::Root(root)) => {
+                let parsed_root: Signed<Root> =
+                    serde_json::from_slice(&root)
+                        .map_err(ErrorKind::ParseSigningRoot)?;
+                (root, parsed_root.signed.consistent_snapshot)
             }
-            let expires = self
-                .snapshot_expires
-                .min(self.targets_expires)
-                .min(self.timestamp_expires);
-            let root = crate::edit::generate_root(&self.keys, expires).await?;
-            (root.buffer().clone(), root.signed().signed.consistent_snapshot)
-        } else {
-            return Err(ErrorKind::NoSigningRoot.into());
+            Some(RequestedRoot::Generate) => {
+                if self.keys.is_empty() {
+                    self.keys.push(Box::new(Ed25519Key::generate()?));
+                }
+                let expires = self
+                    .snapshot_expires
+                    .min(self.targets_expires)
+                    .min(self.timestamp_expires);
+                let root =
+                    crate::edit::generate_root(&self.keys, expires).await?;
+                (
+                    root.buffer().clone(),
+                    root.signed().signed.consistent_snapshot,
+                )
+            }
+            None => return Err(ErrorKind::NoSigningRoot.into()),
         };
 
         let tempdir = tokio::task::spawn_blocking(camino_tempfile::tempdir)
