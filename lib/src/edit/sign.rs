@@ -286,12 +286,13 @@ fn deflate_heuristic(buf: &[u8]) -> Compression {
         // gzip, e.g. illumos zone tarball
         Compression::none()
     } else if buf.starts_with(b"\x78")
-        && let [x, y] = &buf[..2]
+        && let Some([x, y]) = &buf.get(..2)
         && u16::from_be_bytes([*x, *y]) % 31 == 0
     {
         // zlib
         if y & 0xc0 == 0 {
-            // compression level 0
+            // buf is zlib-compressed at level 0, which is not compressed at
+            // all, so we should compress this
             Compression::best()
         } else {
             Compression::none()
