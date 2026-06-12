@@ -4,7 +4,6 @@
 
 use std::collections::BTreeMap;
 use std::collections::HashMap;
-use std::collections::HashSet;
 
 use camino::Utf8Path;
 use camino::Utf8PathBuf;
@@ -44,7 +43,7 @@ pub struct RepositoryEditor<'a> {
     artifact_version: ArtifactVersion,
     generate_installinator_document: bool,
     targets: HashMap<String, Vec<TargetSource<'a>>>,
-    artifacts: HashMap<String, HashSet<ArtifactSchema>>,
+    artifacts: BTreeMap<String, ArtifactSchema>,
     metadata: BTreeMap<String, String>,
 }
 
@@ -56,7 +55,7 @@ impl<'a> RepositoryEditor<'a> {
             system_version,
             generate_installinator_document: true,
             targets: HashMap::new(),
-            artifacts: HashMap::new(),
+            artifacts: BTreeMap::new(),
             metadata: BTreeMap::new(),
         })
     }
@@ -253,10 +252,7 @@ impl<'a> RepositoryEditor<'a> {
     {
         for output in input.outputs()? {
             if let Some(artifact) = output.to_artifact_schema() {
-                self.artifacts
-                    .entry(artifact.target_name.clone())
-                    .or_default()
-                    .insert(artifact);
+                insert_artifact(&mut self.artifacts, artifact)?;
             }
             self.targets
                 .entry(output.target_name)
@@ -291,10 +287,9 @@ impl<'a> RepositoryEditor<'a> {
     ) -> Result<Self, Error> {
         let filter =
             filter.to_tags().map_err(ErrorKind::ConvertKnownTagsToMap)?;
-        let removed = self.artifacts.extract_if(|_, artifacts| {
-            artifacts.retain(|artifact| artifact.tags != filter);
-            artifacts.is_empty() // extract_if: remove from map if true
-        });
+        let removed = self
+            .artifacts
+            .extract_if(.., |_, artifact| artifact.tags == filter);
         for (target_name, _) in removed {
             self.targets.remove(&target_name);
         }
@@ -356,10 +351,7 @@ impl<'a> RepositoryEditor<'a> {
     /// editor.
     pub fn import_repo(mut self, repo: &'a Repository) -> Result<Self, Error> {
         for artifact in repo.to_artifact_schema()? {
-            self.artifacts
-                .entry(artifact.target_name.clone())
-                .or_default()
-                .insert(artifact);
+            insert_artifact(&mut self.artifacts, artifact)?;
         }
         for (target_name, target) in repo.targets() {
             if target_name.raw() == ArtifactSetSchema::TARGET_NAME {
@@ -381,19 +373,7 @@ impl<'a> RepositoryEditor<'a> {
 
     /// Finalize the artifacts and targets, returning an [`UnsignedRepository`].
     pub async fn finish(self) -> Result<UnsignedRepository<'a>, Error> {
-        // Un-nest `self.artifacts`, returning an error if we have multiple
-        // artifact definitions for a single target name.
-        let mut artifacts = self
-            .artifacts
-            .into_iter()
-            .filter_map(|(target_name, entries)| {
-                Some(if entries.len() > 1 {
-                    Err(ErrorKind::TargetNameCollision { target_name }.into())
-                } else {
-                    Ok((target_name, entries.into_iter().next()?))
-                })
-            })
-            .collect::<Result<BTreeMap<_, _>, Error>>()?;
+        let mut artifacts = self.artifacts;
 
         // Ensure each set of tags is unique, except for known tag sets that
         // we expect to be non-unique.
@@ -464,18 +444,12 @@ impl<'a> RepositoryEditor<'a> {
                 }),
                 self.artifact_version.clone(),
             )?;
-            if let Some(artifact) = output.to_artifact_schema() {
-                if let Some(existing) = artifacts.get(&artifact.target_name) {
-                    if existing != &artifact {
-                        return Err(ErrorKind::TargetNameCollision {
-                            target_name: artifact.target_name,
-                        }
-                        .into());
-                    }
-                } else {
-                    artifacts.insert(artifact.target_name.clone(), artifact);
-                }
-            }
+            let Some(artifact) = output.to_artifact_schema() else {
+                unreachable!(
+                    "generate_installinator_document returns an artifact"
+                );
+            };
+            insert_artifact(&mut artifacts, artifact)?;
             targets.insert(
                 output.target_name,
                 output.source.into_target().await,
@@ -549,6 +523,22 @@ pub(crate) fn generate_installinator_document(
     )
 }
 
+fn insert_artifact(
+    artifacts: &mut BTreeMap<String, ArtifactSchema>,
+    artifact: ArtifactSchema,
+) -> Result<(), Error> {
+    if let Some(existing) = artifacts.get(&artifact.target_name)
+        && existing != &artifact
+    {
+        return Err(ErrorKind::TargetNameCollision {
+            target_name: artifact.target_name,
+        }
+        .into());
+    }
+    artifacts.insert(artifact.target_name.clone(), artifact);
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use std::collections::BTreeMap;
@@ -581,7 +571,8 @@ mod tests {
             .entry(target_name.clone())
             .or_default()
             .push(BytesSource::new(Bytes::new()).into());
-        editor.artifacts.entry(target_name.clone()).or_default().insert(
+        editor.artifacts.insert(
+            target_name.clone(),
             ArtifactSchema {
                 target_name,
                 version: ArtifactVersion::new_const("1.0.0"),
