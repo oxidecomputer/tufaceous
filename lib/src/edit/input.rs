@@ -118,9 +118,9 @@ impl<Source> Input<Source> {
             }
             Input::Rot { source, tags, version } => {
                 let target_name = format!(
-                    "rot/{board}-{sign}-{version}-slot-{slot}.zip",
+                    "rot/{board}-{rkth}-{version}-slot-{slot}.zip",
                     board = tags.rot_board,
-                    sign = tags
+                    rkth = tags
                         .rot_rkth
                         .as_ref()
                         .map_or("unsigned", RotKeyTableHash::as_str),
@@ -130,9 +130,9 @@ impl<Source> Input<Source> {
             }
             Input::RotBootloader { source, tags, version } => {
                 let target_name = format!(
-                    "rot-bootloader/{board}-{sign}-{version}.zip",
+                    "rot-bootloader/{board}-{rkth}-{version}.zip",
                     board = tags.rot_board,
-                    sign = tags
+                    rkth = tags
                         .rot_rkth
                         .as_ref()
                         .map_or("unsigned", RotKeyTableHash::as_str),
