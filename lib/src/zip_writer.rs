@@ -19,7 +19,7 @@ use tokio::task::JoinHandle;
 
 pub(crate) struct ZipWriter<W> {
     task: JoinHandle<Result<W, rawzip::Error>>,
-    file_tx: mpsc::Sender<ZipFile>,
+    file_tx: mpsc::Sender<ZipFileMessage>,
 }
 
 impl<W: Write + Send + 'static> ZipWriter<W> {
@@ -67,7 +67,7 @@ impl<W> ZipWriter<W> {
     }
 
     pub(crate) async fn finish(self) -> Result<W, rawzip::Error> {
-        drop(self.file_tx);
+        self.file_tx.send(ZipFileMessage::Finish).await.ok();
         self.task.await.map_err(std::io::Error::from)?
     }
 }
@@ -95,7 +95,7 @@ impl<'a, W> ZipFileBuilder<'a, W> {
     }
 
     pub(crate) async fn start(self) -> Result<ZipDataWriter<'a, W>, SendError> {
-        self.writer.file_tx.send(self.inner).await?;
+        self.writer.file_tx.send(ZipFileMessage::File(self.inner)).await?;
         Ok(ZipDataWriter { _writer: self.writer, bytes_tx: self.bytes_tx })
     }
 }
@@ -115,6 +115,11 @@ impl<W> ZipDataWriter<'_, W> {
     }
 }
 
+enum ZipFileMessage {
+    File(ZipFile),
+    Finish,
+}
+
 struct ZipFile {
     name: String,
     compression: Compression,
@@ -125,10 +130,23 @@ struct ZipFile {
 
 fn write_task<W: Write>(
     writer: W,
-    mut file_rx: mpsc::Receiver<ZipFile>,
+    mut file_rx: mpsc::Receiver<ZipFileMessage>,
 ) -> Result<W, rawzip::Error> {
     let mut archive = ZipArchiveWriter::new(writer);
-    while let Some(mut file) = file_rx.blocking_recv() {
+    loop {
+        let message = file_rx.blocking_recv().ok_or_else(|| {
+            std::io::Error::new(
+                std::io::ErrorKind::UnexpectedEof,
+                "ZipWriter dropped before finish",
+            )
+        })?;
+        let mut file = match message {
+            ZipFileMessage::File(file) => file,
+            ZipFileMessage::Finish => {
+                return archive.finish();
+            }
+        };
+
         let mut builder = archive.new_file(&file.name);
         if file.compression != Compression::none() {
             builder = builder.compression_method(CompressionMethod::Deflate);
@@ -149,7 +167,6 @@ fn write_task<W: Write>(
         encoder.finish()?;
         entry.finish(output)?;
     }
-    archive.finish()
 }
 
 enum ZipEncoder<W: Write> {
