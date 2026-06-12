@@ -11,8 +11,8 @@ use serde::Serialize;
 //
 // NOTE: Similar to KnownArtifactTags, this struct must serialize to
 // and deserialize from a mapping of string keys to string values. The
-// `metadata_roundtrip` test covers this (crate::map::to_map panics when debug
-// assertions are enabled if this does not hold).
+// `metadata_roundtrip` test covers this (crate::map::to_map returns an error if
+// this does not hold).
 //
 // Additionally, it is a requirement that all fields are optional; it must
 // be possible to deserialize this struct from older metadata, and the oldest
