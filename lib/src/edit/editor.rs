@@ -88,9 +88,9 @@ impl<'a> RepositoryEditor<'a> {
     /// Add a measurement corpus to the repository.
     pub async fn add_measurement_corpus(
         self,
-        path: Utf8PathBuf,
+        path: impl Into<Utf8PathBuf>,
     ) -> Result<Self, Error> {
-        let source = FileSource::open(path).await?;
+        let source = FileSource::open(path.into()).await?;
         let input = Input::measurement_corpus(source, None).await?;
         self.insert_input(input)
     }
@@ -117,11 +117,11 @@ impl<'a> RepositoryEditor<'a> {
     pub async fn add_os_image_dir(
         self,
         variant: OsVariant,
-        output_dir: &Utf8Path,
+        output_dir: impl AsRef<Utf8Path>,
     ) -> Result<Self, Error> {
         let input = Input::os_images(
             variant,
-            output_dir,
+            output_dir.as_ref(),
             None,
             self.artifact_version.clone(),
         )
@@ -143,9 +143,9 @@ impl<'a> RepositoryEditor<'a> {
     pub async fn add_rot_archive(
         self,
         rot_slot: RotSlot,
-        path: Utf8PathBuf,
+        path: impl Into<Utf8PathBuf>,
     ) -> Result<Self, Error> {
-        let source = FileSource::open(path).await?;
+        let source = FileSource::open(path.into()).await?;
         self.insert_input(Input::rot_archive(source, None, rot_slot).await?)
     }
 
@@ -154,9 +154,9 @@ impl<'a> RepositoryEditor<'a> {
     /// Tags are automatically determined based on the image caboose.
     pub async fn add_rot_bootloader_archive(
         self,
-        path: Utf8PathBuf,
+        path: impl Into<Utf8PathBuf>,
     ) -> Result<Self, Error> {
-        let source = FileSource::open(path).await?;
+        let source = FileSource::open(path.into()).await?;
         self.insert_input(Input::rot_bootloader_archive(source, None).await?)
     }
 
@@ -165,9 +165,9 @@ impl<'a> RepositoryEditor<'a> {
     /// Tags are automatically determined based on the image caboose.
     pub async fn add_sp_archive(
         self,
-        path: Utf8PathBuf,
+        path: impl Into<Utf8PathBuf>,
     ) -> Result<Self, Error> {
-        let source = FileSource::open(path).await?;
+        let source = FileSource::open(path.into()).await?;
         self.insert_input(Input::sp_archive(source, None).await?)
     }
 
@@ -210,9 +210,9 @@ impl<'a> RepositoryEditor<'a> {
     /// metadata (the `oxide.json` file that starts zone tarballs).
     pub async fn add_zone_image(
         self,
-        path: Utf8PathBuf,
+        path: impl Into<Utf8PathBuf>,
     ) -> Result<Self, Error> {
-        self.insert_input(Input::zone_image(path).await?)
+        self.insert_input(Input::zone_image(path.into()).await?)
     }
 
     /// Add a fake zone image to the repository.
@@ -240,9 +240,10 @@ impl<'a> RepositoryEditor<'a> {
     /// Automation should not be making any guesses.
     pub async fn guess_artifact(
         self,
-        path: Utf8PathBuf,
+        path: impl Into<Utf8PathBuf>,
     ) -> Result<Self, Error> {
-        let input = Input::guess(path, self.artifact_version.clone()).await?;
+        let input =
+            Input::guess(path.into(), self.artifact_version.clone()).await?;
         self.insert_input(input)
     }
 
@@ -273,13 +274,13 @@ impl<'a> RepositoryEditor<'a> {
     /// control plane.
     pub async fn add_extra_target(
         mut self,
-        target_name: String,
-        path: Utf8PathBuf,
+        target_name: impl Into<String>,
+        path: impl Into<Utf8PathBuf>,
     ) -> Result<Self, Error> {
         self.targets
-            .entry(target_name)
+            .entry(target_name.into())
             .or_default()
-            .push(FileSource::open(path).await?.into());
+            .push(FileSource::open(path.into()).await?.into());
         Ok(self)
     }
 
@@ -301,7 +302,8 @@ impl<'a> RepositoryEditor<'a> {
     }
 
     /// Remove a target with the given target name.
-    pub fn remove_target(mut self, target_name: &str) -> Self {
+    pub fn remove_target(mut self, target_name: impl AsRef<str>) -> Self {
+        let target_name = target_name.as_ref();
         self.targets.remove(target_name);
         self.artifacts.remove(target_name);
         self
@@ -311,11 +313,12 @@ impl<'a> RepositoryEditor<'a> {
     /// repository; use one of the other `fake_*` methods instead.
     pub fn add_fake_artifact(
         mut self,
-        target_name: String,
+        target_name: impl Into<String>,
         version: ArtifactVersion,
         tags: &KnownArtifactTags,
         length: u64,
     ) -> Result<Self, Error> {
+        let target_name = target_name.into();
         let prefix = format!("{target_name}\n{version}\n{tags:?}\n");
         self.targets
             .entry(target_name.clone())
