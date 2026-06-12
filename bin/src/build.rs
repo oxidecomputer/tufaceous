@@ -29,10 +29,10 @@ pub struct Args {
 impl Args {
     pub async fn run(self) -> Result<()> {
         let mut editor = if self.fake {
-            RepositoryEditor::fake(self.version)?
+            RepositoryEditor::fake(self.version)
         } else {
             RepositoryEditor::new(self.version)
-        };
+        }?;
         editor = editor
             .generate_installinator_document(!self.no_installinator_document);
         for path in self.artifacts {

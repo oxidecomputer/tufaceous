@@ -14,7 +14,6 @@ use semver::Version;
 use tokio::task::JoinSet;
 use tufaceous_artifact::ArtifactHash;
 use tufaceous_artifact::ArtifactVersion;
-use tufaceous_artifact::ArtifactVersionError;
 use tufaceous_artifact::InstallinatorDocument;
 use tufaceous_artifact::KnownArtifactTags;
 use tufaceous_artifact::Metadata;
@@ -42,7 +41,7 @@ use crate::schema::ArtifactSetSchema;
 #[must_use]
 pub struct RepositoryEditor<'a> {
     system_version: Version,
-    artifact_version: Result<ArtifactVersion, ArtifactVersionError>,
+    artifact_version: ArtifactVersion,
     generate_installinator_document: bool,
     targets: HashMap<String, Vec<TargetSource<'a>>>,
     artifacts: HashMap<String, HashSet<ArtifactSchema>>,
@@ -51,15 +50,15 @@ pub struct RepositoryEditor<'a> {
 
 impl<'a> RepositoryEditor<'a> {
     /// Create an empty repository editor.
-    pub fn new(system_version: Version) -> Self {
-        Self {
-            artifact_version: ArtifactVersion::new(system_version.to_string()),
+    pub fn new(system_version: Version) -> Result<Self, Error> {
+        Ok(Self {
+            artifact_version: ArtifactVersion::new(system_version.to_string())?,
             system_version,
             generate_installinator_document: true,
             targets: HashMap::new(),
             artifacts: HashMap::new(),
             metadata: BTreeMap::new(),
-        }
+        })
     }
 
     /// Change the system version of the repository.
@@ -117,7 +116,7 @@ impl<'a> RepositoryEditor<'a> {
             variant,
             output_dir,
             None,
-            self.artifact_version.clone()?,
+            self.artifact_version.clone(),
         )
         .await?;
         self.insert_input(input)
@@ -125,11 +124,8 @@ impl<'a> RepositoryEditor<'a> {
 
     /// Add a fake OS image to the repository.
     pub fn fake_os_image(self, variant: OsVariant) -> Result<Self, Error> {
-        let input = Input::fake_os_images(
-            variant,
-            self.artifact_version.clone()?,
-            None,
-        );
+        let input =
+            Input::fake_os_images(variant, self.artifact_version.clone(), None);
         self.insert_input(input)
     }
 
@@ -169,11 +165,8 @@ impl<'a> RepositoryEditor<'a> {
     ///
     /// This will generate a fake Hubris archive with the appropriate tags.
     pub fn fake_rot_archive(self, tags: RotTags) -> Result<Self, Error> {
-        let input = Input::fake_rot_archive(
-            tags,
-            self.artifact_version.clone()?,
-            None,
-        )?;
+        let input =
+            Input::fake_rot_archive(tags, self.artifact_version.clone(), None)?;
         self.insert_input(input)
     }
 
@@ -186,7 +179,7 @@ impl<'a> RepositoryEditor<'a> {
     ) -> Result<Self, Error> {
         let input = Input::fake_rot_bootloader_archive(
             tags,
-            self.artifact_version.clone()?,
+            self.artifact_version.clone(),
             None,
         )?;
         self.insert_input(input)
@@ -197,7 +190,7 @@ impl<'a> RepositoryEditor<'a> {
     /// This will generate a fake Hubris archive with the appropriate tags.
     pub fn fake_sp_archive(self, tags: SpTags) -> Result<Self, Error> {
         let input =
-            Input::fake_sp_archive(tags, self.artifact_version.clone()?, None)?;
+            Input::fake_sp_archive(tags, self.artifact_version.clone(), None)?;
         self.insert_input(input)
     }
 
@@ -221,7 +214,7 @@ impl<'a> RepositoryEditor<'a> {
         let input = Input::fake_zone_image(
             zone_name,
             file_name,
-            self.artifact_version.clone()?,
+            self.artifact_version.clone(),
             None,
         )?;
         self.insert_input(input)
@@ -236,7 +229,7 @@ impl<'a> RepositoryEditor<'a> {
         self,
         path: Utf8PathBuf,
     ) -> Result<Self, Error> {
-        let input = Input::guess(path, self.artifact_version.clone()?).await?;
+        let input = Input::guess(path, self.artifact_version.clone()).await?;
         self.insert_input(input)
     }
 
@@ -329,8 +322,8 @@ impl<'a> RepositoryEditor<'a> {
 
     /// Create a fake repository for testing purposes.
     pub fn fake(system_version: Version) -> Result<Self, Error> {
-        let mut editor = Self::new(system_version);
-        let version = editor.artifact_version.clone()?;
+        let mut editor = Self::new(system_version)?;
+        let version = editor.artifact_version.clone();
         for input in Input::fake(&version, None)? {
             editor = editor.insert_input(input)?;
         }
@@ -348,7 +341,7 @@ impl<'a> RepositoryEditor<'a> {
         artifact_version: &ArtifactVersion,
         interior_version: &ArtifactVersion,
     ) -> Result<Self, Error> {
-        let mut editor = Self::new(system_version);
+        let mut editor = Self::new(system_version)?;
         for input in Input::fake(artifact_version, Some(interior_version))? {
             editor = editor.insert_input(input)?;
         }
@@ -367,7 +360,7 @@ impl<'a> RepositoryEditor<'a> {
     /// This creates an editor with references to all of the artifacts and
     /// targets in the original repository.
     pub fn from_repo(repo: &'a Repository) -> Result<Self, Error> {
-        Self::new(repo.system_version().clone()).import_repo(repo)
+        Self::new(repo.system_version().clone())?.import_repo(repo)
     }
 
     /// Import all of the artifacts and targets from a repository into this
@@ -480,7 +473,7 @@ impl<'a> RepositoryEditor<'a> {
                     let target = targets.0.get(&artifact.target_name)?;
                     Some((artifact, target.sha256.as_slice()))
                 }),
-                self.artifact_version.clone()?,
+                self.artifact_version.clone(),
             )?;
             if let Some(artifact) = output.to_artifact_schema() {
                 if let Some(existing) = artifacts.get(&artifact.target_name) {

@@ -84,7 +84,7 @@ async fn verify_targets() -> Result<(), Error> {
 #[tokio::test]
 async fn no_artifacts() -> Result<(), Error> {
     let log = slog::Logger::root(slog::Discard, slog::o!());
-    let zip = RepositoryEditor::new(V1)
+    let zip = RepositoryEditor::new(V1)?
         .generate_installinator_document(false)
         .finish()
         .await?
@@ -105,7 +105,7 @@ async fn no_artifacts() -> Result<(), Error> {
 #[tokio::test]
 async fn empty_artifact() -> Result<(), Error> {
     let log = slog::Logger::root(slog::Discard, slog::o!());
-    let zip = RepositoryEditor::new(V1)
+    let zip = RepositoryEditor::new(V1)?
         .generate_installinator_document(false)
         .fake_artifact(
             "empty.img".to_owned(),
