@@ -103,40 +103,6 @@ async fn no_artifacts() -> Result<(), Error> {
 }
 
 #[tokio::test]
-async fn empty_artifact() -> Result<(), Error> {
-    let log = slog::Logger::root(slog::Discard, slog::o!());
-    let zip = RepositoryEditor::new(V1)?
-        .set_generate_installinator_document(false)
-        .add_fake_artifact(
-            "empty.img".to_owned(),
-            "1.0.0".parse().unwrap(),
-            &KnownArtifactTags::InstallinatorDocument,
-            0,
-        )?
-        .finish()
-        .await?
-        .generate_root()
-        .sign()
-        .await?
-        .write_zip(Vec::new(), Utc::now())
-        .await?;
-    let repo = RepositoryLoader::new()
-        .trust_store_behavior(TrustStoreBehavior::UnsafeBlindFaith)
-        .load_zip_buffer(zip, &log)
-        .await?;
-    let artifacts = repo.artifacts().iter().collect::<Vec<_>>();
-    assert_eq!(artifacts.len(), 1);
-    let data = repo
-        .read_artifact(artifacts[0])
-        .await?
-        .map_ok(|bytes| bytes.to_vec())
-        .try_concat()
-        .await?;
-    assert!(data.is_empty());
-    Ok(())
-}
-
-#[tokio::test]
 async fn inconsistent_fake() -> Result<(), Error> {
     let log = slog::Logger::root(slog::Discard, slog::o!());
     let zip = RepositoryEditor::fake(V1)?

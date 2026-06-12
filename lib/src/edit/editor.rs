@@ -309,33 +309,6 @@ impl<'a> RepositoryEditor<'a> {
         self
     }
 
-    /// Manually adds a fake artifact. Don't use this if building a real
-    /// repository; use one of the other `fake_*` methods instead.
-    pub fn add_fake_artifact(
-        mut self,
-        target_name: impl Into<String>,
-        version: ArtifactVersion,
-        tags: &KnownArtifactTags,
-        length: u64,
-    ) -> Result<Self, Error> {
-        let target_name = target_name.into();
-        let prefix = format!("{target_name}\n{version}\n{tags:?}\n");
-        self.targets
-            .entry(target_name.clone())
-            .or_default()
-            .push(BytesSource::fake_padded(prefix, length).into());
-        self.artifacts.entry(target_name.clone()).or_default().insert(
-            ArtifactSchema {
-                target_name,
-                version,
-                tags: tags
-                    .to_tags()
-                    .map_err(ErrorKind::ConvertKnownTagsToMap)?,
-            },
-        );
-        Ok(self)
-    }
-
     /// Create a fake repository for testing purposes.
     pub fn fake(system_version: Version) -> Result<Self, Error> {
         let mut editor = Self::new(system_version)?;
@@ -576,4 +549,69 @@ pub(crate) fn generate_installinator_document(
         &KnownArtifactTags::InstallinatorDocument,
         source,
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::BTreeMap;
+
+    use bytes::Bytes;
+    use chrono::Utc;
+    use futures_util::TryStreamExt;
+    use semver::Version;
+    use tufaceous_artifact::ArtifactVersion;
+
+    use crate::RepositoryLoader;
+    use crate::TrustStoreBehavior;
+    use crate::edit::RepositoryEditor;
+    use crate::edit::source::BytesSource;
+    use crate::error::Error;
+    use crate::schema::ArtifactSchema;
+
+    /// Test that all of the repository creation and loading machinery works
+    /// when an artifact is zero bytes. (This otherwise wouldn't be tested as
+    /// none of the fake artifacts are empty.)
+    #[tokio::test]
+    async fn empty_artifact() -> Result<(), Error> {
+        let log = slog::Logger::root(slog::Discard, slog::o!());
+        let mut editor = RepositoryEditor::new(Version::new(1, 0, 0))?
+            .set_generate_installinator_document(false);
+        // Manually add an empty artifact.
+        let target_name = "empty".to_string();
+        editor
+            .targets
+            .entry(target_name.clone())
+            .or_default()
+            .push(BytesSource::new(Bytes::new()).into());
+        editor.artifacts.entry(target_name.clone()).or_default().insert(
+            ArtifactSchema {
+                target_name,
+                version: ArtifactVersion::new_const("1.0.0"),
+                tags: BTreeMap::new(),
+            },
+        );
+
+        let zip = editor
+            .finish()
+            .await?
+            .generate_root()
+            .sign()
+            .await?
+            .write_zip(Vec::new(), Utc::now())
+            .await?;
+        let repo = RepositoryLoader::new()
+            .trust_store_behavior(TrustStoreBehavior::UnsafeBlindFaith)
+            .load_zip_buffer(zip, &log)
+            .await?;
+        let artifacts = repo.artifacts().iter().collect::<Vec<_>>();
+        assert_eq!(artifacts.len(), 1);
+        let data = repo
+            .read_artifact(artifacts[0])
+            .await?
+            .map_ok(|bytes| bytes.to_vec())
+            .try_concat()
+            .await?;
+        assert!(data.is_empty());
+        Ok(())
+    }
 }
