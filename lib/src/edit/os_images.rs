@@ -147,15 +147,12 @@ fn read_os_tarball_metadata_blocking(
         }
         let Some(extension) = path.extension() else { continue };
         if extension != "txt" {
-            continue;
+            break;
         }
         let file_name = Path::new(
             path.file_name()
                 .expect("a path with an extension must have a file name"),
         );
-        if file_name == "zfs.img" {
-            break;
-        }
         let file_name = try_path!(
             Utf8PathBuf::try_from(file_name.to_owned())
                 .map_err(camino::FromPathBufError::into_io_error),
