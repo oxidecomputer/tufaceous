@@ -261,8 +261,7 @@ impl SignedRepository<'_> {
                 .as_deref()
                 .map_or(Compression::none(), deflate_heuristic);
             let Ok(mut entry) = writer
-                .new_file(prefix.join(name))
-                .compression(compression)
+                .new_file(prefix.join(name), compression)
                 .last_modified(last_modified)
                 .unix_permissions(0o644)
                 .start()

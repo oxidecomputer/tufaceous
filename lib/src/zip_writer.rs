@@ -51,13 +51,14 @@ impl<W> ZipWriter<W> {
     pub(crate) fn new_file(
         &mut self,
         name: Utf8PathBuf,
+        compression: Compression,
     ) -> ZipFileBuilder<'_, W> {
         let (bytes_tx, bytes_rx) = mpsc::channel(1);
         ZipFileBuilder {
             writer: self,
             inner: ZipFile {
                 name: name.into(),
-                compression: Compression::none(),
+                compression,
                 last_modified: None,
                 unix_permissions: None,
                 bytes_rx,
@@ -79,11 +80,6 @@ pub(crate) struct ZipFileBuilder<'a, W> {
 }
 
 impl<'a, W> ZipFileBuilder<'a, W> {
-    pub(crate) fn compression(mut self, compression: Compression) -> Self {
-        self.inner.compression = compression;
-        self
-    }
-
     pub(crate) fn last_modified(mut self, last_modified: ZipDateTime) -> Self {
         self.inner.last_modified = Some(last_modified);
         self
