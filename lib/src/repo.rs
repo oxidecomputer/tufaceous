@@ -75,17 +75,16 @@ impl Repository {
     /// # let system_version = const { semver::Version::new(1, 0, 0) };
     /// # let log = slog::Logger::root(slog::Discard, slog::o!());
     /// # let log = &log;
-    /// let zip = tufaceous::edit::RepositoryEditor::fake(system_version)?
+    /// let signed = tufaceous::edit::RepositoryEditor::fake(system_version)?
     ///     .finish()
     ///     .await?
     ///     .generate_root()
     ///     .sign()
-    ///     .await?
-    ///     .write_zip(Vec::new(), chrono::Utc::now())
     ///     .await?;
+    /// let zip = signed.write_zip(Vec::new(), chrono::Utc::now()).await?;
     /// # Ok::<_, tufaceous::error::Error>(
     /// tufaceous::RepositoryLoader::new()
-    ///     .trust_store_behavior(tufaceous::TrustStoreBehavior::UnsafeBlindFaith)
+    ///     .trust_root(signed.root())
     ///     .load_zip_buffer(zip, log)
     ///     .await?
     /// # )
