@@ -133,7 +133,7 @@ impl<T: AsRef<[u8]> + Debug + Send + Sync + 'static> ZipTransport<Cursor<T>> {
     pub fn from_slice(data: T, log: &Logger) -> Result<Self, Error> {
         let archive = ZipArchive::with_max_search_space(EOCD_MAX_SEARCH_SPACE)
             .locate_in_slice(data)
-            .map_err(|(_, source)| ErrorKind::ReadZip {
+            .map_err(|(_, source)| ErrorKind::ReadZipEocd {
                 source,
                 archive_path: None,
             })?;
@@ -152,7 +152,7 @@ impl ZipTransport<FileReader> {
             ZipArchive::with_max_search_space(EOCD_MAX_SEARCH_SPACE)
                 .locate_in_file(file, &mut buffer)
                 .map_err(|(_, error)| error),
-            ReadZip,
+            ReadZipEocd,
             archive_path
         );
         Self::from_impl_blocking(archive, archive_path, Some(buffer), log)
@@ -177,7 +177,7 @@ impl<T: ReaderAt + Debug + Send + Sync + 'static> ZipTransport<T> {
 
         let mut records = archive.entries(&mut buffer);
         while let Some(record) =
-            try_archive_path!(records.next_entry(), ReadZip, archive_path)
+            try_archive_path!(records.next_entry(), ReadZipCdfh, archive_path)
         {
             if usize64!(all_entries.len()) >= archive.entries_hint() {
                 return Err(ErrorKind::ZipEntryCount {
@@ -213,12 +213,12 @@ impl<T: ReaderAt + Debug + Send + Sync + 'static> ZipTransport<T> {
         for RawEntry { raw_path, wayfinder } in all_entries {
             let entry = try_archive_path!(
                 archive.get_entry(wayfinder),
-                ReadZip,
+                ReadZipLocal,
                 archive_path
             );
             let header = try_archive_path!(
                 entry.local_header(&mut buffer),
-                ReadZip,
+                ReadZipLocal,
                 archive_path
             );
             // Check that the path in the central directory matches the header

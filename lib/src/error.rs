@@ -60,10 +60,21 @@ pub enum ErrorKind {
     ToughKey(#[source] Box<dyn std::error::Error + Send + Sync + 'static>),
 
     #[error(
-        "failed to read zip archive{archive_path}",
+        "failed to read end of central directory of zip archive{archive_path}",
         archive_path = SpacePath(archive_path),
     )]
-    ReadZip { source: rawzip::Error, archive_path: Option<Utf8PathBuf> },
+    ReadZipEocd { source: rawzip::Error, archive_path: Option<Utf8PathBuf> },
+    #[error(
+        "failed to read central directory file header of \
+        zip archive{archive_path}",
+        archive_path = SpacePath(archive_path),
+    )]
+    ReadZipCdfh { source: rawzip::Error, archive_path: Option<Utf8PathBuf> },
+    #[error(
+        "failed to read local file header of zip archive{archive_path}",
+        archive_path = SpacePath(archive_path),
+    )]
+    ReadZipLocal { source: rawzip::Error, archive_path: Option<Utf8PathBuf> },
     #[error(
         "failed to write zip archive{archive_path}",
         archive_path = SpacePath(archive_path),
@@ -342,7 +353,9 @@ impl ErrorKind {
                 true
             }
 
-            ErrorKind::ReadZip { source, .. } => {
+            ErrorKind::ReadZipEocd { source, .. }
+            | ErrorKind::ReadZipCdfh { source, .. }
+            | ErrorKind::ReadZipLocal { source, .. } => {
                 // All of rawzip's errors are related to broken zip files,
                 // except for IO errors.
                 !matches!(source.kind(), rawzip::ErrorKind::IO(_))
