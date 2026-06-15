@@ -25,21 +25,6 @@ use crate::error::Error;
 use crate::error::ErrorKind;
 use crate::error::try_path;
 
-/// Controls how repository trust is established.
-///
-/// Used in [`RepositoryLoader::trust_store_behavior`].
-#[derive(Debug, Clone, Copy, Default)]
-pub enum TrustStoreBehavior {
-    /// Verification by the provided trust roots is required.
-    ///
-    /// This is the default behavior.
-    #[default]
-    Required,
-    /// The trust root is established by fetching `metadata/1.root.json` from
-    /// the repository. Verification then proceeds normally.
-    UnsafeBlindFaith,
-}
-
 #[derive(Debug, Clone, Default)]
 #[must_use]
 pub struct RepositoryLoader {
@@ -48,9 +33,20 @@ pub struct RepositoryLoader {
     limits: Limits,
     metadata_base_url: Option<Url>,
     targets_base_url: Option<Url>,
-    trust_roots: Vec<Vec<u8>>,
-    trust_store_behavior: TrustStoreBehavior,
+    trust_store: TrustStore,
     v1_compatibility: bool,
+}
+
+#[derive(Debug, Clone)]
+enum TrustStore {
+    UnsafeBlindTrust,
+    Store(Vec<Vec<u8>>),
+}
+
+impl Default for TrustStore {
+    fn default() -> Self {
+        Self::Store(Vec::new())
+    }
 }
 
 impl RepositoryLoader {
@@ -95,7 +91,15 @@ impl RepositoryLoader {
 
     /// Add a trusted root role to the trust store.
     pub fn trust_root(mut self, trust_root: impl AsRef<[u8]>) -> Self {
-        self.trust_roots.push(trust_root.as_ref().into());
+        match self.trust_store {
+            TrustStore::Store(ref mut store) => {
+                store.push(trust_root.as_ref().into());
+            }
+            TrustStore::UnsafeBlindTrust => {
+                self.trust_store =
+                    TrustStore::Store(vec![trust_root.as_ref().into()]);
+            }
+        }
         self
     }
 
@@ -105,16 +109,28 @@ impl RepositoryLoader {
         trust_roots: impl IntoIterator<Item = impl AsRef<[u8]>>,
     ) -> Self {
         let iter = trust_roots.into_iter().map(|root| root.as_ref().into());
-        self.trust_roots.extend(iter);
+        match self.trust_store {
+            TrustStore::Store(ref mut store) => {
+                store.extend(iter);
+            }
+            TrustStore::UnsafeBlindTrust => {
+                self.trust_store = TrustStore::Store(iter.collect());
+            }
+        }
         self
     }
 
-    /// Set how repository trust is established.
-    pub fn trust_store_behavior(
-        self,
-        trust_store_behavior: TrustStoreBehavior,
-    ) -> Self {
-        Self { trust_store_behavior, ..self }
+    /// Blindly trust whatever root is contained in the repository.
+    ///
+    /// This reads the trust root by fetching `metadata/1.root.json` from the
+    /// repository, then proceeds with normal verification. The repository must
+    /// be validly signed, but with this set we do not care who signed it.
+    ///
+    /// Calling this method removes any trust roots added via
+    /// [`Self::trust_root`] and [`Self::trust_roots`], and calling either of
+    /// those methods to add a trust root reverts the effect of this method.
+    pub fn unsafe_blindly_trust_repo(self) -> Self {
+        Self { trust_store: TrustStore::UnsafeBlindTrust, ..self }
     }
 
     /// Enable compatibility with v1-format repositories.
@@ -282,9 +298,9 @@ impl RepositoryLoader {
             return Err(ErrorKind::TargetsBaseUrlUnset.into());
         };
 
-        let trust_roots = match self.trust_store_behavior {
-            TrustStoreBehavior::Required => self.trust_roots,
-            TrustStoreBehavior::UnsafeBlindFaith => {
+        let trust_roots = match self.trust_store {
+            TrustStore::Store(trust_roots) => trust_roots,
+            TrustStore::UnsafeBlindTrust => {
                 let root_path = "1.root.json";
                 let root_url =
                     metadata_base_url.join(root_path).map_err(|source| {

@@ -4,20 +4,25 @@
 
 use anyhow::Result;
 use camino::Utf8PathBuf;
-use clap::Parser;
+use clap::Args;
 use tough::key_source::LocalKeySource;
 use tufaceous::edit::SignedRepository;
 use tufaceous::edit::UnsignedRepository;
 use tufaceous::error::Error;
 use tufaceous::error::ErrorKind;
 
-#[derive(Debug, Parser)]
+#[derive(Debug, Args)]
 #[cfg_attr(test, derive(PartialEq))]
 pub struct SignOptions {
+    /// Refuse to generate a signing root.
     #[clap(long)]
     no_generate_root: bool,
+
+    /// Path to the signing root [default: generate a root]
     #[clap(long, required_if_eq("no_generate_root", "true"))]
-    root: Option<Utf8PathBuf>,
+    signing_root: Option<Utf8PathBuf>,
+
+    /// Path to a key listed in the signing root.
     #[clap(long)]
     key: Vec<Utf8PathBuf>,
 }
@@ -30,7 +35,7 @@ impl SignOptions {
         if !self.no_generate_root {
             unsigned = unsigned.generate_root();
         }
-        if let Some(path) = self.root {
+        if let Some(path) = self.signing_root {
             let root = match tokio::fs::read(&path).await {
                 Ok(root) => root,
                 Err(source) => {
@@ -57,39 +62,47 @@ mod tests {
 
     use crate::sign::SignOptions;
 
+    #[derive(Parser)]
+    struct Args {
+        #[clap(flatten)]
+        inner: SignOptions,
+    }
+
     #[test]
     fn test_flags() {
         assert_eq!(
-            SignOptions::try_parse_from([""]).unwrap(),
-            SignOptions { no_generate_root: false, root: None, key: vec![] }
-        );
-        assert!(
-            SignOptions::try_parse_from(["", "--no-generate-root"]).is_err()
-        );
-        let mut args = vec!["", "--root", "root.json"];
-        assert_eq!(
-            SignOptions::try_parse_from(&args).unwrap(),
+            Args::try_parse_from([""]).unwrap().inner,
             SignOptions {
                 no_generate_root: false,
-                root: Some("root.json".into()),
+                signing_root: None,
+                key: vec![]
+            }
+        );
+        assert!(Args::try_parse_from(["", "--no-generate-root"]).is_err());
+        let mut args = vec!["", "--signing-root", "root.json"];
+        assert_eq!(
+            Args::try_parse_from(&args).unwrap().inner,
+            SignOptions {
+                no_generate_root: false,
+                signing_root: Some("root.json".into()),
                 key: vec![],
             }
         );
         args.extend(["--key", "key.pem"]);
         assert_eq!(
-            SignOptions::try_parse_from(&args).unwrap(),
+            Args::try_parse_from(&args).unwrap().inner,
             SignOptions {
                 no_generate_root: false,
-                root: Some("root.json".into()),
+                signing_root: Some("root.json".into()),
                 key: vec!["key.pem".into()],
             }
         );
         args.extend(["--key", "key2.pem"]);
         assert_eq!(
-            SignOptions::try_parse_from(&args).unwrap(),
+            Args::try_parse_from(&args).unwrap().inner,
             SignOptions {
                 no_generate_root: false,
-                root: Some("root.json".into()),
+                signing_root: Some("root.json".into()),
                 key: vec!["key.pem".into(), "key2.pem".into()],
             }
         );

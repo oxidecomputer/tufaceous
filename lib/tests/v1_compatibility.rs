@@ -5,7 +5,6 @@
 use camino::Utf8Path;
 use tufaceous::ExpirationEnforcement;
 use tufaceous::RepositoryLoader;
-use tufaceous::TrustStoreBehavior;
 use tufaceous::error::Error;
 use tufaceous_artifact::ArtifactSet;
 use tufaceous_artifact::KnownArtifactTags;
@@ -28,7 +27,7 @@ async fn v1_fake() -> Result<(), Error> {
 
     let repo = RepositoryLoader::new()
         .expiration_enforcement(ExpirationEnforcement::Unsafe)
-        .trust_store_behavior(TrustStoreBehavior::UnsafeBlindFaith)
+        .unsafe_blindly_trust_repo()
         .v1_compatibility(true)
         .load_zip_path(path, &log)
         .await?;
@@ -90,7 +89,7 @@ async fn v1_fake_without_compat() {
 
     let _ = RepositoryLoader::new()
         .expiration_enforcement(ExpirationEnforcement::Unsafe)
-        .trust_store_behavior(TrustStoreBehavior::UnsafeBlindFaith)
+        .unsafe_blindly_trust_repo()
         .v1_compatibility(false)
         .load_zip_path(path, &log)
         .await

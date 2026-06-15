@@ -550,7 +550,6 @@ mod tests {
     use tufaceous_artifact::ArtifactVersion;
 
     use crate::RepositoryLoader;
-    use crate::TrustStoreBehavior;
     use crate::edit::RepositoryEditor;
     use crate::edit::source::BytesSource;
     use crate::error::Error;
@@ -580,16 +579,10 @@ mod tests {
             },
         );
 
-        let zip = editor
-            .finish()
-            .await?
-            .generate_root()
-            .sign()
-            .await?
-            .write_zip(Vec::new(), Utc::now())
-            .await?;
+        let signed = editor.finish().await?.generate_root().sign().await?;
+        let zip = signed.write_zip(Vec::new(), Utc::now()).await?;
         let repo = RepositoryLoader::new()
-            .trust_store_behavior(TrustStoreBehavior::UnsafeBlindFaith)
+            .trust_root(signed.root())
             .load_zip_buffer(zip, &log)
             .await?;
         let artifacts = repo.artifacts().iter().collect::<Vec<_>>();

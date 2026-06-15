@@ -198,12 +198,13 @@ impl<'a> UnsignedRepository<'a> {
             );
         }
 
-        Ok(SignedRepository { sources })
+        Ok(SignedRepository { root, sources })
     }
 }
 
 #[derive(Debug)]
 pub struct SignedRepository<'a> {
+    root: Vec<u8>,
     sources: BTreeMap<(FilePrefix, String), TargetSource<'a>>,
 }
 
@@ -214,8 +215,12 @@ enum FilePrefix {
 }
 
 impl SignedRepository<'_> {
+    pub fn root(&self) -> &[u8] {
+        &self.root
+    }
+
     pub async fn write_zip<W: Write + Send + 'static>(
-        &mut self,
+        &self,
         writer: W,
         modification_time: DateTime<Utc>,
     ) -> Result<W, Error> {
@@ -224,7 +229,7 @@ impl SignedRepository<'_> {
     }
 
     pub async fn write_zip_file(
-        &mut self,
+        &self,
         path: impl AsRef<Utf8Path>,
         modification_time: DateTime<Utc>,
     ) -> Result<(), Error> {
@@ -238,14 +243,14 @@ impl SignedRepository<'_> {
     }
 
     async fn write_zip_impl<W>(
-        &mut self,
+        &self,
         mut writer: ZipWriter<W>,
         modification_time: DateTime<Utc>,
         archive_path: Option<&Utf8Path>,
     ) -> Result<W, Error> {
         let last_modified =
             UtcDateTime::from_unix(modification_time.timestamp());
-        'outer: for ((prefix, name), source) in &mut self.sources {
+        'outer: for ((prefix, name), source) in &self.sources {
             let prefix = Utf8Path::new(match prefix {
                 FilePrefix::Metadata => "repo/metadata",
                 FilePrefix::Targets => "repo/targets",

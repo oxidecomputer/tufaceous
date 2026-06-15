@@ -7,22 +7,22 @@ use std::collections::BTreeSet;
 use anyhow::Result;
 use camino::Utf8PathBuf;
 use clap::Parser;
-use tufaceous::ExpirationEnforcement;
-use tufaceous::RepositoryLoader;
-use tufaceous::TrustStoreBehavior;
+
+use crate::load::LoadOptions;
 
 #[derive(Debug, Parser)]
 pub struct Args {
+    #[clap(flatten)]
+    load_options: LoadOptions,
     repo: Utf8PathBuf,
 }
 
 impl Args {
     pub async fn run(self) -> Result<()> {
-        let repo = RepositoryLoader::new()
-            // TODO after v2 merge: Create a LoadOptions struct for configuring
-            // expiration enforcement and trust store behavior.
-            .expiration_enforcement(ExpirationEnforcement::Unsafe)
-            .trust_store_behavior(TrustStoreBehavior::UnsafeBlindFaith)
+        let repo = self
+            .load_options
+            .loader()
+            .await?
             .load_zip_path(self.repo.clone(), &crate::LOG)
             .await?;
         let target_names = repo.targets().keys().collect::<BTreeSet<_>>();

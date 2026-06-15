@@ -5,6 +5,7 @@
 mod build;
 mod edit;
 mod list_targets;
+mod load;
 mod show_target;
 mod sign;
 mod verify;

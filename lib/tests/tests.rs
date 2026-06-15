@@ -13,7 +13,6 @@ use futures_util::TryStreamExt;
 use futures_util::stream;
 use semver::Version;
 use tufaceous::RepositoryLoader;
-use tufaceous::TrustStoreBehavior;
 use tufaceous::edit::RepositoryEditor;
 use tufaceous::error::Error;
 use tufaceous_artifact::KnownArtifactTags;
@@ -24,16 +23,15 @@ const V2: Version = Version::new(2, 0, 0);
 #[tokio::test]
 async fn it_works() -> Result<(), Error> {
     let log = slog::Logger::root(slog::Discard, slog::o!());
-    let zip = RepositoryEditor::fake(V1)?
+    let signed = RepositoryEditor::fake(V1)?
         .finish()
         .await?
         .generate_root()
         .sign()
-        .await?
-        .write_zip(Vec::new(), Utc::now())
         .await?;
+    let zip = signed.write_zip(Vec::new(), Utc::now()).await?;
     let repo = RepositoryLoader::new()
-        .trust_store_behavior(TrustStoreBehavior::UnsafeBlindFaith)
+        .trust_root(signed.root())
         .load_zip_buffer(zip, &log)
         .await?;
     for artifact in repo.artifacts() {
@@ -49,16 +47,15 @@ async fn it_works() -> Result<(), Error> {
 #[tokio::test]
 async fn verify_targets() -> Result<(), Error> {
     let log = slog::Logger::root(slog::Discard, slog::o!());
-    let mut zip = RepositoryEditor::fake(V1)?
+    let signed = RepositoryEditor::fake(V1)?
         .finish()
         .await?
         .generate_root()
         .sign()
-        .await?
-        .write_zip(Vec::new(), Utc::now())
         .await?;
+    let mut zip = signed.write_zip(Vec::new(), Utc::now()).await?;
     let repo = RepositoryLoader::new()
-        .trust_store_behavior(TrustStoreBehavior::UnsafeBlindFaith)
+        .trust_root(signed.root())
         .load_zip_buffer(zip.clone(), &log)
         .await?;
     let repo = Arc::new(repo);
@@ -70,7 +67,7 @@ async fn verify_targets() -> Result<(), Error> {
         .expect("b\"hubris\" not found in archive");
     zip[pos] = b'H'; // flip! that! bit!
     let repo = RepositoryLoader::new()
-        .trust_store_behavior(TrustStoreBehavior::UnsafeBlindFaith)
+        .trust_root(signed.root())
         .load_zip_buffer(zip.clone(), &log)
         .await?;
     let repo = Arc::new(repo);
@@ -84,17 +81,16 @@ async fn verify_targets() -> Result<(), Error> {
 #[tokio::test]
 async fn no_artifacts() -> Result<(), Error> {
     let log = slog::Logger::root(slog::Discard, slog::o!());
-    let zip = RepositoryEditor::new(V1)?
+    let signed = RepositoryEditor::new(V1)?
         .set_generate_installinator_document(false)
         .finish()
         .await?
         .generate_root()
         .sign()
-        .await?
-        .write_zip(Vec::new(), Utc::now())
         .await?;
+    let zip = signed.write_zip(Vec::new(), Utc::now()).await?;
     let repo = RepositoryLoader::new()
-        .trust_store_behavior(TrustStoreBehavior::UnsafeBlindFaith)
+        .trust_root(signed.root())
         .load_zip_buffer(zip, &log)
         .await?;
     assert_eq!(repo.artifacts().len(), 0);
@@ -105,32 +101,30 @@ async fn no_artifacts() -> Result<(), Error> {
 #[tokio::test]
 async fn inconsistent_fake() -> Result<(), Error> {
     let log = slog::Logger::root(slog::Discard, slog::o!());
-    let zip = RepositoryEditor::fake(V1)?
+    let signed = RepositoryEditor::fake(V1)?
         .finish()
         .await?
         .generate_root()
         .sign()
-        .await?
-        .write_zip(Vec::new(), Utc::now())
         .await?;
+    let zip = signed.write_zip(Vec::new(), Utc::now()).await?;
     let repo1 = RepositoryLoader::new()
-        .trust_store_behavior(TrustStoreBehavior::UnsafeBlindFaith)
+        .trust_root(signed.root())
         .load_zip_buffer(zip, &log)
         .await?;
 
     let artifact_v1 = V1.to_string().parse()?;
     let artifact_v2 = V2.to_string().parse()?;
-    let zip =
+    let signed =
         RepositoryEditor::inconsistent_fake(V2, &artifact_v2, &artifact_v1)?
             .finish()
             .await?
             .generate_root()
             .sign()
-            .await?
-            .write_zip(Vec::new(), Utc::now())
             .await?;
+    let zip = signed.write_zip(Vec::new(), Utc::now()).await?;
     let repo2 = RepositoryLoader::new()
-        .trust_store_behavior(TrustStoreBehavior::UnsafeBlindFaith)
+        .trust_root(signed.root())
         .load_zip_buffer(zip, &log)
         .await?;
 
@@ -160,12 +154,13 @@ async fn inconsistent_fake() -> Result<(), Error> {
 #[tokio::test]
 async fn compute_archive_sha256() -> Result<(), Error> {
     let log = slog::Logger::root(slog::Discard, slog::o!());
-    let zip = RepositoryEditor::fake(V1)?
+    let signed = RepositoryEditor::fake(V1)?
         .finish()
         .await?
         .generate_root()
         .sign()
-        .await?
+        .await?;
+    let zip = signed
         .write_zip(BytesMut::new().writer(), Utc::now())
         .await?
         .into_inner()
@@ -173,7 +168,7 @@ async fn compute_archive_sha256() -> Result<(), Error> {
     for should_compute in [false, true] {
         let repo = RepositoryLoader::new()
             .compute_archive_sha256(should_compute)
-            .trust_store_behavior(TrustStoreBehavior::UnsafeBlindFaith)
+            .trust_root(signed.root())
             .load_zip_buffer(zip.clone(), &log)
             .await?;
         assert_eq!(repo.archive_sha256().is_some(), should_compute);
@@ -182,14 +177,14 @@ async fn compute_archive_sha256() -> Result<(), Error> {
         file.write_all(&zip).unwrap();
         let repo = RepositoryLoader::new()
             .compute_archive_sha256(should_compute)
-            .trust_store_behavior(TrustStoreBehavior::UnsafeBlindFaith)
+            .trust_root(signed.root())
             .load_zip_file(file, None, &log)
             .await?;
         assert_eq!(repo.archive_sha256().is_some(), should_compute);
 
         let repo = RepositoryLoader::new()
             .compute_archive_sha256(should_compute)
-            .trust_store_behavior(TrustStoreBehavior::UnsafeBlindFaith)
+            .trust_root(signed.root())
             .load_zip_stream(
                 stream::once(async { Ok::<_, Infallible>(zip.clone()) }),
                 None,

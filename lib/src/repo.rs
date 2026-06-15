@@ -95,16 +95,15 @@ impl Repository {
         system_version: Version,
         log: &Logger,
     ) -> Result<Self, Error> {
-        let zip = crate::edit::RepositoryEditor::fake(system_version)?
+        let signed = crate::edit::RepositoryEditor::fake(system_version)?
             .finish()
             .await?
             .generate_root()
             .sign()
-            .await?
-            .write_zip(Vec::new(), chrono::Utc::now())
             .await?;
+        let zip = signed.write_zip(Vec::new(), chrono::Utc::now()).await?;
         RepositoryLoader::new()
-            .trust_store_behavior(crate::TrustStoreBehavior::UnsafeBlindFaith)
+            .trust_root(signed.root())
             .load_zip_buffer(zip, log)
             .await
     }

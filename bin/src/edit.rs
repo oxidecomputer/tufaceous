@@ -7,18 +7,18 @@ use camino::Utf8PathBuf;
 use chrono::Utc;
 use clap::Parser;
 use semver::Version;
-use tufaceous::ExpirationEnforcement;
-use tufaceous::RepositoryLoader;
-use tufaceous::TrustStoreBehavior;
 use tufaceous::edit::RepositoryEditor;
 use tufaceous_artifact::KnownArtifactTags;
 
+use crate::load::LoadOptions;
 use crate::sign::SignOptions;
 
 #[derive(Debug, Parser)]
 pub struct Args {
     #[arg(short = 'a', long, num_args(1..))]
     add_artifacts: Vec<Utf8PathBuf>,
+    #[clap(flatten)]
+    load_options: LoadOptions,
     #[clap(long)]
     no_installinator_document: bool,
     #[clap(short = 'o', long)]
@@ -34,11 +34,10 @@ pub struct Args {
 
 impl Args {
     pub async fn run(self) -> Result<()> {
-        let repo = RepositoryLoader::new()
-            // TODO after v2 merge: Create a LoadOptions struct for configuring
-            // expiration enforcement and trust store behavior.
-            .expiration_enforcement(ExpirationEnforcement::Unsafe)
-            .trust_store_behavior(TrustStoreBehavior::UnsafeBlindFaith)
+        let repo = self
+            .load_options
+            .loader()
+            .await?
             .load_zip_path(self.repo.clone(), &crate::LOG)
             .await?;
         let mut editor = RepositoryEditor::from_repo(&repo)?
