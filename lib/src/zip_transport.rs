@@ -66,8 +66,6 @@ use bytes::BytesMut;
 use camino::Utf8PathBuf;
 use flate2::read::DeflateDecoder;
 use futures_util::Stream;
-use futures_util::TryFutureExt;
-use futures_util::stream;
 use rawzip::CompressionMethod;
 use rawzip::FileReader;
 use rawzip::ReaderAt;
@@ -75,9 +73,9 @@ use rawzip::ZipArchive;
 use rawzip::ZipArchiveEntryWayfinder;
 use rawzip::ZipFileHeaderRecord;
 use slog::Logger;
+use slog::error;
 use slog::warn;
 use tokio::sync::mpsc;
-use tokio::sync::oneshot;
 use tough::Transport;
 use tough::TransportError;
 use tough::TransportErrorKind;
@@ -114,6 +112,7 @@ const EOCD_MAX_SEARCH_SPACE: u64 = 22;
 #[derive(Debug)]
 pub struct ZipTransport<T: ReaderAt + Debug + Send + Sync + 'static> {
     inner: Arc<Inner<T>>,
+    log: Logger,
 }
 
 #[derive(Debug)]
@@ -125,7 +124,7 @@ struct Inner<T: ReaderAt + Debug + Send + Sync + 'static> {
 // Manually implemented, as the derive macro adds an unnecessary `T: Clone`.
 impl<T: ReaderAt + Debug + Send + Sync + 'static> Clone for ZipTransport<T> {
     fn clone(&self) -> Self {
-        Self { inner: self.inner.clone() }
+        Self { inner: self.inner.clone(), log: self.log.clone() }
     }
 }
 
@@ -262,7 +261,10 @@ impl<T: ReaderAt + Debug + Send + Sync + 'static> ZipTransport<T> {
             }
         }
 
-        Ok(Self { inner: Arc::new(Inner { archive, entries }) })
+        Ok(Self {
+            inner: Arc::new(Inner { archive, entries }),
+            log: log.clone(),
+        })
     }
 
     fn stream(
@@ -272,11 +274,12 @@ impl<T: ReaderAt + Debug + Send + Sync + 'static> ZipTransport<T> {
     ) -> impl Stream<Item = Result<Bytes, TransportError>> {
         // This could be a lot nicer but the ZIP entry reader can't cross in/out
         // of `spawn_blocking` because the type has an associated lifetime.
-        let (outer_tx, mut outer_rx) = mpsc::channel::<
-            oneshot::Sender<Result<Bytes, ZipTransportError>>,
-        >(1);
+        let (tx, mut rx) = mpsc::channel::<Result<Bytes, TransportError>>(1);
+        let cloned_url = url.clone();
         let task = tokio::task::spawn_blocking(move || {
-            let Some(inner_tx) = outer_rx.blocking_recv() else { return };
+            type SendError =
+                mpsc::error::SendError<Result<Bytes, TransportError>>;
+
             let mut reader = match self
                 .inner
                 .archive
@@ -293,55 +296,55 @@ impl<T: ReaderAt + Debug + Send + Sync + 'static> ZipTransport<T> {
                 }) {
                 Ok(reader) => reader,
                 Err(error) => {
-                    inner_tx.send(Err(error)).ok();
-                    return;
+                    tx.blocking_send(Err(error.into_tough_error(url)))?;
+                    return Ok::<_, SendError>(());
                 }
             };
 
-            let mut buf = BytesMut::new();
-            let mut first_tx = Some(inner_tx);
-            while let Some(inner_tx) =
-                first_tx.take().or_else(|| outer_rx.blocking_recv())
-            {
+            let mut buf = BytesMut::with_capacity(8192);
+            loop {
                 if buf.capacity() == 0 {
                     buf.reserve(8192);
                 }
                 buf.resize(buf.capacity(), 0);
-                let result = match reader.read(&mut buf) {
-                    Ok(0) => break,
+                match reader.read(&mut buf) {
+                    Ok(0) => return Ok::<_, SendError>(()),
                     Ok(n) => {
                         buf.truncate(n);
-                        Ok(buf.split().freeze())
+                        tx.blocking_send(Ok(buf.split().freeze()))?;
                     }
-                    Err(error) => Err(error.into()),
-                };
-                let Ok(()) = inner_tx.send(result) else { break };
-            }
-        });
-        stream::try_unfold(
-            (outer_tx, task, url),
-            async |(outer_tx, task, url)| {
-                let (inner_tx, inner_rx) = oneshot::channel();
-                match outer_tx
-                    .send(inner_tx)
-                    .map_err(|_send_error| ())
-                    .and_then(|()| inner_rx.map_err(|_recv_error| ()))
-                    .await
-                {
-                    Ok(Ok(bytes)) => Ok(Some((bytes, (outer_tx, task, url)))),
-                    Ok(Err(error)) => Err(error.into_tough_error(url)),
-                    Err(()) => {
-                        // The task hung up. If we're still here, then the task
-                        // reached EOF. await the task and return.
-                        match task.await {
-                            Ok(()) => Ok(None),
-                            Err(error) => Err(ZipTransportError::from(error)
-                                .into_tough_error(url)),
-                        }
+                    Err(error) => {
+                        tx.blocking_send(Err(ZipTransportError::from(error)
+                            .into_tough_error(url)))?;
+                        return Ok::<_, SendError>(());
                     }
                 }
-            },
-        )
+            }
+        });
+
+        tokio::task::spawn(async move {
+            if let Ok(Err(send_error)) = task.await {
+                match send_error.0 {
+                    Ok(_) => {
+                        error!(
+                            self.log,
+                            "zip file reader hung up mid-stream";
+                            "url" => &cloned_url.to_string(),
+                        );
+                    }
+                    Err(err) => {
+                        error!(
+                            self.log,
+                            "zip file reader hung up mid-stream \
+                            before receiving error";
+                            "url" => &cloned_url.to_string(),
+                            "err" => &crate::util::error_chain(&err),
+                        );
+                    }
+                }
+            }
+        });
+        futures_util::stream::poll_fn(move |cx| rx.poll_recv(cx))
     }
 }
 

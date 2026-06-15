@@ -45,6 +45,7 @@ pub type TargetStream =
 /// A loaded TUF repository.
 #[derive(Debug, Clone)]
 pub struct Repository {
+    log: Logger,
     inner: tough::Repository,
     system_version: Version,
     trust_root: Vec<u8>,
@@ -121,6 +122,7 @@ impl Repository {
                 && let Some(partial) = v1::from_loaded(&repo, log).await?
             {
                 return Ok(Repository {
+                    log: log.clone(),
                     inner: repo,
                     trust_root,
                     system_version: partial.system_version,
@@ -151,6 +153,7 @@ impl Repository {
             })
             .collect();
         Ok(Repository {
+            log: log.clone(),
             inner: repo,
             trust_root,
             system_version,
@@ -240,13 +243,21 @@ impl Repository {
             ArtifactData::Target { target_name } => {
                 self.read_target(target_name).await
             }
-            ArtifactData::V1Unpacked { file, .. } => {
+            ArtifactData::V1Unpacked {
+                file,
+                original_target_name,
+                inner_path,
+            } => {
                 let unpacked = v1::UnpackedArtifact {
                     file: file.clone(),
                     hash: artifact.hash,
                     length: artifact.length,
                 };
-                Ok(Box::pin(unpacked.stream()))
+                Ok(Box::pin(unpacked.stream(
+                    self.log.clone(),
+                    original_target_name.clone(),
+                    inner_path.clone(),
+                )))
             }
         }
     }

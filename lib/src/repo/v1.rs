@@ -20,7 +20,6 @@ use flate2::bufread::GzDecoder;
 use futures_util::Stream;
 use futures_util::TryStreamExt;
 use futures_util::pin_mut;
-use futures_util::stream;
 use hubtools::Caboose;
 use hubtools::RawHubrisArchive;
 use rawzip::FileReader;
@@ -31,6 +30,7 @@ use serde::Deserialize;
 use sha2::Digest;
 use sha2::Sha256;
 use slog::Logger;
+use slog::error;
 use slog::info;
 use slog::warn;
 use tokio::sync::mpsc;
@@ -274,45 +274,82 @@ impl UnpackedArtifact {
 
     pub(crate) fn stream(
         self,
+        log: Logger,
+        original_target_name: String,
+        inner_path: Utf8PathBuf,
     ) -> impl Stream<Item = Result<Bytes, Error>> + 'static {
-        stream::try_unfold(
-            (self, BytesMut::new(), Sha256::new(), 0),
-            async |(this, mut buf, mut hasher, mut bytes_read)| {
+        let (tx, mut rx) = mpsc::channel::<Result<Bytes, Error>>(1);
+        let task = tokio::task::spawn_blocking(move || {
+            type SendError = mpsc::error::SendError<Result<Bytes, Error>>;
+
+            let mut buf = BytesMut::with_capacity(8192);
+            let mut hasher = Sha256::new();
+            let mut bytes_read = 0;
+            loop {
                 if buf.capacity() == 0 {
                     buf.reserve(8192);
                 }
                 buf.resize(buf.capacity(), 0);
-                let (this, mut buf) = tokio::task::spawn_blocking(move || {
-                    let n = this.file.read_at(&mut buf, bytes_read).map_err(
-                        |source| ErrorKind::ReadFile { source, path: None },
-                    )?;
-                    buf.truncate(n);
-                    Ok::<_, Error>((this, buf))
-                })
-                .await??;
+                match self.file.read_at(&mut buf, bytes_read) {
+                    Ok(n) => {
+                        buf.truncate(n);
+                    }
+                    Err(source) => {
+                        let err = ErrorKind::ReadFile { source, path: None };
+                        tx.blocking_send(Err(err.into()))?;
+                        return Ok::<_, SendError>(());
+                    }
+                }
+
                 let bytes = buf.split().freeze();
                 if bytes.is_empty() {
-                    let msg = if this.hash != ArtifactHash(hasher.finalize().0)
-                    {
-                        "invalid checksum"
-                    } else if this.length != bytes_read {
-                        "invalid length"
-                    } else {
-                        return Ok(None);
-                    };
-                    let source = std::io::Error::new(
-                        std::io::ErrorKind::InvalidData,
-                        msg,
-                    );
-                    return Err(
-                        ErrorKind::ReadFile { source, path: None }.into()
-                    );
+                    break;
                 }
                 hasher.update(&bytes);
                 bytes_read += usize64!(bytes.len());
-                Ok(Some((bytes, (this, buf, hasher, bytes_read))))
-            },
-        )
+                tx.blocking_send(Ok(bytes))?;
+            }
+
+            let msg = if self.hash != ArtifactHash(hasher.finalize().into()) {
+                "invalid checksum"
+            } else if self.length != bytes_read {
+                "invalid length"
+            } else {
+                // correct checksum and length
+                return Ok::<_, SendError>(());
+            };
+            let source =
+                std::io::Error::new(std::io::ErrorKind::InvalidData, msg);
+            tx.blocking_send(Err(
+                ErrorKind::ReadFile { source, path: None }.into()
+            ))
+        });
+
+        tokio::task::spawn(async move {
+            if let Ok(Err(send_error)) = task.await {
+                match send_error.0 {
+                    Ok(_) => {
+                        error!(
+                            log,
+                            "unpacked file reader hung up mid-stream";
+                            "original_target_name" => original_target_name,
+                            "inner_path" => inner_path.as_str(),
+                        );
+                    }
+                    Err(err) => {
+                        error!(
+                            log,
+                            "unpacked file reader hung up mid-stream \
+                            before receiving error";
+                            "original_target_name" => original_target_name,
+                            "inner_path" => inner_path.as_str(),
+                            "err" => &crate::util::error_chain(&err),
+                        );
+                    }
+                }
+            }
+        });
+        futures_util::stream::poll_fn(move |cx| rx.poll_recv(cx))
     }
 }
 

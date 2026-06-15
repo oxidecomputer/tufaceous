@@ -23,6 +23,7 @@ use serde::Serialize;
 use sha2::Digest;
 use sha2::Sha256;
 use tokio::fs::File;
+use tokio::sync::mpsc;
 use tufaceous_artifact::ArtifactHash;
 
 use crate::Repository;
@@ -274,29 +275,41 @@ impl FileSource {
     }
 
     pub(crate) fn stream(&self) -> impl Stream<Item = Result<Bytes, Error>> {
-        stream::try_unfold(
-            (self.inner.clone(), BytesMut::new(), 0),
-            async |(inner, mut buf, mut offset)| {
-                tokio::task::spawn_blocking(move || {
-                    if buf.capacity() == 0 {
-                        buf.reserve(8192);
+        let (tx, mut rx) = mpsc::channel::<Result<Bytes, Error>>(1);
+        let inner = self.inner.clone();
+        tokio::task::spawn_blocking(move || {
+            let mut buf = BytesMut::with_capacity(8192);
+            let mut offset = 0;
+            loop {
+                if buf.capacity() == 0 {
+                    buf.reserve(8192);
+                }
+                buf.resize(buf.capacity(), 0);
+                match inner.file.read_at(&mut buf, offset) {
+                    Ok(n) => {
+                        buf.truncate(n);
                     }
-                    buf.resize(buf.capacity(), 0);
-                    let n = try_path!(
-                        inner.file.read_at(&mut buf, offset),
-                        ReadFile,
-                        inner.path.clone()
-                    );
-                    if n == 0 {
-                        return Ok(None);
+                    Err(source) => {
+                        let err = ErrorKind::ReadFile {
+                            source,
+                            path: Some(inner.path.clone()),
+                        };
+                        tx.blocking_send(Err(err.into())).ok();
+                        return;
                     }
-                    offset += usize64!(n);
-                    buf.truncate(n);
-                    Ok(Some((buf.split().freeze(), (inner, buf, offset))))
-                })
-                .await?
-            },
-        )
+                }
+
+                let bytes = buf.split().freeze();
+                if bytes.is_empty() {
+                    return;
+                }
+                offset += usize64!(bytes.len());
+                if tx.blocking_send(Ok(bytes)).is_err() {
+                    return;
+                }
+            }
+        });
+        futures_util::stream::poll_fn(move |cx| rx.poll_recv(cx))
     }
 }
 
