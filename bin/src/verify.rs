@@ -17,7 +17,7 @@ use crate::load::LoadOptions;
 pub struct Args {
     #[clap(flatten)]
     load_options: LoadOptions,
-    /// Path to the repository
+    /// Input repository path
     repo: Utf8PathBuf,
     /// Number of threads to use while verifying targets
     #[clap(short = 'j', alias = "jobs", default_value_t = default_threads())]

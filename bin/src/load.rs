@@ -20,7 +20,7 @@ pub struct LoadOptions {
     )]
     allow_expired: bool,
 
-    /// Blindly trust whatever root is contained in the repository.
+    /// Blindly trust whatever root is contained in the repository
     ///
     /// This reads the trust root by fetching metadata/1.root.json from the
     /// repository, then proceeds with normal verification. The repository must
@@ -35,7 +35,7 @@ pub struct LoadOptions {
     #[clap(short('f'), long)]
     force_load: bool,
 
-    /// Provide a trust root that can be used to verify the repository.
+    /// Trust roots to verify the repository
     ///
     /// This flag is required unless --blindly-trust or --force-load is set.
     #[clap(

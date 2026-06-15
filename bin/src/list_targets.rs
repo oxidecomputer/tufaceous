@@ -14,6 +14,7 @@ use crate::load::LoadOptions;
 pub struct Args {
     #[clap(flatten)]
     load_options: LoadOptions,
+    /// Input repository path
     repo: Utf8PathBuf,
 }
 

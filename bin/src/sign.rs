@@ -14,7 +14,7 @@ use tufaceous::error::ErrorKind;
 #[derive(Debug, Args)]
 #[cfg_attr(test, derive(PartialEq))]
 pub struct SignOptions {
-    /// Refuse to generate a signing root.
+    /// Refuse to generate a signing root
     #[clap(long)]
     no_generate_root: bool,
 
@@ -22,7 +22,7 @@ pub struct SignOptions {
     #[clap(long, required_if_eq("no_generate_root", "true"))]
     signing_root: Option<Utf8PathBuf>,
 
-    /// Path to a key listed in the signing root.
+    /// Private signing key listed in the signing root
     #[clap(long)]
     key: Vec<Utf8PathBuf>,
 }

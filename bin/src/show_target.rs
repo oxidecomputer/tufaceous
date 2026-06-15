@@ -16,7 +16,12 @@ use crate::load::LoadOptions;
 pub struct Args {
     #[clap(flatten)]
     load_options: LoadOptions,
+    /// Input repository path
     repo: Utf8PathBuf,
+    /// Targets to output
+    ///
+    /// This is the path under "repo/targets/" in a ZIP archive. The
+    /// list-targets command lists the target names.
     target_name: String,
 }
 

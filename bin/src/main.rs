@@ -38,6 +38,9 @@ enum Command {
     /// Build a new repository from a set of artifacts
     Build(build::Args),
     /// Add artifacts to and remove targets from a repository
+    ///
+    /// Calling this with no options will re-sign the repository with a
+    /// newly-generated root and overwrite it.
     Edit(edit::Args),
     /// List the targets in a repository
     #[clap(alias = "ls")]
