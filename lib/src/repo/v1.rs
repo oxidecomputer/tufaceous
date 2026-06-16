@@ -85,11 +85,11 @@ impl PartialRepository {
 /// Returns `None` if the v1 `artifacts.json` wasn't found.
 #[expect(clippy::too_many_lines)]
 pub(crate) async fn from_loaded(
-    repo: &tough::Repository,
+    tuf_repo: &tough::Repository,
     log: &Logger,
 ) -> Result<Option<PartialRepository>, Error> {
     let Some(V1ArtifactSetSchema { system_version, artifacts: v1_artifacts }) =
-        read_target_json(repo, V1ArtifactSetSchema::TARGET_NAME).await?
+        read_target_json(tuf_repo, V1ArtifactSetSchema::TARGET_NAME).await?
     else {
         return Ok(None);
     };
@@ -101,7 +101,7 @@ pub(crate) async fn from_loaded(
     };
     let mut installinator_document = None;
     for V1Artifact { version, kind, target } in v1_artifacts {
-        let (hash, length) = target_meta(repo, &target)?;
+        let (hash, length) = target_meta(tuf_repo, &target)?;
         let kind = match kind {
             V1ArtifactKind::Known(kind) => kind,
             V1ArtifactKind::Unknown(kind) => {
@@ -121,7 +121,7 @@ pub(crate) async fn from_loaded(
             V1KnownArtifactKind::GimletSp
             | V1KnownArtifactKind::PscSp
             | V1KnownArtifactKind::SwitchSp => {
-                let image = read_target_vec(repo, &target).await?;
+                let image = read_target_vec(tuf_repo, &target).await?;
                 let Some(image) = image else { continue };
                 let mut is_lab_image = false;
                 let tags = caboose_tags(image, &target, |caboose| {
@@ -150,7 +150,7 @@ pub(crate) async fn from_loaded(
             V1KnownArtifactKind::GimletRotBootloader
             | V1KnownArtifactKind::PscRotBootloader
             | V1KnownArtifactKind::SwitchRotBootloader => {
-                let image = read_target_vec(repo, &target).await?;
+                let image = read_target_vec(tuf_repo, &target).await?;
                 let Some(image) = image else { continue };
                 let tags = caboose_tags(
                     image,
@@ -189,7 +189,7 @@ pub(crate) async fn from_loaded(
             V1KnownArtifactKind::GimletRot
             | V1KnownArtifactKind::PscRot
             | V1KnownArtifactKind::SwitchRot => {
-                CompositeArtifact::unpack(repo, target)
+                CompositeArtifact::unpack(tuf_repo, target)
                     .await?
                     .read_rot(log, &mut partial, version)
                     .await?;
@@ -197,24 +197,24 @@ pub(crate) async fn from_loaded(
             }
 
             V1KnownArtifactKind::Host => {
-                CompositeArtifact::unpack(repo, target).await?.read_os_image(
-                    &mut partial,
-                    OsVariant::Host,
-                    &version,
-                )?;
+                CompositeArtifact::unpack(tuf_repo, target)
+                    .await?
+                    .read_os_image(&mut partial, OsVariant::Host, &version)?;
                 continue;
             }
             V1KnownArtifactKind::Trampoline => {
-                CompositeArtifact::unpack(repo, target).await?.read_os_image(
-                    &mut partial,
-                    OsVariant::Recovery,
-                    &version,
-                )?;
+                CompositeArtifact::unpack(tuf_repo, target)
+                    .await?
+                    .read_os_image(
+                        &mut partial,
+                        OsVariant::Recovery,
+                        &version,
+                    )?;
                 continue;
             }
 
             V1KnownArtifactKind::ControlPlane => {
-                CompositeArtifact::unpack(repo, target)
+                CompositeArtifact::unpack(tuf_repo, target)
                     .await?
                     .read_control_plane(&mut partial)
                     .await?;
@@ -387,11 +387,11 @@ struct CompositeArtifact {
 
 impl CompositeArtifact {
     async fn unpack(
-        repo: &tough::Repository,
+        tuf_repo: &tough::Repository,
         target_name: String,
     ) -> Result<Self, Error> {
         let stream =
-            read_target(repo, &target_name).await?.ok_or_else(|| {
+            read_target(tuf_repo, &target_name).await?.ok_or_else(|| {
                 ErrorKind::TargetNotFound { target_name: target_name.clone() }
             })?;
         pin_mut!(stream);

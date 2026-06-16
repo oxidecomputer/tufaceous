@@ -45,7 +45,7 @@ pub type TargetStream =
 #[derive(Debug, Clone)]
 pub struct Repository {
     log: Logger,
-    inner: tough::Repository,
+    tuf_repo: tough::Repository,
     system_version: Version,
     trust_root: Vec<u8>,
     artifacts: ArtifactSet,
@@ -107,20 +107,20 @@ impl Repository {
     }
 
     pub(crate) async fn from_loaded(
-        repo: tough::Repository,
+        tuf_repo: tough::Repository,
         log: &Logger,
         trust_root: Vec<u8>,
         v1_compatibility: bool,
     ) -> Result<Self, Error> {
         let Some(ArtifactSetSchema { system_version, artifacts, metadata }) =
-            read_target_json(&repo, ArtifactSetSchema::TARGET_NAME).await?
+            read_target_json(&tuf_repo, ArtifactSetSchema::TARGET_NAME).await?
         else {
             if v1_compatibility
-                && let Some(partial) = v1::from_loaded(&repo, log).await?
+                && let Some(partial) = v1::from_loaded(&tuf_repo, log).await?
             {
                 return Ok(Repository {
                     log: log.clone(),
-                    inner: repo,
+                    tuf_repo,
                     trust_root,
                     system_version: partial.system_version,
                     artifacts: partial.artifacts,
@@ -140,7 +140,7 @@ impl Repository {
         let (artifacts, artifact_data) = artifacts
             .into_iter()
             .map(|ArtifactSchema { target_name, version, tags }| {
-                let (hash, length) = target_meta(&repo, &target_name)?;
+                let (hash, length) = target_meta(&tuf_repo, &target_name)?;
                 let artifact = Artifact { version, tags, hash, length };
                 Ok::<_, Error>((
                     artifact.clone(),
@@ -150,7 +150,7 @@ impl Repository {
             .collect::<Result<_, _>>()?;
         Ok(Repository {
             log: log.clone(),
-            inner: repo,
+            tuf_repo,
             trust_root,
             system_version,
             artifacts,
@@ -186,7 +186,7 @@ impl Repository {
     }
 
     pub fn targets(&self) -> &HashMap<TargetName, Target> {
-        &self.inner.targets().signed.targets
+        &self.tuf_repo.targets().signed.targets
     }
 
     pub fn artifacts(&self) -> &ArtifactSet {
@@ -265,7 +265,7 @@ impl Repository {
         &self,
         target_name: &str,
     ) -> Result<TargetStream, Error> {
-        if let Some(stream) = read_target(&self.inner, target_name).await? {
+        if let Some(stream) = read_target(&self.tuf_repo, target_name).await? {
             Ok(Box::pin(stream))
         } else {
             Err(ErrorKind::TargetNotFound {
@@ -396,6 +396,11 @@ impl ArtifactData {
     }
 }
 
+/// An [`Artifact`] and the [`Repository`] it belongs to, for convenience to
+/// code that works at the artifact level but needs to read the artifact data
+/// from the repository.
+///
+/// Created by [`Repository::get_handle`] or [`Repository::handles`].
 #[derive(Debug, Clone)]
 pub struct ArtifactHandle {
     artifact: Artifact,
@@ -403,51 +408,55 @@ pub struct ArtifactHandle {
 }
 
 impl ArtifactHandle {
+    /// Return a reference to this handle's [`Artifact`].
     pub fn artifact(&self) -> &Artifact {
         &self.artifact
     }
 
+    /// Convert this handle into its owned [`Artifact`], dropping its
+    /// association with its [`Repository`].
     pub fn into_artifact(self) -> Artifact {
         self.artifact
     }
 
+    /// Read this artifact from its repository.
     pub async fn stream(&self) -> Result<TargetStream, Error> {
         self.repo.read_artifact(&self.artifact).await
     }
 }
 
 async fn read_target(
-    repo: &tough::Repository,
+    tuf_repo: &tough::Repository,
     target: &str,
 ) -> Result<Option<impl Stream<Item = Result<Bytes, Error>> + 'static>, Error> {
     let target_name = target.parse()?;
     // Ensure the target is in the top-level targets.json role and not a
     // delegated target; we don't permit the use of delegated targets in
     // Tufaceous currently.
-    if !repo.targets().signed.targets.contains_key(&target_name) {
+    if !tuf_repo.targets().signed.targets.contains_key(&target_name) {
         return Ok(None);
     }
-    Ok(repo
+    Ok(tuf_repo
         .read_target(&target_name)
         .await?
         .map(TryStreamExt::err_into::<Error>))
 }
 
 async fn read_target_vec(
-    repo: &tough::Repository,
+    tuf_repo: &tough::Repository,
     target: &str,
 ) -> Result<Option<Vec<u8>>, Error> {
-    let Some(stream) = read_target(repo, target).await? else {
+    let Some(stream) = read_target(tuf_repo, target).await? else {
         return Ok(None);
     };
     stream.map_ok(Vec::from).try_concat().await.map(Some)
 }
 
 async fn read_target_json<T: DeserializeOwned>(
-    repo: &tough::Repository,
+    tuf_repo: &tough::Repository,
     target: &str,
 ) -> Result<Option<T>, Error> {
-    let Some(vec) = read_target_vec(repo, target).await? else {
+    let Some(vec) = read_target_vec(tuf_repo, target).await? else {
         return Ok(None);
     };
     serde_json::from_slice(&vec).map_err(|source| {
@@ -456,15 +465,16 @@ async fn read_target_json<T: DeserializeOwned>(
 }
 
 fn target_meta(
-    repo: &tough::Repository,
+    tuf_repo: &tough::Repository,
     target_name: &str,
 ) -> Result<(ArtifactHash, u64), Error> {
     let name = TargetName::new(target_name).map_err(|_| {
         ErrorKind::UnsafeTargetName { target_name: target_name.to_owned() }
     })?;
-    let target = repo.targets().signed.targets.get(&name).ok_or_else(|| {
-        ErrorKind::TargetNotFound { target_name: target_name.to_owned() }
-    })?;
+    let target =
+        tuf_repo.targets().signed.targets.get(&name).ok_or_else(|| {
+            ErrorKind::TargetNotFound { target_name: target_name.to_owned() }
+        })?;
     let hash = ArtifactHash(target.hashes.sha256.as_ref().try_into().map_err(
         |_| ErrorKind::InvalidHashLength {
             target_name: target_name.to_owned(),
