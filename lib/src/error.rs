@@ -97,6 +97,11 @@ pub enum ErrorKind {
         archive_path: Option<Utf8PathBuf>,
     },
     #[error(
+        "zip writer state machine violation: {reason} \
+        (please report this logic error in Tufaceous)"
+    )]
+    WriteZipStateMachine { reason: &'static str },
+    #[error(
         "zip archive{archive_path}'s end of central directory record \
         expects {expected} entries, but found {actual} entries",
         archive_path = SpacePath(archive_path),
@@ -338,6 +343,7 @@ impl ErrorKind {
             ErrorKind::Join(_)
             | ErrorKind::ToughKey(_)
             | ErrorKind::WriteZip { .. }
+            | ErrorKind::WriteZipStateMachine { .. }
             | ErrorKind::CreateTempDir(_)
             | ErrorKind::CreateTempFile(_)
             | ErrorKind::OpenFile { .. }

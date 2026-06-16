@@ -299,21 +299,14 @@ impl SignedRepository<'_> {
         }
         tx.send(ZipWriterMessage::FinishArchive).await.ok();
         task.await?.map_err(|error| {
-            let source = match error {
-                ZipWriterError::Zip(error) => error,
-                err @ (ZipWriterError::ExpectedFile
-                | ZipWriterError::ExpectedBytes) => {
-                    std::io::Error::new(std::io::ErrorKind::InvalidInput, err)
-                        .into()
+            match error {
+                ZipWriterError::Zip(source) => ErrorKind::WriteZip {
+                    source,
+                    archive_path: archive_path.map(Utf8Path::to_owned),
+                },
+                ZipWriterError::StateMachine(reason) => {
+                    ErrorKind::WriteZipStateMachine { reason }
                 }
-                err @ ZipWriterError::UnexpectedEof => {
-                    std::io::Error::new(std::io::ErrorKind::UnexpectedEof, err)
-                        .into()
-                }
-            };
-            ErrorKind::WriteZip {
-                source,
-                archive_path: archive_path.map(Utf8Path::to_owned),
             }
             .into()
         })
@@ -365,16 +358,15 @@ enum ZipWriterMessage {
     FinishFile,
 }
 
-#[derive(Debug, thiserror::Error)]
 enum ZipWriterError {
-    #[error(transparent)]
-    Zip(#[from] rawzip::Error),
-    #[error("state machine violation: expected file start or archive finish")]
-    ExpectedFile,
-    #[error("state machine violation: expected file bytes or file finish")]
-    ExpectedBytes,
-    #[error("state machine violation: unexpected end of message stream")]
-    UnexpectedEof,
+    Zip(rawzip::Error),
+    StateMachine(&'static str),
+}
+
+impl From<rawzip::Error> for ZipWriterError {
+    fn from(error: rawzip::Error) -> Self {
+        ZipWriterError::Zip(error)
+    }
 }
 
 impl From<std::io::Error> for ZipWriterError {
@@ -399,8 +391,9 @@ fn blocking_write_task<W: Write>(
 ) -> Result<W, ZipWriterError> {
     let mut archive = ZipArchiveWriter::new(writer);
     loop {
-        let message =
-            rx.blocking_recv().ok_or(ZipWriterError::UnexpectedEof)?;
+        let message = rx.blocking_recv().ok_or(
+            ZipWriterError::StateMachine("unexpected end of message stream"),
+        )?;
         let (name, compression) = match message {
             ZipWriterMessage::FinishArchive => {
                 return Ok(archive.finish()?);
@@ -410,7 +403,9 @@ fn blocking_write_task<W: Write>(
             }
             ZipWriterMessage::WriteFileBytes(_)
             | ZipWriterMessage::FinishFile => {
-                return Err(ZipWriterError::ExpectedFile);
+                return Err(ZipWriterError::StateMachine(
+                    "expected StartFile or FinishArchive",
+                ));
             }
         };
 
@@ -431,7 +426,9 @@ fn blocking_write_task<W: Write>(
 
         loop {
             let message =
-                rx.blocking_recv().ok_or(ZipWriterError::UnexpectedEof)?;
+                rx.blocking_recv().ok_or(ZipWriterError::StateMachine(
+                    "unexpected end of message stream",
+                ))?;
             match message {
                 ZipWriterMessage::WriteFileBytes(bytes) => {
                     writer.write_all(&bytes)?;
@@ -444,7 +441,9 @@ fn blocking_write_task<W: Write>(
                 }
                 ZipWriterMessage::FinishArchive
                 | ZipWriterMessage::StartFile { .. } => {
-                    return Err(ZipWriterError::ExpectedBytes);
+                    return Err(ZipWriterError::StateMachine(
+                        "expected WriteFileBytes or FinishFile",
+                    ));
                 }
             }
         }
