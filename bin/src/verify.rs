@@ -10,6 +10,7 @@ use anyhow::ensure;
 use camino::Utf8PathBuf;
 use clap::Parser;
 use tufaceous::CheckProblem;
+use tufaceous_artifact::ArtifactHash;
 
 use crate::load::LoadOptions;
 
@@ -36,9 +37,13 @@ impl Args {
             .load_options
             .loader()
             .await?
+            .compute_archive_sha256(true)
             .v1_compatibility(true)
             .load_zip_path(self.repo.clone(), &crate::LOG)
             .await?;
+        let sha256 = ArtifactHash(
+            *repo.archive_sha256().expect("repo hash should be calculated"),
+        );
 
         repo.verify_targets(self.threads).await?;
 
@@ -49,7 +54,7 @@ impl Args {
             WriteProblems(&problems)
         );
 
-        eprintln!("{}: OK", self.repo);
+        eprintln!("{}: OK, SHA256 = {sha256}", self.repo);
         Ok(())
     }
 }
