@@ -79,6 +79,10 @@ impl PartialRepository {
     }
 }
 
+/// Attempt to load a `tough::Repository` as if it is a Tufaceous v1 repository,
+/// converting artifacts into the v2 memory representation.
+///
+/// Returns `None` if the v1 `artifacts.json` wasn't found.
 #[expect(clippy::too_many_lines)]
 pub(crate) async fn from_loaded(
     repo: &tough::Repository,
@@ -112,6 +116,8 @@ pub(crate) async fn from_loaded(
             }
         };
         let tags = match kind {
+            // These arms represent a single artifact, and return their tags
+            // from the match arm.
             V1KnownArtifactKind::GimletSp
             | V1KnownArtifactKind::PscSp
             | V1KnownArtifactKind::SwitchSp => {
@@ -171,6 +177,15 @@ pub(crate) async fn from_loaded(
                 }
                 tags
             }
+
+            V1KnownArtifactKind::MeasurementCorpus => {
+                KnownArtifactTags::MeasurementCorpus
+            }
+
+            // These arms represent composite artifacts, and all diverge
+            // with `continue`. They use methods on `CompositeArtifact` to
+            // unpack and add multiple artifacts to `partial` instead of the
+            // single-artifact logic at the end of this match statement.
             V1KnownArtifactKind::GimletRot
             | V1KnownArtifactKind::PscRot
             | V1KnownArtifactKind::SwitchRot => {
@@ -198,14 +213,6 @@ pub(crate) async fn from_loaded(
                 continue;
             }
 
-            V1KnownArtifactKind::InstallinatorDocument => {
-                // Ignore this Installinator document, because it is written for
-                // the v1 artifacts. We need to generate a new one for the v2
-                // artifacts once all of the potential artifacts are extracted.
-                installinator_document = Some((version, target));
-                continue;
-            }
-
             V1KnownArtifactKind::ControlPlane => {
                 CompositeArtifact::unpack(repo, target)
                     .await?
@@ -214,8 +221,13 @@ pub(crate) async fn from_loaded(
                 continue;
             }
 
-            V1KnownArtifactKind::MeasurementCorpus => {
-                KnownArtifactTags::MeasurementCorpus
+            // Do not directly use any Installinator document, because it is
+            // written for the v1 artifacts. We need to generate a new one
+            // for the v2 artifacts once all of the potential artifacts are
+            // extracted.
+            V1KnownArtifactKind::InstallinatorDocument => {
+                installinator_document = Some((version, target));
+                continue;
             }
         };
 
@@ -226,6 +238,8 @@ pub(crate) async fn from_loaded(
         );
     }
 
+    // If we found an Installinator document, generate a new one with the v2
+    // artifacts.
     if let Some((version, target)) = installinator_document {
         generate_installinator_document(&mut partial, version, target).await?;
     }
