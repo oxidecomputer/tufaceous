@@ -42,10 +42,13 @@ impl Repository {
             }
         }
 
-        match self
-            .structured_metadata()
-            .and_then(|structured_metadata| structured_metadata.to_map().ok())
-        {
+        match self.structured_metadata().and_then(|m| match m.to_map() {
+            Ok(m) => Some(m),
+            Err(source) => {
+                problems.push(CheckProblem::ConvertMetadataMapping(source));
+                None
+            }
+        }) {
             Some(metadata) => {
                 if self.metadata() != &metadata {
                     let diff = self.metadata().diff(&metadata);
@@ -173,6 +176,14 @@ pub enum CheckProblem {
     /// The repository metadata cannot be parsed.
     #[error("couldn't parse metadata {0:?}")]
     UnknownMetadata(BTreeMap<String, String>),
+
+    /// The repository metadata cannot be converted into a string mapping, which
+    /// is a bug.
+    #[error(
+        "couldn't convert metadata to string mapping; \
+        this is a bug in Tufaceous"
+    )]
+    ConvertMetadataMapping(#[source] serde_json::Error),
 
     /// The repository metadata contains an unknown key.
     #[error("unknown metadata key {0:?}")]
