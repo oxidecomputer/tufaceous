@@ -29,7 +29,7 @@ pub struct Args {
     output: Utf8PathBuf,
     #[clap(flatten)]
     sign_options: SignOptions,
-    /// The system version [required]
+    /// The system version (required)
     #[clap(short = 'V', long)]
     system_version: Version,
 }
