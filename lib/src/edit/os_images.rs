@@ -85,8 +85,9 @@ impl Input<TargetSource<'static>> {
             }
         };
         for path in ["unix.z", "cpio.z"] {
-            let source = FileSource::open(dir.join(path)).await?;
-            extra_targets.insert(path.into(), source.into());
+            if let Some(source) = FileSource::try_open(dir.join(path)).await? {
+                extra_targets.insert(path.into(), source.into());
+            }
         }
 
         Ok(Self::OsImages {

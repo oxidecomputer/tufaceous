@@ -204,6 +204,19 @@ impl FileSource {
         Ok(Self::from_file(file.into_std().await, path))
     }
 
+    pub(crate) async fn try_open(
+        path: Utf8PathBuf,
+    ) -> Result<Option<Self>, Error> {
+        let file = match File::open(&path).await {
+            Ok(file) => file,
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
+                return Ok(None);
+            }
+            Err(err) => try_path!(Err(err), OpenFile, path),
+        };
+        Ok(Some(Self::from_file(file.into_std().await, path)))
+    }
+
     pub(crate) fn from_file(file: std::fs::File, path: Utf8PathBuf) -> Self {
         Self {
             inner: Arc::new(FileSourceInner {
