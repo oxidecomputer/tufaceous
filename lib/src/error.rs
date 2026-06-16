@@ -255,6 +255,8 @@ pub enum ErrorKind {
         source: serde_json::Error,
         target: String,
     },
+    #[error("unsafe target name {target_name}")]
+    UnsafeTargetName { target_name: String },
 
     #[error(transparent)]
     ArtifactVersion(#[from] tufaceous_artifact::ArtifactVersionError),
@@ -277,11 +279,8 @@ pub enum ErrorKind {
         second_target_name: String,
         tags: BTreeMap<String, String>,
     },
-    #[error(
-        "target {target_name} from imported repository has invalid SHA-256 \
-        hash length; remove the target before calling finish"
-    )]
-    InvalidImportedHashLength { target_name: String },
+    #[error("target {target_name} has invalid SHA-256 hash length")]
+    InvalidHashLength { target_name: String },
     #[error("failed to serialize artifacts document")]
     SerializeArtifacts(#[source] serde_json::Error),
     #[error("failed to serialize Installinator document")]
@@ -335,6 +334,7 @@ impl ErrorKind {
             | ErrorKind::ArtifactNotFound { .. }
             | ErrorKind::TargetNotFound { .. }
             | ErrorKind::ParseTargetJson { .. }
+            | ErrorKind::UnsafeTargetName { .. }
             | ErrorKind::ArtifactVersion(_)
             | ErrorKind::ConvertKnownTagsToMap(_)
             | ErrorKind::ReadCompositeArtifact { .. }
@@ -365,7 +365,7 @@ impl ErrorKind {
             | ErrorKind::ConvertMetadataToMap(_)
             | ErrorKind::TargetNameCollision { .. }
             | ErrorKind::DisallowedTagCollision { .. }
-            | ErrorKind::InvalidImportedHashLength { .. }
+            | ErrorKind::InvalidHashLength { .. }
             | ErrorKind::SerializeArtifacts(_)
             | ErrorKind::SerializeInstallinator(_)
             | ErrorKind::NoSigningRoot

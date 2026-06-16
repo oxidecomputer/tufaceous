@@ -59,7 +59,7 @@ use crate::repo::ArtifactData;
 use crate::repo::read_target;
 use crate::repo::read_target_json;
 use crate::repo::read_target_vec;
-use crate::repo::target_meta_skip;
+use crate::repo::target_meta;
 use crate::util::ArtifactExt;
 
 pub(super) struct PartialRepository {
@@ -97,9 +97,7 @@ pub(crate) async fn from_loaded(
     };
     let mut installinator_document = None;
     for V1Artifact { version, kind, target } in v1_artifacts {
-        let Some((hash, length)) = target_meta_skip(repo, log, &target) else {
-            continue;
-        };
+        let (hash, length) = target_meta(repo, &target)?;
         let kind = match kind {
             V1ArtifactKind::Known(kind) => kind,
             V1ArtifactKind::Unknown(kind) => {

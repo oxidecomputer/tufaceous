@@ -19,7 +19,6 @@ use rawzip::FileReader;
 use semver::Version;
 use serde::de::DeserializeOwned;
 use slog::Logger;
-use slog::warn;
 use tokio::sync::Semaphore;
 use tokio::sync::TryAcquireError;
 use tokio::task::JoinSet;
@@ -140,16 +139,15 @@ impl Repository {
 
         let (artifacts, artifact_data) = artifacts
             .into_iter()
-            .filter_map(|ArtifactSchema { target_name, version, tags }| {
-                let (hash, length) =
-                    target_meta_skip(&repo, log, &target_name)?;
+            .map(|ArtifactSchema { target_name, version, tags }| {
+                let (hash, length) = target_meta(&repo, &target_name)?;
                 let artifact = Artifact { version, tags, hash, length };
-                Some((
+                Ok::<_, Error>((
                     artifact.clone(),
                     (artifact, ArtifactData::Target { target_name }),
                 ))
             })
-            .collect();
+            .collect::<Result<_, _>>()?;
         Ok(Repository {
             log: log.clone(),
             inner: repo,
@@ -457,54 +455,20 @@ async fn read_target_json<T: DeserializeOwned>(
     })
 }
 
-fn target_meta_inner(
-    target: &Target,
-) -> Result<(ArtifactHash, u64), InvalidTargetError> {
-    Ok((
-        ArtifactHash(target.hashes.sha256.as_ref().try_into().map_err(
-            |_| InvalidTargetError::ChecksumLength {
-                sha256: target.hashes.sha256.to_vec(),
-            },
-        )?),
-        target.length,
-    ))
-}
-
 fn target_meta(
     repo: &tough::Repository,
     target_name: &str,
-) -> Result<(ArtifactHash, u64), InvalidTargetError> {
-    let name = TargetName::new(target_name)
-        .map_err(|_| InvalidTargetError::NameRejected)?;
-    let Some(target) = repo.targets().signed.targets.get(&name) else {
-        return Err(InvalidTargetError::NotFound);
-    };
-    target_meta_inner(target)
-}
-
-fn target_meta_skip(
-    repo: &tough::Repository,
-    log: &Logger,
-    target_name: &str,
-) -> Option<(ArtifactHash, u64)> {
-    target_meta(repo, target_name)
-        .inspect_err(|error| {
-            warn!(
-                log,
-                "skipping artifact";
-                "target_name" => &target_name,
-                "error" => crate::util::error_chain(&error),
-            );
-        })
-        .ok()
-}
-
-#[derive(Debug, thiserror::Error)]
-enum InvalidTargetError {
-    #[error("target name rejected by tough")]
-    NameRejected,
-    #[error("target not found")]
-    NotFound,
-    #[error("incorrect sha256 length for {:?}", hex::encode(.sha256))]
-    ChecksumLength { sha256: Vec<u8> },
+) -> Result<(ArtifactHash, u64), Error> {
+    let name = TargetName::new(target_name).map_err(|_| {
+        ErrorKind::UnsafeTargetName { target_name: target_name.to_owned() }
+    })?;
+    let target = repo.targets().signed.targets.get(&name).ok_or_else(|| {
+        ErrorKind::TargetNotFound { target_name: target_name.to_owned() }
+    })?;
+    let hash = ArtifactHash(target.hashes.sha256.as_ref().try_into().map_err(
+        |_| ErrorKind::InvalidHashLength {
+            target_name: target_name.to_owned(),
+        },
+    )?);
+    Ok((hash, target.length))
 }

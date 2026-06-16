@@ -17,10 +17,6 @@ use tufaceous_artifact::OsVariant;
 use tufaceous_artifact::artifact_set::GetError;
 
 use crate::Repository;
-use crate::repo::ArtifactData;
-use crate::repo::InvalidTargetError;
-use crate::repo::target_meta;
-use crate::repo::target_meta_inner;
 
 impl Repository {
     /// Check the repository for consistency and other problems.
@@ -35,29 +31,7 @@ impl Repository {
     pub async fn check_problems(&self) -> Vec<CheckProblem> {
         let mut problems = Vec::new();
 
-        for (target_name, target) in self.targets() {
-            if target_name.raw() != target_name.resolved() {
-                problems.push(CheckProblem::BadTargetName {
-                    target_name: target_name.raw().to_owned(),
-                });
-            }
-            if let Err(error) = target_meta_inner(target) {
-                problems.push(CheckProblem::from_invalid_target(
-                    error,
-                    target_name.raw().to_owned(),
-                ));
-            }
-        }
-
         for (artifact, data) in &self.artifact_data {
-            if let ArtifactData::Target { target_name } = data
-                && let Err(error) = target_meta(&self.inner, target_name)
-            {
-                problems.push(CheckProblem::from_invalid_target(
-                    error,
-                    target_name.to_owned(),
-                ));
-            }
             // Check that no artifact contains unknown tags.
             if artifact.known_tags().is_none() {
                 problems.push(CheckProblem::UnknownTags {
@@ -176,24 +150,6 @@ pub enum CheckProblem {
     #[error("no artifact matching {0}")]
     MissingArtifact(KnownArtifactTags),
 
-    /// An artifact's target name is not in the repository.
-    #[error(
-        "artifact with target name {target_name} listed but not present \
-        in repository"
-    )]
-    MissingTarget { target_name: String },
-
-    /// A target name in the repository is not well-formed.
-    #[error("target name {target_name} is not well-formed")]
-    BadTargetName { target_name: String },
-
-    /// A SHA-256 checksum in the TUF repository metadata has an invalid length.
-    #[error(
-        "target {target_name} has SHA-256 checksum {} with invalid length",
-        hex::encode(.sha256)
-    )]
-    TargetHashLengthMismatch { target_name: String, sha256: Vec<u8> },
-
     /// Multiple artifacts for these tags were not expected.
     #[error("multiple artifacts found matching {0}")]
     MultipleArtifacts(KnownArtifactTags),
@@ -224,21 +180,4 @@ pub enum CheckProblem {
         DisplayTags::from(.tags)
     )]
     UnknownTags { target_name: String, tags: BTreeMap<String, String> },
-}
-
-impl CheckProblem {
-    fn from_invalid_target(
-        source: InvalidTargetError,
-        target_name: String,
-    ) -> Self {
-        match source {
-            InvalidTargetError::NameRejected => {
-                Self::BadTargetName { target_name }
-            }
-            InvalidTargetError::NotFound => Self::MissingTarget { target_name },
-            InvalidTargetError::ChecksumLength { sha256 } => {
-                Self::TargetHashLengthMismatch { target_name, sha256 }
-            }
-        }
-    }
 }

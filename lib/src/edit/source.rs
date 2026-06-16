@@ -347,7 +347,7 @@ impl<'a> RepositorySource<'a> {
         let sha256 = match self.sha256.as_slice().try_into() {
             Ok(sha256) => ArtifactHash(sha256),
             Err(_) => {
-                return Err(ErrorKind::InvalidImportedHashLength {
+                return Err(ErrorKind::InvalidHashLength {
                     target_name: self.target_name,
                 }
                 .into());
