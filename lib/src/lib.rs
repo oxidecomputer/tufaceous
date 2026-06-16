@@ -25,7 +25,6 @@ mod repo;
 mod schema;
 mod util;
 mod zip_transport;
-mod zip_writer;
 
 pub use loader::*;
 pub use repo::*;

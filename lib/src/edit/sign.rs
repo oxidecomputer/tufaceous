@@ -8,13 +8,23 @@ use std::io::Write;
 use std::num::NonZero;
 use std::time::Duration;
 
+use atomicwrites::AtomicFile;
+use atomicwrites::OverwriteBehavior;
+use bytes::Bytes;
 use camino::Utf8Path;
+use camino::Utf8PathBuf;
 use chrono::DateTime;
 use chrono::SubsecRound;
 use chrono::Utc;
 use flate2::Compression;
+use flate2::write::DeflateEncoder;
+use futures_util::StreamExt;
 use futures_util::TryStreamExt;
+use rawzip::CompressionMethod;
+use rawzip::ZipArchiveWriter;
 use rawzip::time::UtcDateTime;
+use tokio::sync::mpsc;
+use tokio::task::JoinHandle;
 use tough::key_source::KeySource;
 use tough::schema::Root;
 use tough::schema::Signed;
@@ -27,7 +37,6 @@ use crate::edit::source::TargetSource;
 use crate::error::Error;
 use crate::error::ErrorKind;
 use crate::error::try_path;
-use crate::zip_writer::ZipWriter;
 
 pub(crate) const DEFAULT_VALIDITY: Duration =
     Duration::from_secs(60 * 60 * 24 * 7 /* 1 week */);
@@ -224,8 +233,11 @@ impl SignedRepository<'_> {
         writer: W,
         modification_time: DateTime<Utc>,
     ) -> Result<W, Error> {
-        self.write_zip_impl(ZipWriter::new(writer), modification_time, None)
-            .await
+        let (tx, rx) = mpsc::channel(1);
+        let task = tokio::task::spawn_blocking(move || {
+            blocking_write_task(writer, rx, modification_time)
+        });
+        self.write_zip_impl(tx, task, None).await
     }
 
     pub async fn write_zip_file(
@@ -234,22 +246,23 @@ impl SignedRepository<'_> {
         modification_time: DateTime<Utc>,
     ) -> Result<(), Error> {
         let path = path.as_ref();
-        self.write_zip_impl(
-            ZipWriter::create(path),
-            modification_time,
-            Some(path),
-        )
-        .await
+        let file = AtomicFile::new(path, OverwriteBehavior::AllowOverwrite);
+        let (tx, rx) = mpsc::channel(1);
+        let task = tokio::task::spawn_blocking(move || {
+            file.write(|file| {
+                blocking_write_task(file, rx, modification_time).map(|_| ())
+            })?;
+            Ok(())
+        });
+        self.write_zip_impl(tx, task, Some(path)).await
     }
 
     async fn write_zip_impl<W>(
         &self,
-        mut writer: ZipWriter<W>,
-        modification_time: DateTime<Utc>,
+        tx: mpsc::Sender<ZipWriterMessage>,
+        task: JoinHandle<Result<W, ZipWriterError>>,
         archive_path: Option<&Utf8Path>,
     ) -> Result<W, Error> {
-        let last_modified =
-            UtcDateTime::from_unix(modification_time.timestamp());
         'outer: for ((prefix, name), source) in &self.sources {
             let prefix = Utf8Path::new(match prefix {
                 FilePrefix::Metadata => "repo/metadata",
@@ -260,24 +273,49 @@ impl SignedRepository<'_> {
             let compression = first_chunk
                 .as_deref()
                 .map_or(Compression::none(), deflate_heuristic);
-            let Ok(mut entry) = writer
-                .new_file(prefix.join(name), compression)
-                .last_modified(last_modified)
-                .unix_permissions(0o644)
-                .start()
+
+            let Ok(()) = tx
+                .send(ZipWriterMessage::StartFile {
+                    name: prefix.join(name),
+                    compression,
+                })
                 .await
             else {
                 break 'outer;
             };
-            let Some(first_chunk) = first_chunk else { continue };
-            let Ok(()) = entry.write(first_chunk).await else { break };
-            while let Some(item) = stream.try_next().await? {
-                let Ok(()) = entry.write(item).await else { break 'outer };
+
+            let mut stream =
+                futures_util::stream::iter(first_chunk).map(Ok).chain(stream);
+            while let Some(chunk) = stream.try_next().await? {
+                let Ok(()) =
+                    tx.send(ZipWriterMessage::WriteFileBytes(chunk)).await
+                else {
+                    break 'outer;
+                };
             }
+            let Ok(()) = tx.send(ZipWriterMessage::FinishFile).await else {
+                break 'outer;
+            };
         }
-        writer.finish().await.map_err(|source| {
-            let archive_path = archive_path.map(Utf8Path::to_owned);
-            ErrorKind::WriteZip { source, archive_path }.into()
+        tx.send(ZipWriterMessage::FinishArchive).await.ok();
+        task.await?.map_err(|error| {
+            let source = match error {
+                ZipWriterError::Zip(error) => error,
+                err @ (ZipWriterError::ExpectedFile
+                | ZipWriterError::ExpectedBytes) => {
+                    std::io::Error::new(std::io::ErrorKind::InvalidInput, err)
+                        .into()
+                }
+                err @ ZipWriterError::UnexpectedEof => {
+                    std::io::Error::new(std::io::ErrorKind::UnexpectedEof, err)
+                        .into()
+                }
+            };
+            ErrorKind::WriteZip {
+                source,
+                archive_path: archive_path.map(Utf8Path::to_owned),
+            }
+            .into()
         })
     }
 }
@@ -317,5 +355,136 @@ fn deflate_heuristic(buf: &[u8]) -> Compression {
         }
     } else {
         Compression::best()
+    }
+}
+
+enum ZipWriterMessage {
+    FinishArchive,
+    StartFile { name: Utf8PathBuf, compression: Compression },
+    WriteFileBytes(Bytes),
+    FinishFile,
+}
+
+#[derive(Debug, thiserror::Error)]
+enum ZipWriterError {
+    #[error(transparent)]
+    Zip(#[from] rawzip::Error),
+    #[error("state machine violation: expected file start or archive finish")]
+    ExpectedFile,
+    #[error("state machine violation: expected file bytes or file finish")]
+    ExpectedBytes,
+    #[error("state machine violation: unexpected end of message stream")]
+    UnexpectedEof,
+}
+
+impl From<std::io::Error> for ZipWriterError {
+    fn from(error: std::io::Error) -> Self {
+        ZipWriterError::Zip(error.into())
+    }
+}
+
+impl From<atomicwrites::Error<ZipWriterError>> for ZipWriterError {
+    fn from(error: atomicwrites::Error<ZipWriterError>) -> Self {
+        match error {
+            atomicwrites::Error::User(error) => error,
+            atomicwrites::Error::Internal(error) => error.into(),
+        }
+    }
+}
+
+fn blocking_write_task<W: Write>(
+    writer: W,
+    mut rx: mpsc::Receiver<ZipWriterMessage>,
+    modification_time: DateTime<Utc>,
+) -> Result<W, ZipWriterError> {
+    let mut archive = ZipArchiveWriter::new(writer);
+    loop {
+        let message =
+            rx.blocking_recv().ok_or(ZipWriterError::UnexpectedEof)?;
+        let (name, compression) = match message {
+            ZipWriterMessage::FinishArchive => {
+                return Ok(archive.finish()?);
+            }
+            ZipWriterMessage::StartFile { name, compression } => {
+                (name, compression)
+            }
+            ZipWriterMessage::WriteFileBytes(_)
+            | ZipWriterMessage::FinishFile => {
+                return Err(ZipWriterError::ExpectedFile);
+            }
+        };
+
+        let (mut entry, config) = archive
+            .new_file(name.as_str())
+            .compression_method(if compression == Compression::none() {
+                CompressionMethod::Store
+            } else {
+                CompressionMethod::Deflate
+            })
+            .last_modified(UtcDateTime::from_unix(
+                modification_time.timestamp(),
+            ))
+            .unix_permissions(0o644)
+            .start()?;
+        let encoder = ZipEncoder::new(&mut entry, compression);
+        let mut writer = config.wrap(encoder);
+
+        loop {
+            let message =
+                rx.blocking_recv().ok_or(ZipWriterError::UnexpectedEof)?;
+            match message {
+                ZipWriterMessage::WriteFileBytes(bytes) => {
+                    writer.write_all(&bytes)?;
+                }
+                ZipWriterMessage::FinishFile => {
+                    let (encoder, output) = writer.finish()?;
+                    encoder.finish()?;
+                    entry.finish(output)?;
+                    break;
+                }
+                ZipWriterMessage::FinishArchive
+                | ZipWriterMessage::StartFile { .. } => {
+                    return Err(ZipWriterError::ExpectedBytes);
+                }
+            }
+        }
+    }
+}
+
+enum ZipEncoder<W: Write> {
+    Store(W),
+    Deflate(DeflateEncoder<W>),
+}
+
+impl<W: Write> ZipEncoder<W> {
+    fn new(writer: W, compression: Compression) -> Self {
+        if compression == Compression::none() {
+            Self::Store(writer)
+        } else {
+            Self::Deflate(DeflateEncoder::new(writer, compression))
+        }
+    }
+
+    fn finish(self) -> std::io::Result<W> {
+        match self {
+            Self::Store(writer) => Ok(writer),
+            Self::Deflate(encoder) => encoder.finish(),
+        }
+    }
+}
+
+impl<W: Write> Write for ZipEncoder<W> {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        match self {
+            ZipEncoder::Store(writer) => writer.write(buf),
+            ZipEncoder::Deflate(writer) => writer.write(buf),
+        }
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        match self {
+            ZipEncoder::Store(writer) => writer.flush(),
+            ZipEncoder::Deflate(writer) => writer.flush(),
+        }
     }
 }
