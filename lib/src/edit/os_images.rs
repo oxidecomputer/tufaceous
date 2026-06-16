@@ -190,12 +190,41 @@ impl Input<BytesSource> {
             ),
             MIB,
         );
-        let phase_2 = BytesSource::fake_padded(
-            format!(
-                "{os_variant} OS phase 2 image version {interior_version}\n"
-            ),
-            4 * MIB,
+
+        let mut phase_2_bytes = BytesMut::with_capacity(4096);
+        phase_2_bytes.put(OXIDE_BOOT_MAGIC.as_slice()); // uint32_t odh_magic;
+        phase_2_bytes.put_u32_le(2); // uint32_t odh_version;
+        // The only defined ODH_FLAG is:
+        //     #define ODH_FLAG_COMPRESSED 0x1
+        // but we are not compressing any fake images. (Normally the host image
+        // is "uncompressed" -- a raw ZFS image with compressed contents -- and
+        // the recovery image is compressed.)
+        phase_2_bytes.put_u64_le(0); // uint64_t odh_flags;
+        phase_2_bytes.put_u64_le(4 * MIB); // uint64_t odh_data_size;
+        phase_2_bytes.put_u64_le(4 * MIB); // uint64_t odh_image_size;
+        phase_2_bytes.put_u64_le(1 << 32); // uint64_t odh_target_size;
+        // #define OXBOOT_CSUMLEN_SHA256 32
+        // uint8_t odh_sha256[OXBOOT_CSUMLEN_SHA256];
+        phase_2_bytes.put(
+            // head -c $((4 * 1024 * 1024)) </dev/zero | sha256sum
+            b"\xbb\x9f\x8d\xf6\x14\x74\xd2\x5e\x71\xfa\x00\x72\x23\x18\xcd\x38\
+            \x73\x96\xca\x17\x36\x60\x5e\x12\x48\x82\x1c\xc0\xde\x3d\x3a\xf8"
+                .as_slice(),
         );
+        // #define OXBOOT_DISK_DATASET_SIZE 128
+        // char odh_dataset[OXBOOT_DISK_DATASET_SIZE];
+        let end = phase_2_bytes.len() + 128;
+        phase_2_bytes.put(b"rpool/ROOT/ramdisk".as_slice());
+        phase_2_bytes.resize(end, 0);
+        // #define OXBOOT_DISK_IMAGENAME_SIZE 128
+        // char odh_imagename[OXBOOT_DISK_IMAGENAME_SIZE];
+        phase_2_bytes.put(match os_variant {
+            OsVariant::Host => "ci".as_bytes(),
+            OsVariant::Recovery => "recovery".as_bytes(),
+        });
+        phase_2_bytes.put(" fake123/789fake 1986-12-28 01:23".as_bytes());
+        // rest of header is zeroes, which will be written out by `fake_padded`
+        let phase_2 = BytesSource::fake_padded(phase_2_bytes, 4096 + 4 * MIB);
 
         let mut extra_targets = BTreeMap::new();
         extra_targets.insert(
