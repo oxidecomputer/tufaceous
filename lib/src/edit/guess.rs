@@ -18,11 +18,21 @@ use crate::error::Error;
 use crate::error::ErrorKind;
 use crate::error::try_path;
 
+/// The input to guess methods: the first chunk of bytes from the file, and the
+/// `FileSource` for converting into an [`Input`] if the guess method knows what
+/// it is.
 pub(crate) struct GuessInput {
     pub(crate) file_start: Bytes,
     pub(crate) source: FileSource,
 }
 
+/// A guess method can:
+///
+/// - say it knows what an input is, diverging the control flow:
+///   `Ok(ControlFlow::Break(input))`
+/// - say it doesn't know what an input is, returning the input and continuing
+///   the control flow: `Ok(ControlFlow::Continue(guess_input))`
+/// - return an error: `Err(error)`
 pub(crate) type GuessResult =
     Result<ControlFlow<Input<TargetSource<'static>>, GuessInput>, Error>;
 
