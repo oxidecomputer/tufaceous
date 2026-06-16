@@ -17,6 +17,7 @@ use tufaceous_artifact::OsVariant;
 use tufaceous_artifact::artifact_set::GetError;
 
 use crate::Repository;
+use crate::error::Error;
 
 impl Repository {
     /// Check the repository for consistency and other problems.
@@ -28,7 +29,7 @@ impl Repository {
     /// another version of Tufaceous, such as when the control plane decides to
     /// accept a repository.
     #[allow(clippy::too_many_lines)]
-    pub async fn check_problems(&self) -> Vec<CheckProblem> {
+    pub async fn check_problems(&self) -> Result<Vec<CheckProblem>, Error> {
         let mut problems = Vec::new();
 
         for (artifact, data) in &self.artifact_data {
@@ -108,23 +109,26 @@ impl Repository {
 
         if let Ok(artifact) =
             self.artifacts().get_only(&KnownArtifactTags::InstallinatorDocument)
-            && let Ok(stream) = self.read_artifact(artifact).await
-            && let Ok(bytes) = stream.map_ok(Vec::from).try_concat().await
-            && let Ok(doc) = serde_json::from_slice::<InstallinatorDocument>(
-                &bytes,
-            )
-            .map_err(|source| {
-                problems.push(CheckProblem::DeserializeInstallinator(source));
-            })
-            && doc.system_version.as_str() != self.system_version().to_string()
         {
-            problems.push(CheckProblem::InstallinatorVersion {
-                doc_version: doc.system_version.clone(),
-                system_version: self.system_version().clone(),
-            });
+            let stream = self.read_artifact(artifact).await?;
+            let bytes = stream.map_ok(Vec::from).try_concat().await?;
+            match serde_json::from_slice::<InstallinatorDocument>(&bytes) {
+                Ok(doc) => {
+                    if doc.system_version.as_str()
+                        != self.system_version().to_string()
+                    {
+                        problems.push(CheckProblem::InstallinatorVersion {
+                            doc_version: doc.system_version.clone(),
+                            system_version: self.system_version().clone(),
+                        });
+                    }
+                }
+                Err(source) => problems
+                    .push(CheckProblem::DeserializeInstallinator(source)),
+            }
         }
 
-        problems
+        Ok(problems)
     }
 }
 

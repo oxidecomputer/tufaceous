@@ -17,7 +17,7 @@ const V1: Version = Version::new(1, 0, 0);
 async fn fake_checks_out() -> Result<(), Error> {
     let log = slog::Logger::root(slog::Discard, slog::o!());
     let repo = Repository::fake(V1, &log).await?;
-    let problems = repo.check_problems().await;
+    let problems = repo.check_problems().await?;
     assert!(problems.is_empty(), "repo has unexpected problems: {problems:?}");
     Ok(())
 }
@@ -37,7 +37,7 @@ async fn missing_installinator() -> Result<(), Error> {
         .trust_root(signed.root())
         .load_zip_buffer(zip, &log)
         .await?;
-    let problems = repo.check_problems().await;
+    let problems = repo.check_problems().await?;
     assert!(
         matches!(
             problems.as_slice(),

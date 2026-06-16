@@ -47,7 +47,7 @@ impl Args {
 
         repo.verify_targets(self.threads).await?;
 
-        let problems = repo.check_problems().await;
+        let problems = repo.check_problems().await?;
         ensure!(
             problems.is_empty(),
             "found compatibility problems:\n{}",
