@@ -142,6 +142,7 @@ pub enum ReadCabooseError {
         /// The tag that was not valid UTF-8.
         tag: &'static str,
         /// The underlying error.
+        #[source]
         source: std::str::Utf8Error,
     },
 }

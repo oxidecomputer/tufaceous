@@ -63,23 +63,39 @@ pub enum ErrorKind {
         "failed to read end of central directory of zip archive{archive_path}",
         archive_path = SpacePath(archive_path),
     )]
-    ReadZipEocd { source: rawzip::Error, archive_path: Option<Utf8PathBuf> },
+    ReadZipEocd {
+        #[source]
+        source: rawzip::Error,
+        archive_path: Option<Utf8PathBuf>,
+    },
     #[error(
         "failed to read central directory file header of \
         zip archive{archive_path}",
         archive_path = SpacePath(archive_path),
     )]
-    ReadZipCdfh { source: rawzip::Error, archive_path: Option<Utf8PathBuf> },
+    ReadZipCdfh {
+        #[source]
+        source: rawzip::Error,
+        archive_path: Option<Utf8PathBuf>,
+    },
     #[error(
         "failed to read local file header of zip archive{archive_path}",
         archive_path = SpacePath(archive_path),
     )]
-    ReadZipLocal { source: rawzip::Error, archive_path: Option<Utf8PathBuf> },
+    ReadZipLocal {
+        #[source]
+        source: rawzip::Error,
+        archive_path: Option<Utf8PathBuf>,
+    },
     #[error(
         "failed to write zip archive{archive_path}",
         archive_path = SpacePath(archive_path),
     )]
-    WriteZip { source: rawzip::Error, archive_path: Option<Utf8PathBuf> },
+    WriteZip {
+        #[source]
+        source: rawzip::Error,
+        archive_path: Option<Utf8PathBuf>,
+    },
     #[error(
         "zip archive{archive_path}'s end of central directory record \
         expects {expected} entries, but found {actual} entries",
@@ -134,31 +150,60 @@ pub enum ErrorKind {
     #[error("failed to create temporary file")]
     CreateTempFile(#[source] std::io::Error),
     #[error("failed to open file{path}", path = SpacePath(path))]
-    OpenFile { source: std::io::Error, path: Option<Utf8PathBuf> },
+    OpenFile {
+        #[source]
+        source: std::io::Error,
+        path: Option<Utf8PathBuf>,
+    },
     #[error("failed to read directory{path}", path = SpacePath(path))]
-    ReadDir { source: std::io::Error, path: Option<Utf8PathBuf> },
+    ReadDir {
+        #[source]
+        source: std::io::Error,
+        path: Option<Utf8PathBuf>,
+    },
     #[error("failed to read from file{path}", path = SpacePath(path))]
-    ReadFile { source: std::io::Error, path: Option<Utf8PathBuf> },
+    ReadFile {
+        #[source]
+        source: std::io::Error,
+        path: Option<Utf8PathBuf>,
+    },
     #[error("failed to seek in file{path}", path = SpacePath(path))]
-    SeekFile { source: std::io::Error, path: Option<Utf8PathBuf> },
+    SeekFile {
+        #[source]
+        source: std::io::Error,
+        path: Option<Utf8PathBuf>,
+    },
     #[error("failed to write to file{path}", path = SpacePath(path))]
-    WriteFile { source: std::io::Error, path: Option<Utf8PathBuf> },
+    WriteFile {
+        #[source]
+        source: std::io::Error,
+        path: Option<Utf8PathBuf>,
+    },
     #[error("failed to read stream")]
     ReadStream(#[source] Box<dyn std::error::Error + Send + Sync + 'static>),
     #[error("stream exceeded length limit ({limit})")]
     StreamLimit { limit: u64 },
 
     #[error("failed to read hubris archive {path}")]
-    ReadHubrisArchive { source: hubtools::Error, path: Utf8PathBuf },
+    ReadHubrisArchive {
+        #[source]
+        source: hubtools::Error,
+        path: Utf8PathBuf,
+    },
     #[error("failed to read caboose from {path}")]
     ReadCaboose {
+        #[source]
         source: tufaceous_artifact::ReadCabooseError,
         path: Utf8PathBuf,
     },
     #[error("failed to generate fake hubris archive")]
     GenerateFakeHubrisArchive(#[source] hubtools::Error),
     #[error("failed to read CoRIM manifest {path}")]
-    ReadCorim { source: rats_corim::Error, path: Utf8PathBuf },
+    ReadCorim {
+        #[source]
+        source: rats_corim::Error,
+        path: Utf8PathBuf,
+    },
     #[error("failed to generate fake measurement corpus")]
     GenerateFakeMeasurementCorpus(#[source] rats_corim::Error),
     #[error("failed to serialize fake measurement corpus")]
@@ -180,7 +225,12 @@ pub enum ErrorKind {
     #[error("targets base URL unset")]
     TargetsBaseUrlUnset,
     #[error("failed to join {url} onto {base}")]
-    UrlJoin { source: url::ParseError, url: &'static str, base: String },
+    UrlJoin {
+        #[source]
+        source: url::ParseError,
+        url: &'static str,
+        base: String,
+    },
     #[error("no trust roots provided to load repository")]
     NoTrustRoots,
     #[error(
@@ -195,7 +245,11 @@ pub enum ErrorKind {
     #[error("target {target_name} not found")]
     TargetNotFound { target_name: String },
     #[error("failed to parse target {target}")]
-    ParseTargetJson { source: serde_json::Error, target: String },
+    ParseTargetJson {
+        #[source]
+        source: serde_json::Error,
+        target: String,
+    },
 
     #[error(transparent)]
     ArtifactVersion(#[from] tufaceous_artifact::ArtifactVersionError),
@@ -238,9 +292,17 @@ pub enum ErrorKind {
     )]
     ConvertKnownTagsToMap(#[source] serde_json::Error),
     #[error("failed to read composite artifact {target}")]
-    ReadCompositeArtifact { source: std::io::Error, target: String },
+    ReadCompositeArtifact {
+        #[source]
+        source: std::io::Error,
+        target: String,
+    },
     #[error("failed to read oxide.json from {path}")]
-    ReadZoneOxideJson { source: std::io::Error, path: Utf8PathBuf },
+    ReadZoneOxideJson {
+        #[source]
+        source: std::io::Error,
+        path: Utf8PathBuf,
+    },
     #[error("importing v1 repository to an editor is not supported")]
     ImportV1Repo,
 }

@@ -463,7 +463,12 @@ pub enum ZipTransportError {
     #[error(transparent)]
     Join(#[from] tokio::task::JoinError),
     #[error("failed to join {url} onto {base}")]
-    UrlJoin { source: url::ParseError, url: String, base: String },
+    UrlJoin {
+        #[source]
+        source: url::ParseError,
+        url: String,
+        base: String,
+    },
     #[error(transparent)]
     Zip(#[from] rawzip::Error),
 
