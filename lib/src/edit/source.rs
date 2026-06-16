@@ -2,6 +2,22 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+//! Indirection layer for reading target data from varying sources.
+//!
+//! When generating a repository, the data for each target could come from
+//! one of several places. In the normal case it comes from a file on disk
+//! ([`FileSource`]). If it is particularly small or is fake it might be an
+//! in-memory representation ([`BytesSource`]). If we're editing an existing
+//! repository, all of the previous repository's artifacts are treated as a
+//! pointer to the open repository ([`RepositorySource`]).
+//!
+//! [`TargetSource`] is an enum that covers all three of these possible sources,
+//! and has static dispatch for reading the underlying source as a `Stream`.
+//!
+//! Each of the three concrete sources has an `into_target` method which returns
+//! a [`Target`], which is the `TargetSource` along with the target's length and
+//! SHA-256 checksum.
+
 use std::convert::Infallible;
 use std::pin::Pin;
 use std::sync::Arc;
@@ -46,6 +62,11 @@ pub(crate) enum TargetSource<'a> {
 }
 
 impl TargetSource<'_> {
+    /// A relative indication of how computationally expensive it is to read
+    /// from this source, given two sources of the data.
+    ///
+    /// For example, reading from a file on disk is preferred from reading a
+    /// target out of an opened repository.
     pub(crate) fn cost(&self) -> usize {
         match self {
             TargetSource::Bytes(BytesSource { fake_length: None, .. }) => 0,

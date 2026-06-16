@@ -2,6 +2,27 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+//! Indirection layer for logical sets of artifacts/targets.
+//!
+//! In the usual case, a file in a repository ("target" in TUF terms) is an
+//! artifact that can be thought of as logically independent. The exception to
+//! this general rule is OS images, which logically couple several phase 1 ROMs,
+//! a phase 2 ZFS image, and extra non-artifact targets that are kept around for
+//! archival purposes.
+//!
+//! An [`Input`] is a logical set of targets and their metadata, which can be
+//! cheaply converted into a set of [`Output`]s. Each `Output` is the
+//! [source data][crate::edit::source], the target name within the repository,
+//! and if the target is an artifact, its version and tags.
+//!
+//! This indirection exists to make the behavior in the rest of the editor
+//! module more consistent, as well as provide a single place where the
+//! generated target names for artifacts are defined. This keeps target names
+//! consistent across all real and fake repositories. Additionally, because
+//! none of these methods are `async`, it is possible to generate a list of fake
+//! artifacts in non-async code that will always be consistent with the set of
+//! artifacts in a generated fake repository.
+
 use std::collections::BTreeMap;
 
 use camino::Utf8PathBuf;
