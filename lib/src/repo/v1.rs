@@ -466,7 +466,10 @@ impl CompositeArtifact {
         version: ArtifactVersion,
     ) -> Result<(), Error> {
         for slot in [RotSlot::A, RotSlot::B] {
-            let path = Utf8PathBuf::from(format!("archive-{slot}.zip"));
+            let path = Utf8PathBuf::from(match slot {
+                RotSlot::A => "archive-a.zip",
+                RotSlot::B => "archive-b.zip",
+            });
             let Some(UnpackedArtifact { file, hash, length }) =
                 self.entries.remove(&path)
             else {
