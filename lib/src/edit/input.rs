@@ -144,7 +144,8 @@ impl<Source> Input<Source> {
                     rkth = tags
                         .rot_rkth
                         .as_ref()
-                        .map_or("unsigned", RotKeyTableHash::as_str),
+                        .and_then(RotKeyTableHash::friendly_ca_name)
+                        .unwrap_or("unsigned"),
                     slot = tags.rot_slot
                 );
                 vec![Output::new(target_name, version, &tags.into(), source)?]
@@ -156,7 +157,8 @@ impl<Source> Input<Source> {
                     rkth = tags
                         .rot_rkth
                         .as_ref()
-                        .map_or("unsigned", RotKeyTableHash::as_str),
+                        .and_then(RotKeyTableHash::friendly_ca_name)
+                        .unwrap_or("unsigned"),
                 );
                 vec![Output::new(target_name, version, &tags.into(), source)?]
             }
