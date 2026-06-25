@@ -78,7 +78,7 @@ impl TargetSource<'_> {
 
     pub(crate) fn stream(
         &self,
-    ) -> Pin<Box<dyn Stream<Item = Result<Bytes, Error>> + '_>> {
+    ) -> Pin<Box<dyn Stream<Item = Result<Bytes, Error>> + Send + '_>> {
         match self {
             TargetSource::Bytes(source) => {
                 Box::pin(source.stream().err_into::<Error>())
