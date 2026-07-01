@@ -115,13 +115,23 @@ impl FromStr for ArtifactHash {
     type Err = ParseHexError;
 
     fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
-        s.parse()
+        HexArray::<32>::from_str(s).map(|a| Self(a.0))
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn fromstr_works() {
+        assert_eq!(
+            "0000000000000000000000000000000000000000000000000000000000000000"
+                .parse::<ArtifactHash>()
+                .unwrap(),
+            ArtifactHash([0; 32])
+        );
+    }
 
     #[test]
     fn display_respects_padding() {
