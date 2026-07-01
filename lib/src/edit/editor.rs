@@ -4,12 +4,13 @@
 
 use std::collections::BTreeMap;
 use std::collections::HashMap;
+use std::num::NonZero;
+use std::sync::Arc;
 
 use camino::Utf8Path;
 use camino::Utf8PathBuf;
-use futures_util::FutureExt;
-use futures_util::TryFutureExt;
 use semver::Version;
+use tokio::sync::Semaphore;
 use tokio::task::JoinSet;
 use tufaceous_artifact::ArtifactHash;
 use tufaceous_artifact::ArtifactVersion;
@@ -45,6 +46,7 @@ pub struct RepositoryEditor<'a> {
     targets: HashMap<String, Vec<TargetSource<'a>>>,
     artifacts: BTreeMap<String, ArtifactSchema>,
     metadata: BTreeMap<String, String>,
+    max_threads: NonZero<usize>,
 }
 
 impl<'a> RepositoryEditor<'a> {
@@ -57,6 +59,8 @@ impl<'a> RepositoryEditor<'a> {
             targets: HashMap::new(),
             artifacts: BTreeMap::new(),
             metadata: BTreeMap::new(),
+            max_threads: std::thread::available_parallelism()
+                .unwrap_or(NonZero::<usize>::MIN),
         })
     }
 
@@ -371,6 +375,18 @@ impl<'a> RepositoryEditor<'a> {
         Ok(self)
     }
 
+    /// Set the maximum number of concurrent threads used for hashing targets
+    /// when `finish` is called.
+    ///
+    /// Defaults to [`std::thread::available_parallelism`] (or `1` if that
+    /// fails).
+    pub fn set_max_threads(
+        self,
+        max_threads: impl Into<NonZero<usize>>,
+    ) -> Self {
+        Self { max_threads: max_threads.into(), ..self }
+    }
+
     /// Finalize the artifacts and targets, returning an [`UnsignedRepository`].
     pub async fn finish(self) -> Result<UnsignedRepository<'a>, Error> {
         let mut artifacts = self.artifacts;
@@ -402,23 +418,31 @@ impl<'a> RepositoryEditor<'a> {
         // we spawn their calculation tasks on a JoinSet. Sources from borrowed
         // repositories can't be moved into a task, but we already know their
         // hash.
+        let semaphore = Arc::new(Semaphore::new(self.max_threads.get()));
         let mut all_targets = Vec::new();
         let mut tasks = JoinSet::new();
         for (target_name, sources) in self.targets {
             for source in sources {
                 let target_name = target_name.clone();
+                let semaphore = semaphore.clone();
                 match source {
                     TargetSource::Bytes(source) => {
-                        let future = source
-                            .into_target()
-                            .map(|target| Ok((target_name, target)));
-                        tasks.spawn(future);
+                        tasks.spawn(async move {
+                            let Ok(_permit) = semaphore.acquire().await else {
+                                unreachable!("we never close the semaphore");
+                            };
+                            let target = source.into_target().await;
+                            Ok::<_, Error>((target_name, target))
+                        });
                     }
                     TargetSource::File(source) => {
-                        let future = source
-                            .into_target()
-                            .map_ok(|target| (target_name, target));
-                        tasks.spawn(future);
+                        tasks.spawn(async move {
+                            let Ok(_permit) = semaphore.acquire().await else {
+                                unreachable!("we never close the semaphore");
+                            };
+                            let target = source.into_target().await?;
+                            Ok((target_name, target))
+                        });
                     }
                     TargetSource::Repository(source) => {
                         all_targets.push((target_name, source.into_target()?));
