@@ -238,6 +238,8 @@ pub enum ErrorKind {
     },
     #[error("no trust roots provided to load repository")]
     NoTrustRoots,
+    #[error("maximum root size {max_size} exceeded")]
+    MaxRootSizeExceeded { max_size: u64 },
     #[error(
         "artifact ({tags} version={version} hash={hash} length={length}) \
         not found",
@@ -331,6 +333,7 @@ impl ErrorKind {
             | ErrorKind::TargetsBaseUrlUnset
             | ErrorKind::UrlJoin { .. }
             | ErrorKind::NoTrustRoots
+            | ErrorKind::MaxRootSizeExceeded { .. }
             | ErrorKind::ArtifactNotFound { .. }
             | ErrorKind::TargetNotFound { .. }
             | ErrorKind::ParseTargetJson { .. }

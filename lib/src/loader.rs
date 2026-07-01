@@ -319,6 +319,12 @@ impl RepositoryLoader {
                     stream.try_next().await.map_err(ErrorKind::Fetch)?
                 {
                     root.extend_from_slice(&bytes);
+                    if usize64!(root.len()) > self.limits.max_root_size {
+                        return Err(ErrorKind::MaxRootSizeExceeded {
+                            max_size: self.limits.max_root_size,
+                        }
+                        .into());
+                    }
                 }
                 vec![root]
             }
