@@ -250,9 +250,9 @@ impl Repository {
                     length: artifact.length,
                 };
                 Ok(Box::pin(unpacked.stream(
-                    self.log.clone(),
-                    original_target_name.clone(),
-                    inner_path.clone(),
+                    &self.log,
+                    original_target_name,
+                    inner_path,
                 )))
             }
         }

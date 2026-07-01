@@ -39,7 +39,6 @@ use serde::Serialize;
 use sha2::Digest;
 use sha2::Sha256;
 use tokio::fs::File;
-use tokio::sync::mpsc;
 use tufaceous_artifact::ArtifactHash;
 
 use crate::Repository;
@@ -309,9 +308,8 @@ impl FileSource {
     }
 
     pub(crate) fn stream(&self) -> impl Stream<Item = Result<Bytes, Error>> {
-        let (tx, mut rx) = mpsc::channel::<Result<Bytes, Error>>(1);
         let inner = self.inner.clone();
-        tokio::task::spawn_blocking(move || {
+        crate::mpsc_stream::mpsc_stream(None, move |tx| {
             let mut buf = BytesMut::with_capacity(8192);
             let mut offset = 0;
             loop {
@@ -328,22 +326,18 @@ impl FileSource {
                             source,
                             path: Some(inner.path.clone()),
                         };
-                        tx.blocking_send(Err(err.into())).ok();
-                        return;
+                        return tx.blocking_send(Err(err.into()));
                     }
                 }
 
                 let bytes = buf.split().freeze();
                 if bytes.is_empty() {
-                    return;
+                    return Ok(());
                 }
                 offset += usize64!(bytes.len());
-                if tx.blocking_send(Ok(bytes)).is_err() {
-                    return;
-                }
+                tx.blocking_send(Ok(bytes))?;
             }
-        });
-        futures_util::stream::poll_fn(move |cx| rx.poll_recv(cx))
+        })
     }
 }
 

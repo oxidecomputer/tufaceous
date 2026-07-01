@@ -30,8 +30,8 @@ use serde::Deserialize;
 use sha2::Digest;
 use sha2::Sha256;
 use slog::Logger;
-use slog::error;
 use slog::info;
+use slog::o;
 use slog::warn;
 use tokio::sync::mpsc;
 use tufaceous_artifact::Artifact;
@@ -286,12 +286,16 @@ impl UnpackedArtifact {
 
     pub(crate) fn stream(
         self,
-        log: Logger,
-        original_target_name: String,
-        inner_path: Utf8PathBuf,
+        log: &Logger,
+        original_target_name: &str,
+        inner_path: &Utf8Path,
     ) -> impl Stream<Item = Result<Bytes, Error>> + 'static {
-        let (tx, mut rx) = mpsc::channel::<Result<Bytes, Error>>(1);
-        let task = tokio::task::spawn_blocking(move || {
+        let log = log.new(o!(
+            "stream" => format!("{}::stream", std::any::type_name::<Self>()),
+            "original_target_name" => original_target_name.to_owned(),
+            "inner_path" => inner_path.to_string(),
+        ));
+        crate::mpsc_stream::mpsc_stream(Some(log), move |tx| {
             type SendError = mpsc::error::SendError<Result<Bytes, Error>>;
 
             let mut buf = BytesMut::with_capacity(8192);
@@ -308,8 +312,7 @@ impl UnpackedArtifact {
                     }
                     Err(source) => {
                         let err = ErrorKind::ReadFile { source, path: None };
-                        tx.blocking_send(Err(err.into()))?;
-                        return Ok::<_, SendError>(());
+                        return tx.blocking_send(Err(err.into()));
                     }
                 }
 
@@ -335,33 +338,7 @@ impl UnpackedArtifact {
             tx.blocking_send(Err(
                 ErrorKind::ReadFile { source, path: None }.into()
             ))
-        });
-
-        tokio::task::spawn(async move {
-            if let Ok(Err(send_error)) = task.await {
-                match send_error.0 {
-                    Ok(_) => {
-                        error!(
-                            log,
-                            "unpacked file reader hung up mid-stream";
-                            "original_target_name" => original_target_name,
-                            "inner_path" => inner_path.as_str(),
-                        );
-                    }
-                    Err(err) => {
-                        error!(
-                            log,
-                            "unpacked file reader hung up mid-stream \
-                            before receiving error";
-                            "original_target_name" => original_target_name,
-                            "inner_path" => inner_path.as_str(),
-                            "err" => &crate::util::error_chain(&err),
-                        );
-                    }
-                }
-            }
-        });
-        futures_util::stream::poll_fn(move |cx| rx.poll_recv(cx))
+        })
     }
 }
 

@@ -66,6 +66,7 @@ use bytes::BytesMut;
 use camino::Utf8PathBuf;
 use flate2::read::DeflateDecoder;
 use futures_util::Stream;
+use futures_util::TryStreamExt;
 use rawzip::CompressionMethod;
 use rawzip::FileReader;
 use rawzip::ReaderAt;
@@ -73,9 +74,8 @@ use rawzip::ZipArchive;
 use rawzip::ZipArchiveEntryWayfinder;
 use rawzip::ZipFileHeaderRecord;
 use slog::Logger;
-use slog::error;
+use slog::o;
 use slog::warn;
-use tokio::sync::mpsc;
 use tough::Transport;
 use tough::TransportError;
 use tough::TransportErrorKind;
@@ -274,12 +274,11 @@ impl<T: ReaderAt + Debug + Send + Sync + 'static> ZipTransport<T> {
     ) -> impl Stream<Item = Result<Bytes, TransportError>> {
         // This could be a lot nicer but the ZIP entry reader can't cross in/out
         // of `spawn_blocking` because the type has an associated lifetime.
-        let (tx, mut rx) = mpsc::channel::<Result<Bytes, TransportError>>(1);
-        let cloned_url = url.clone();
-        let task = tokio::task::spawn_blocking(move || {
-            type SendError =
-                mpsc::error::SendError<Result<Bytes, TransportError>>;
-
+        let log = self.log.new(o!(
+            "stream" => format!("{}::stream", std::any::type_name::<Self>()),
+            "url" => url.to_string(),
+        ));
+        crate::mpsc_stream::mpsc_stream(Some(log), move |tx| {
             let mut reader = match self
                 .inner
                 .archive
@@ -296,8 +295,7 @@ impl<T: ReaderAt + Debug + Send + Sync + 'static> ZipTransport<T> {
                 }) {
                 Ok(reader) => reader,
                 Err(error) => {
-                    tx.blocking_send(Err(error.into_tough_error(url)))?;
-                    return Ok::<_, SendError>(());
+                    return tx.blocking_send(Err(error));
                 }
             };
 
@@ -308,43 +306,20 @@ impl<T: ReaderAt + Debug + Send + Sync + 'static> ZipTransport<T> {
                 }
                 buf.resize(buf.capacity(), 0);
                 match reader.read(&mut buf) {
-                    Ok(0) => return Ok::<_, SendError>(()),
+                    Ok(0) => return Ok(()),
                     Ok(n) => {
                         buf.truncate(n);
                         tx.blocking_send(Ok(buf.split().freeze()))?;
                     }
                     Err(error) => {
-                        tx.blocking_send(Err(ZipTransportError::from(error)
-                            .into_tough_error(url)))?;
-                        return Ok::<_, SendError>(());
+                        return tx.blocking_send(Err(ZipTransportError::from(
+                            error,
+                        )));
                     }
                 }
             }
-        });
-
-        tokio::task::spawn(async move {
-            if let Ok(Err(send_error)) = task.await {
-                match send_error.0 {
-                    Ok(_) => {
-                        error!(
-                            self.log,
-                            "zip file reader hung up mid-stream";
-                            "url" => &cloned_url.to_string(),
-                        );
-                    }
-                    Err(err) => {
-                        error!(
-                            self.log,
-                            "zip file reader hung up mid-stream \
-                            before receiving error";
-                            "url" => &cloned_url.to_string(),
-                            "err" => &crate::util::error_chain(&err),
-                        );
-                    }
-                }
-            }
-        });
-        futures_util::stream::poll_fn(move |cx| rx.poll_recv(cx))
+        })
+        .map_err(move |e: ZipTransportError| e.into_tough_error(url.clone()))
     }
 }
 

@@ -21,6 +21,7 @@ macro_rules! usize64 {
 pub mod edit;
 pub mod error;
 mod loader;
+mod mpsc_stream;
 mod repo;
 mod schema;
 mod util;
