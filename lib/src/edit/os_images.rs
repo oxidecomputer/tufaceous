@@ -109,7 +109,18 @@ impl Input<TargetSource<'static>> {
         // Read the header block from the image and guess whether it's a
         // recovery image based on the image name.
         let mut buf = [0; 4096];
-        file.read_exact(&mut buf).await.ok()?;
+        if let Err(source) = file.read_exact(&mut buf).await {
+            if source.kind() == std::io::ErrorKind::UnexpectedEof {
+                // The read was fine, the file is just too small to be a real
+                // OS image.
+                return None;
+            }
+            return Some(Err(ErrorKind::ReadFile {
+                source,
+                path: Some(path.to_owned()),
+            }
+            .into()));
+        }
         if !buf.starts_with(&OXIDE_BOOT_MAGIC) {
             return None;
         }

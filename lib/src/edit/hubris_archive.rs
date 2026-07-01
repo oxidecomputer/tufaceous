@@ -111,10 +111,19 @@ impl Input<TargetSource<'static>> {
         if !input.file_start.starts_with(b"PK\x03\x04") {
             return Ok(ControlFlow::Continue(input));
         }
-        let Ok(archive) = input.source.read_hubris_archive().await else {
-            return Ok(ControlFlow::Continue(input));
+        let archive = match input.source.read_hubris_archive().await {
+            Ok(archive) => archive,
+            Err(err) => {
+                if matches!(*err, ErrorKind::ReadHubrisArchive { .. }) {
+                    // seemingly not a valid Hubris archive, keep guessing
+                    return Ok(ControlFlow::Continue(input));
+                }
+                // otherwise, probably an IO error
+                return Err(err);
+            }
         };
         let Ok(caboose) = archive.read_caboose() else {
+            // seemingly not a valid Hubris archive, keep guessing
             return Ok(ControlFlow::Continue(input));
         };
         // HACK: We are reading the `image-name` file in the archive, which
