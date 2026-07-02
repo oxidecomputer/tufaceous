@@ -54,6 +54,10 @@ impl Input<TargetSource<'static>> {
         // small, so it should be contained entirely within the first 4K of the
         // compressed tarball.
         let mut archive = tar::Archive::new(GzDecoder::new(&*input.file_start));
+        // The tar crate returns std::io::Error so it's difficult to
+        // differentiate between "I couldn't read the file" and "the file isn't
+        // a tar archive", but at this point in guessing we're unlikely to have
+        // OS-level IO issues.
         let Ok(layer_info) = Metadata::read_from_tar(&mut archive)
             .and_then(Metadata::into_layer_info)
         else {

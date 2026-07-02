@@ -105,7 +105,19 @@ impl Input<TargetSource<'static>> {
         version: &ArtifactVersion,
     ) -> Option<Result<Self, Error>> {
         let phase_2_path = path.join(PHASE_2_PATH);
-        let mut file = File::open(&phase_2_path).await.ok()?;
+        let mut file = match File::open(&phase_2_path).await {
+            Ok(file) => file,
+            Err(source) => {
+                if source.kind() == std::io::ErrorKind::NotFound {
+                    return None;
+                }
+                return Some(Err(ErrorKind::OpenFile {
+                    source,
+                    path: Some(phase_2_path),
+                }
+                .into()));
+            }
+        };
         // Read the header block from the image and guess whether it's a
         // recovery image based on the image name.
         let mut buf = [0; 4096];

@@ -52,13 +52,20 @@ impl Input<TargetSource<'static>> {
         let corim =
             match ciborium::from_reader::<Corim, _>(&mut &*input.file_start) {
                 Ok(corim) => Some(corim),
-                Err(ciborium::de::Error::Io(err))
-                    if err.kind() == std::io::ErrorKind::UnexpectedEof =>
-                {
-                    // This was plausibly a CoRIM manifest until we hit the end
-                    // of the buffer, indicating a very high likelihood that if
-                    // we read the entire thing it'd still be a CoRIM manifest.
-                    None
+                Err(ciborium::de::Error::Io(source)) => {
+                    if source.kind() == std::io::ErrorKind::UnexpectedEof {
+                        // This was plausibly a CoRIM manifest until we hit the
+                        // end of the buffer, indicating a very high likelihood
+                        // that if we read the entire thing it'd still be a
+                        // CoRIM manifest.
+                        None
+                    } else {
+                        return Err(ErrorKind::ReadFile {
+                            source,
+                            path: Some(input.source.path().to_owned()),
+                        }
+                        .into());
+                    }
                 }
                 Err(_) => {
                     return Ok(ControlFlow::Continue(input));
