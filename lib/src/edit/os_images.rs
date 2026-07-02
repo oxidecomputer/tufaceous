@@ -117,7 +117,7 @@ impl Input<TargetSource<'static>> {
             }
             return Some(Err(ErrorKind::ReadFile {
                 source,
-                path: Some(path.to_owned()),
+                path: Some(phase_2_path),
             }
             .into()));
         }
