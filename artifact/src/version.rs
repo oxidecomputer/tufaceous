@@ -2,10 +2,13 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use std::{borrow::Cow, fmt, str::FromStr};
+use std::borrow::Cow;
+use std::fmt;
+use std::str::FromStr;
 
 use daft::Diffable;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
+use serde::Serialize;
 use thiserror::Error;
 
 /// An artifact version.
@@ -65,6 +68,10 @@ impl ArtifactVersion {
     }
 
     /// Creates a new `ArtifactVersion` from a static string.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the string is not a valid artifact version.
     pub fn new_static(
         version: &'static str,
     ) -> Result<Self, ArtifactVersionError> {
@@ -75,8 +82,11 @@ impl ArtifactVersion {
         }
     }
 
-    /// Creates a new `ArtifactVersion` at compile time, panicking if it is
-    /// invalid.
+    /// Creates a new `ArtifactVersion` from a static string.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the string is not a valid artifact version.
     pub const fn new_const(s: &'static str) -> Self {
         match validate_version(s) {
             Ok(()) => Self(Cow::Borrowed(s)),
@@ -168,19 +178,28 @@ static PROPTEST_REGEX: &str = {
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
 #[non_exhaustive]
 pub enum ArtifactVersionError {
+    /// The version string was empty.
     #[error("version is empty")]
     Empty,
+    /// The version string was too long.
     #[error(
         "version is too long ({len} bytes, max {})",
         ArtifactVersion::MAX_LEN
     )]
-    TooLong { len: usize },
+    TooLong {
+        /// Length of the version string that was too long.
+        len: usize,
+    },
     #[error(
         "version contains invalid byte `{}` (allowed: {})",
         b.escape_ascii(),
         ArtifactVersion::REGEX
     )]
-    InvalidByte { b: u8 },
+    /// The version string contained an invalid byte.
+    InvalidByte {
+        /// The first invalid byte.
+        b: u8,
+    },
 }
 
 impl ArtifactVersionError {
