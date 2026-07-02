@@ -108,7 +108,11 @@ impl Input<TargetSource<'static>> {
         let mut file = match File::open(&phase_2_path).await {
             Ok(file) => file,
             Err(source) => {
-                if source.kind() == std::io::ErrorKind::NotFound {
+                if matches!(
+                    source.kind(),
+                    std::io::ErrorKind::NotFound
+                        | std::io::ErrorKind::NotADirectory
+                ) {
                     return None;
                 }
                 return Some(Err(ErrorKind::OpenFile {
