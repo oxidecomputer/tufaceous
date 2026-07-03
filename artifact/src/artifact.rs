@@ -93,6 +93,27 @@ pub struct ArtifactHash(
     pub [u8; 32],
 );
 
+impl ArtifactHash {
+    /// Return the JSON `Schema` that Tufaceous v1 formerly generated.
+    ///
+    /// This can be used with
+    /// `#[schemars(schema_with = "ArtifactHash::v1_json_schema")]`.
+    ///
+    /// This is intended to be used during the Tufaceous v2 transition period
+    /// and eventually will be removed.
+    #[cfg(feature = "schemars")]
+    pub fn v1_json_schema(
+        generator: &mut schemars::SchemaGenerator,
+    ) -> schemars::schema::Schema {
+        use schemars::JsonSchema;
+
+        let mut schema: schemars::schema::SchemaObject =
+            <String>::json_schema(generator).into();
+        schema.format = Some("hex string (32 bytes)".to_owned());
+        schema.into()
+    }
+}
+
 impl AsRef<[u8]> for ArtifactHash {
     fn as_ref(&self) -> &[u8] {
         self.0.as_slice()
