@@ -2,6 +2,8 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+use std::collections::BTreeMap;
+use std::collections::BTreeSet;
 use std::convert::Infallible;
 use std::io::Write;
 use std::sync::Arc;
@@ -15,6 +17,8 @@ use semver::Version;
 use tufaceous::RepositoryLoader;
 use tufaceous::edit::RepositoryEditor;
 use tufaceous::error::Error;
+use tufaceous_artifact::Artifact;
+use tufaceous_artifact::ArtifactHash;
 use tufaceous_artifact::KnownArtifactTags;
 
 const V1: Version = Version::new(1, 0, 0);
@@ -95,6 +99,65 @@ async fn no_artifacts() -> Result<(), Error> {
         .await?;
     assert_eq!(repo.artifacts().len(), 0);
     assert!(repo.artifacts().is_empty());
+    Ok(())
+}
+
+#[tokio::test]
+async fn fake_artifacts_are_distinct() -> Result<(), Error> {
+    let log = slog::Logger::root(slog::Discard, slog::o!());
+
+    let signed = RepositoryEditor::fake(V1)?
+        .finish()
+        .await?
+        .generate_root()
+        .sign()
+        .await?;
+    let zip = signed.write_zip(Vec::new(), Utc::now()).await?;
+    let repo1 = RepositoryLoader::new()
+        .trust_root(signed.root())
+        .load_zip_buffer(zip, &log)
+        .await?;
+
+    let signed = RepositoryEditor::fake(V2)?
+        .finish()
+        .await?
+        .generate_root()
+        .sign()
+        .await?;
+    let zip = signed.write_zip(Vec::new(), Utc::now()).await?;
+    let repo2 = RepositoryLoader::new()
+        .trust_root(signed.root())
+        .load_zip_buffer(zip, &log)
+        .await?;
+
+    let hashes1 = repo1
+        .artifacts()
+        .iter()
+        .map(|artifact| artifact.hash)
+        .collect::<BTreeSet<_>>();
+    let hashes2 = repo2
+        .artifacts()
+        .iter()
+        .map(|artifact| artifact.hash)
+        .collect::<BTreeSet<_>>();
+    if !hashes1.is_disjoint(&hashes2) {
+        let intersection =
+            hashes1.intersection(&hashes2).collect::<BTreeSet<_>>();
+        let mut artifacts = BTreeMap::<ArtifactHash, Vec<&Artifact>>::new();
+        for repo in [&repo1, &repo2] {
+            for artifact in repo.artifacts() {
+                if intersection.contains(&artifact.hash) {
+                    artifacts.entry(artifact.hash).or_default().push(artifact);
+                }
+            }
+        }
+        panic!(
+            "artifacts from fake repos of different versions \
+            have the same hash: {:?}",
+            artifacts.values()
+        );
+    }
+
     Ok(())
 }
 
