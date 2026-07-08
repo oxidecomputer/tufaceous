@@ -1531,8 +1531,7 @@ dependencies = [
 [[package]]
 name = "olpc-cjson"
 version = "0.1.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "696183c9b5fe81a7715d074fd632e8bd46f4ccc0231a3ed7fc580a80de5f7083"
+source = "git+https://github.com/oxidecomputer/tough?branch=oxide%2Fdevelop#3a1cb66ebe987c10b50f30aebfe812cae2002f8c"
 dependencies = [
  "serde",
  "serde_json",
@@ -2767,8 +2766,7 @@ dependencies = [
 [[package]]
 name = "tough"
 version = "0.22.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8031cff0872dd1c6312370515a6be8098f6ea5512f1bad725016046fc725f272"
+source = "git+https://github.com/oxidecomputer/tough?branch=oxide%2Fdevelop#3a1cb66ebe987c10b50f30aebfe812cae2002f8c"
 dependencies = [
  "async-recursion",
  "async-trait",

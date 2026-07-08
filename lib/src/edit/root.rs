@@ -11,6 +11,7 @@ use chrono::DateTime;
 use chrono::Utc;
 use serde::Deserialize;
 use serde::Serialize;
+use tough::KeyIdFormat;
 use tough::editor::signed::SignedRole;
 use tough::key_source::KeySource;
 use tough::schema;
@@ -43,7 +44,7 @@ impl Root {
     pub fn verify_self_signed(&self) -> Result<(), Error> {
         self.inner
             .signed
-            .verify_role(&self.inner)
+            .verify_role(&self.inner, KeyIdFormat::Any)
             .map_err(ErrorKind::RoleVerify)?;
         Ok(())
     }
