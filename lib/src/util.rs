@@ -11,8 +11,12 @@ use std::task::Poll;
 use camino::FromPathBufError;
 use camino::Utf8Path;
 use camino::Utf8PathBuf;
+use chrono::DateTime;
+use chrono::Timelike as _;
+use chrono::Utc;
 use flate2::read::GzDecoder;
 use futures_util::Stream;
+use jiff::Timestamp;
 use tufaceous_artifact::Artifact;
 use tufaceous_artifact::ArtifactHash;
 use tufaceous_artifact::InstallinatorArtifact;
@@ -130,4 +134,21 @@ pub(crate) fn error_chain(mut error: &dyn std::error::Error) -> String {
         error = source;
     }
     s
+}
+
+pub(crate) fn chrono_to_jiff(chrono: DateTime<Utc>) -> Timestamp {
+    Timestamp::new(
+        chrono.timestamp(),
+        // Timestamp::new is documented to error out if the date is out of the supported range (not
+        // a problem for us) or if the nanoseconds are lower than -999_999_999 or greater than
+        // 999_999_999. Chrono documents that in case of leap seconds nanosecond() will return a
+        // value from 1_000_000_000 to 1_999_999_999, so we clamp that (jiff doesn't support leap
+        // seconds anyway).
+        chrono
+            .nanosecond()
+            .max(999_999_999)
+            .try_into()
+            .expect("nanosecond should be clamped"),
+    )
+    .expect("couldn't convert timestamp")
 }
