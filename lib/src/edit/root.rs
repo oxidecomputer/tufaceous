@@ -11,6 +11,7 @@ use chrono::DateTime;
 use chrono::Utc;
 use serde::Deserialize;
 use serde::Serialize;
+use tough::KeyIdFormat;
 use tough::editor::signed::SignedRole;
 use tough::key_source::KeySource;
 use tough::schema;
@@ -21,6 +22,7 @@ use tough::schema::Signed;
 
 use crate::error::Error;
 use crate::error::ErrorKind;
+use crate::util::chrono_to_jiff;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Root {
@@ -43,7 +45,7 @@ impl Root {
     pub fn verify_self_signed(&self) -> Result<(), Error> {
         self.inner
             .signed
-            .verify_role(&self.inner)
+            .verify_role(&self.inner, KeyIdFormat::Any)
             .map_err(ErrorKind::RoleVerify)?;
         Ok(())
     }
@@ -89,7 +91,7 @@ pub(crate) async fn generate_root(
         spec_version: "1.0.0".into(),
         consistent_snapshot: false,
         version: NonZero::<u64>::MIN,
-        expires,
+        expires: chrono_to_jiff(expires),
         keys: HashMap::new(),
         roles: HashMap::new(),
         _extra: HashMap::new(),

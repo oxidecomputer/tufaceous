@@ -37,6 +37,7 @@ use crate::edit::source::TargetSource;
 use crate::error::Error;
 use crate::error::ErrorKind;
 use crate::error::try_path;
+use crate::util::chrono_to_jiff;
 
 pub(crate) const DEFAULT_VALIDITY: Duration =
     Duration::from_secs(60 * 60 * 24 * 7 /* 1 week */);
@@ -162,11 +163,11 @@ impl<'a> UnsignedRepository<'a> {
             tough::editor::RepositoryEditor::new(&root_path).await?;
         editor
             .snapshot_version(self.snapshot_version)
-            .snapshot_expires(self.snapshot_expires)
+            .snapshot_expires(chrono_to_jiff(self.snapshot_expires))
             .targets_version(self.targets_version)?
-            .targets_expires(self.targets_expires)?
+            .targets_expires(chrono_to_jiff(self.targets_expires))?
             .timestamp_version(self.timestamp_version)
-            .timestamp_expires(self.timestamp_expires);
+            .timestamp_expires(chrono_to_jiff(self.timestamp_expires));
 
         let mut sources = BTreeMap::new();
         for (target_name, Target { length, sha256, source }) in self.targets {
