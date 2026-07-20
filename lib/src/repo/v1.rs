@@ -56,6 +56,7 @@ use crate::error::Error;
 use crate::error::ErrorKind;
 use crate::error::try_path;
 use crate::repo::ArtifactData;
+use crate::repo::InstallinatorV1Artifact;
 use crate::repo::read_target;
 use crate::repo::read_target_json;
 use crate::repo::read_target_vec;
@@ -66,6 +67,8 @@ pub(super) struct PartialRepository {
     pub(super) system_version: Version,
     pub(super) artifacts: ArtifactSet,
     pub(super) artifact_data: BTreeMap<Artifact, ArtifactData>,
+    pub(super) installinator_v1_document: Option<ArtifactHash>,
+    pub(super) installinator_v1_artifacts: Vec<InstallinatorV1Artifact>,
 }
 
 impl PartialRepository {
@@ -98,6 +101,8 @@ pub(crate) async fn from_loaded(
         system_version,
         artifacts: ArtifactSet::default(),
         artifact_data: BTreeMap::new(),
+        installinator_v1_document: None,
+        installinator_v1_artifacts: Vec::new(),
     };
     let mut installinator_document = None;
     for V1Artifact { version, kind, target } in v1_artifacts {
@@ -214,6 +219,14 @@ pub(crate) async fn from_loaded(
             }
 
             V1KnownArtifactKind::ControlPlane => {
+                partial.installinator_v1_artifacts.push(
+                    InstallinatorV1Artifact {
+                        version,
+                        hash,
+                        length,
+                        target_name: target.clone(),
+                    },
+                );
                 CompositeArtifact::unpack(tuf_repo, target)
                     .await?
                     .read_control_plane(&mut partial)
@@ -226,6 +239,15 @@ pub(crate) async fn from_loaded(
             // for the v2 artifacts once all of the potential artifacts are
             // extracted.
             V1KnownArtifactKind::InstallinatorDocument => {
+                partial.installinator_v1_document = Some(hash);
+                partial.installinator_v1_artifacts.push(
+                    InstallinatorV1Artifact {
+                        version: version.clone(),
+                        hash,
+                        length,
+                        target_name: target.clone(),
+                    },
+                );
                 installinator_document = Some((version, target));
                 continue;
             }
