@@ -96,7 +96,7 @@ async fn v1_fake() -> Result<(), Error> {
         .get_only(&KnownArtifactTags::InstallinatorDocument)
         .unwrap();
     let doc_json = repo
-        .read_artifact(&artifact)
+        .read_artifact(artifact)
         .await?
         .map_ok(Vec::from)
         .try_concat()
