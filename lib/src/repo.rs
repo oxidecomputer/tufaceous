@@ -27,6 +27,7 @@ use tough::schema::Target;
 use tufaceous_artifact::Artifact;
 use tufaceous_artifact::ArtifactHash;
 use tufaceous_artifact::ArtifactSet;
+use tufaceous_artifact::ArtifactVersion;
 use tufaceous_artifact::KnownArtifactTags;
 use tufaceous_artifact::Metadata;
 use tufaceous_artifact::artifact_set::GetError;
@@ -51,6 +52,15 @@ pub struct Repository {
     artifacts: ArtifactSet,
     artifact_data: BTreeMap<Artifact, ArtifactData>,
     metadata: BTreeMap<String, String>,
+
+    /// If this is a v1 repo, this contains the hash of the original
+    /// Installinator document (instead of the converted-to-v2 document).
+    installinator_v1_document: Option<ArtifactHash>,
+    /// If this is a v1 repo, this contains artifacts that allow reading
+    /// the original Installinator document (instead of the converted-to-v2
+    /// document), as well as the original control plane tarball referenced by
+    /// that document.
+    installinator_v1_artifacts: Vec<InstallinatorV1Artifact>,
 
     // These are set directly by the ZIP archive convenience methods in the
     // loader module.
@@ -126,6 +136,10 @@ impl Repository {
                     artifacts: partial.artifacts,
                     artifact_data: partial.artifact_data,
                     metadata: BTreeMap::new(),
+                    installinator_v1_document: partial
+                        .installinator_v1_document,
+                    installinator_v1_artifacts: partial
+                        .installinator_v1_artifacts,
                     archive_path: None,
                     archive_sha256: None,
                 });
@@ -156,6 +170,8 @@ impl Repository {
             artifacts,
             artifact_data,
             metadata,
+            installinator_v1_document: None,
+            installinator_v1_artifacts: Vec::new(),
             archive_path: None,
             archive_sha256: None,
         })
@@ -290,7 +306,11 @@ impl Repository {
         tags: &KnownArtifactTags,
     ) -> Result<ArtifactHandle, GetError> {
         let artifact = self.artifacts.get_only(tags)?.clone();
-        Ok(ArtifactHandle { artifact, repo: Arc::clone(self) })
+        Ok(ArtifactHandle {
+            artifact,
+            repo: Arc::clone(self),
+            installinator_v1_target_name: None,
+        })
     }
 
     /// Returns an iterator of [`ArtifactHandle`]s for every artifact
@@ -300,10 +320,38 @@ impl Repository {
     /// together in a struct as a convenience. The repository must be wrapped in
     /// [`Arc`] to call this method.
     pub fn handles(self: &Arc<Self>) -> impl Iterator<Item = ArtifactHandle> {
-        self.artifacts
-            .iter()
-            .cloned()
-            .map(|artifact| ArtifactHandle { artifact, repo: Arc::clone(self) })
+        self.artifacts.iter().cloned().map(|artifact| ArtifactHandle {
+            artifact,
+            repo: Arc::clone(self),
+            installinator_v1_target_name: None,
+        })
+    }
+
+    /// If this was a v1 repository, returns the hash of the original
+    /// Installinator document (instead of the converted-to-v2 document).
+    pub fn installinator_v1_document(&self) -> Option<ArtifactHash> {
+        self.installinator_v1_document.as_ref().copied()
+    }
+
+    /// If this was a v1 repository, returns an iterator of [`ArtifactHandle`]
+    /// that can be used to read the original Installinator document or control
+    /// plane tarball.
+    ///
+    /// Note that the `Artifact` returned by the handle has no tags as it is not
+    /// a valid artifact.
+    pub fn installinator_v1_handles(
+        self: &Arc<Self>,
+    ) -> impl Iterator<Item = ArtifactHandle> {
+        self.installinator_v1_artifacts.iter().map(|artifact| ArtifactHandle {
+            artifact: Artifact {
+                version: artifact.version.clone(),
+                tags: BTreeMap::new(),
+                hash: artifact.hash,
+                length: artifact.length,
+            },
+            repo: Arc::clone(self),
+            installinator_v1_target_name: Some(artifact.target_name.clone()),
+        })
     }
 
     /// Reads all targets in the repository and verifies they have the correct
@@ -396,6 +444,14 @@ impl ArtifactData {
     }
 }
 
+#[derive(Debug, Clone)]
+struct InstallinatorV1Artifact {
+    version: ArtifactVersion,
+    hash: ArtifactHash,
+    length: u64,
+    target_name: String,
+}
+
 /// An [`Artifact`] and the [`Repository`] it belongs to, for convenience to
 /// code that works at the artifact level but needs to read the artifact data
 /// from the repository.
@@ -405,6 +461,11 @@ impl ArtifactData {
 pub struct ArtifactHandle {
     artifact: Artifact,
     repo: Arc<Repository>,
+
+    /// If `Some`, this is not a "real" artifact but instead was generated
+    /// by [`Repository::installinator_v1_artifacts`], and `artifact.tags` is
+    /// empty.
+    installinator_v1_target_name: Option<String>,
 }
 
 impl ArtifactHandle {
@@ -421,7 +482,11 @@ impl ArtifactHandle {
 
     /// Read this artifact from its repository.
     pub async fn stream(&self) -> Result<TargetStream, Error> {
-        self.repo.read_artifact(&self.artifact).await
+        if let Some(target_name) = &self.installinator_v1_target_name {
+            self.repo.read_target(target_name).await
+        } else {
+            self.repo.read_artifact(&self.artifact).await
+        }
     }
 }
 

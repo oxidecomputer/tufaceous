@@ -2,11 +2,16 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+use std::collections::BTreeSet;
+use std::sync::Arc;
+
 use camino::Utf8Path;
+use futures_util::TryStreamExt;
 use tufaceous::ExpirationEnforcement;
 use tufaceous::RepositoryLoader;
 use tufaceous::error::Error;
 use tufaceous_artifact::ArtifactSet;
+use tufaceous_artifact::InstallinatorDocument;
 use tufaceous_artifact::KnownArtifactTags;
 use tufaceous_artifact::OsBoard;
 use tufaceous_artifact::OsPhase1Tags;
@@ -25,12 +30,14 @@ async fn v1_fake() -> Result<(), Error> {
     let path = Utf8Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("tests/data/v1-fake.zip");
 
-    let repo = RepositoryLoader::new()
-        .expiration_enforcement(ExpirationEnforcement::Unsafe)
-        .unsafe_blindly_trust_repo()
-        .v1_compatibility(true)
-        .load_zip_path(path, &log)
-        .await?;
+    let repo = Arc::new(
+        RepositoryLoader::new()
+            .expiration_enforcement(ExpirationEnforcement::Unsafe)
+            .unsafe_blindly_trust_repo()
+            .v1_compatibility(true)
+            .load_zip_path(path, &log)
+            .await?,
+    );
     let parallelism = std::thread::available_parallelism().unwrap().get();
     repo.verify_targets(parallelism).await?;
 
@@ -76,6 +83,54 @@ async fn v1_fake() -> Result<(), Error> {
         .collect::<ArtifactSet>();
     // And there should be no unexpected artifacts:
     assert_eq!(&seen, repo.artifacts());
+
+    // The Installinator document should be regenerated to only reference
+    // v2 artifacts.
+    let mut hashes = repo
+        .artifacts()
+        .iter()
+        .map(|artifact| artifact.hash)
+        .collect::<BTreeSet<_>>();
+    let artifact = repo
+        .artifacts()
+        .get_only(&KnownArtifactTags::InstallinatorDocument)
+        .unwrap();
+    let doc_json = repo
+        .read_artifact(artifact)
+        .await?
+        .map_ok(Vec::from)
+        .try_concat()
+        .await?;
+    let doc: InstallinatorDocument = serde_json::from_slice(&doc_json).unwrap();
+    for artifact in doc.artifacts {
+        assert!(
+            hashes.contains(&artifact.hash),
+            "converted Installinator document references non-existent hash {}",
+            artifact.hash
+        );
+    }
+
+    // The original Installinator document should be accessible, and may
+    // reference either v2 or v1-only artifacts.
+    hashes.extend(
+        repo.installinator_v1_handles().map(|handle| handle.artifact().hash),
+    );
+    let handle = repo
+        .installinator_v1_handles()
+        .find(|handle| {
+            handle.artifact().hash == repo.installinator_v1_document().unwrap()
+        })
+        .unwrap();
+    let doc_json =
+        handle.stream().await?.map_ok(Vec::from).try_concat().await?;
+    let doc: InstallinatorDocument = serde_json::from_slice(&doc_json).unwrap();
+    for artifact in doc.artifacts {
+        assert!(
+            hashes.contains(&artifact.hash),
+            "original Installinator document references non-existent hash {}",
+            artifact.hash
+        );
+    }
 
     Ok(())
 }

@@ -43,8 +43,6 @@ use crate::ArtifactVersion;
 /// own backwards compatibility code, which some temporary code in this module
 /// supports:
 ///
-/// - `name` is accepted as an alias for [`InstallinatorArtifact::file_name`].
-///   We renamed this field in Tufaceous v2 for clarity.
 /// - `ControlPlane` is an accepted variant for [`InstallinatorArtifactKind`].
 ///   This indicates to Installinator that an older version of Wicket was used
 ///   to read the repository, and that it will need to fetch the composite
@@ -82,8 +80,11 @@ pub struct InstallinatorArtifact {
     pub hash: ArtifactHash,
     /// A file name without directory separators; not necessarily the target
     /// name.
-    // (temporary alias; see "v1 compatibility notes" above)
-    #[serde(alias = "name")]
+    ///
+    /// This is named `name` in the serialized document in order to retain
+    /// compatibility with older versions of Installinator, allowing us to
+    /// downgrade clean-slated development environments with mupdate.
+    #[serde(rename = "name")]
     pub file_name: String,
 }
 
