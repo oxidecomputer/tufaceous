@@ -36,8 +36,6 @@ pub struct Args {
     /// list-targets command lists the target names.
     #[arg(short = 'd', long, num_args(1..))]
     remove_targets: Vec<String>,
-    /// Input repository path
-    repo: Utf8PathBuf,
     #[clap(flatten)]
     sign_options: SignOptions,
     /// Edit the system version
@@ -47,12 +45,8 @@ pub struct Args {
 
 impl Args {
     pub async fn run(self) -> Result<()> {
-        let repo = self
-            .load_options
-            .loader()
-            .await?
-            .load_zip_path(self.repo.clone(), &crate::LOG)
-            .await?;
+        let repo_path = self.load_options.repo.clone();
+        let repo = self.load_options.load().await?;
         let mut editor = RepositoryEditor::from_repo(&repo)?
             .set_generate_installinator_document(
                 !self.no_installinator_document,
@@ -74,7 +68,7 @@ impl Args {
         }
 
         let unsigned = editor.finish().await?;
-        let output = self.output.unwrap_or(self.repo);
+        let output = self.output.unwrap_or(repo_path);
         self.sign_options
             .sign(unsigned)
             .await?

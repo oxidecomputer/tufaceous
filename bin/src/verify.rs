@@ -7,9 +7,9 @@ use std::fmt::Display;
 
 use anyhow::Result;
 use anyhow::ensure;
-use camino::Utf8PathBuf;
 use clap::Parser;
 use tufaceous::CheckProblem;
+use tufaceous::RepositoryLoader;
 use tufaceous_artifact::ArtifactHash;
 
 use crate::load::LoadOptions;
@@ -18,8 +18,6 @@ use crate::load::LoadOptions;
 pub struct Args {
     #[clap(flatten)]
     load_options: LoadOptions,
-    /// Input repository path
-    repo: Utf8PathBuf,
     /// Number of threads to use while verifying targets
     #[clap(short = 'j', alias = "jobs", default_value_t = default_threads())]
     threads: usize,
@@ -33,13 +31,14 @@ fn default_threads() -> usize {
 
 impl Args {
     pub async fn run(self) -> Result<()> {
+        let repo_path = self.load_options.repo.clone();
         let repo = self
             .load_options
-            .loader()
-            .await?
-            .compute_archive_sha256(true)
-            .v1_compatibility(true)
-            .load_zip_path(self.repo.clone(), &crate::LOG)
+            .with_loader(
+                RepositoryLoader::new()
+                    .compute_archive_sha256(true)
+                    .v1_compatibility(true),
+            )
             .await?;
         let sha256 = ArtifactHash(
             *repo.archive_sha256().expect("repo hash should be calculated"),
@@ -54,7 +53,7 @@ impl Args {
             WriteProblems(&problems)
         );
 
-        eprintln!("{}: OK, SHA256 = {sha256}", self.repo);
+        eprintln!("{repo_path}: OK, SHA256 = {sha256}");
         Ok(())
     }
 }

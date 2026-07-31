@@ -6,7 +6,6 @@ use std::io::Write;
 
 use anyhow::Context;
 use anyhow::Result;
-use camino::Utf8PathBuf;
 use clap::Parser;
 use futures_util::TryStreamExt;
 
@@ -16,8 +15,6 @@ use crate::load::LoadOptions;
 pub struct Args {
     #[clap(flatten)]
     load_options: LoadOptions,
-    /// Input repository path
-    repo: Utf8PathBuf,
     /// Targets to output
     ///
     /// This is the path under "repo/targets/" in a ZIP archive. The
@@ -27,12 +24,7 @@ pub struct Args {
 
 impl Args {
     pub async fn run(self) -> Result<()> {
-        let repo = self
-            .load_options
-            .loader()
-            .await?
-            .load_zip_path(self.repo.clone(), &crate::LOG)
-            .await?;
+        let repo = self.load_options.load().await?;
         let mut stream = repo.read_target(&self.target_name).await?;
         let mut stdout = std::io::stdout().lock();
         while let Some(bytes) = stream.try_next().await? {
