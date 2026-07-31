@@ -413,9 +413,9 @@ fn blocking_write_task<W: Write>(
         let (mut entry, config) = archive
             .new_file(name.as_str())
             .compression_method(if compression == Compression::none() {
-                CompressionMethod::Store
+                CompressionMethod::STORE
             } else {
-                CompressionMethod::Deflate
+                CompressionMethod::DEFLATE
             })
             .last_modified(UtcDateTime::from_unix(
                 modification_time.timestamp(),

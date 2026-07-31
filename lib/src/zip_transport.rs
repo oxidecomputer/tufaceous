@@ -136,7 +136,7 @@ impl<T: AsRef<[u8]> + Debug + Send + Sync + 'static> ZipTransport<Cursor<T>> {
                 source,
                 archive_path: None,
             })?;
-        Self::from_impl_blocking(archive.into_zip_archive(), None, None, log)
+        Self::from_impl_blocking(archive.into_cursor_archive(), None, None, log)
     }
 }
 
@@ -285,10 +285,10 @@ impl<T: ReaderAt + Debug + Send + Sync + 'static> ZipTransport<T> {
                 .get_entry(entry_data.wayfinder)
                 .map_err(ZipTransportError::from)
                 .and_then(|entry| match entry_data.compression_method {
-                    CompressionMethod::Store => Ok(entry.verifying_reader(
+                    CompressionMethod::STORE => Ok(entry.verifying_reader(
                         Box::new(entry.reader()) as Box<dyn Read>,
                     )),
-                    CompressionMethod::Deflate => Ok(entry.verifying_reader(
+                    CompressionMethod::DEFLATE => Ok(entry.verifying_reader(
                         Box::new(DeflateDecoder::new(entry.reader())),
                     )),
                     other => Err(ZipTransportError::CompressionMethod(other)),
