@@ -40,9 +40,6 @@ impl Args {
                     .v1_compatibility(true),
             )
             .await?;
-        let sha256 = ArtifactHash(
-            *repo.archive_sha256().expect("repo hash should be calculated"),
-        );
 
         repo.verify_targets(self.threads).await?;
 
@@ -53,7 +50,11 @@ impl Args {
             WriteProblems(&problems)
         );
 
-        eprintln!("{repo_path}: OK, SHA256 = {sha256}");
+        eprint!("{repo_path}: OK");
+        if let Some(sha256) = repo.archive_sha256().copied().map(ArtifactHash) {
+            eprint!(", SHA256 = {sha256}");
+        }
+        eprintln!();
         Ok(())
     }
 }

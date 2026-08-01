@@ -22,8 +22,9 @@ slog-envlogger.workspace = true
 slog-term.workspace = true
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
 tough.workspace = true
-tufaceous.workspace = true
+tufaceous = { workspace = true, features = ["zip-http"] }
 tufaceous-artifact.workspace = true
+url.workspace = true
 
 [lints]
 workspace = true

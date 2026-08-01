@@ -10,6 +10,7 @@ use tufaceous::Repository;
 use tufaceous::RepositoryLoader;
 use tufaceous::error::Error;
 use tufaceous::error::ErrorKind;
+use url::Url;
 
 #[derive(Debug, Args)]
 #[cfg_attr(test, derive(PartialEq))]
@@ -47,7 +48,7 @@ pub struct LoadOptions {
     )]
     trust_roots: Vec<Utf8PathBuf>,
 
-    /// Input repository path
+    /// Input repository path or HTTP URL
     pub repo: Utf8PathBuf,
 }
 
@@ -74,7 +75,14 @@ impl LoadOptions {
         if self.blindly_trust {
             loader = loader.unsafe_blindly_trust_repo();
         }
-        loader.load_zip_path(self.repo, &crate::LOG).await
+
+        if let Ok(url) = self.repo.as_str().parse::<Url>()
+            && matches!(url.scheme(), "http" | "https")
+        {
+            loader.load_zip_file_from_http(url, &crate::LOG).await
+        } else {
+            loader.load_zip_path(self.repo, &crate::LOG).await
+        }
     }
 }
 
