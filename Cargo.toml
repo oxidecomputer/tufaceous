@@ -17,11 +17,11 @@ publish = false
 anyhow = "1.0.96"
 assert_cmd = "2.0.16"
 atomicwrites = "0.4.4"
-aws-lc-rs = "1.16.2"
+aws-lc-rs = "1.16.3"
 byte-wrapper = { version = "0.1.0", default-features = false, features = ["alloc", "hex", "serde"] }
 bytes = "1.11.1"
 camino = "1.1.9"
-camino-tempfile = "1.1.1"
+camino-tempfile = "1.4.1"
 chrono = { version = "0.4.40", default-features = false, features = ["std"] }
 ciborium = "0.2.2"
 clap = { version = "4.5.31", features = ["cargo", "derive", "wrap_help"] }
@@ -32,15 +32,17 @@ flate2 = "1.0.35"
 futures-util = "0.3.31"
 hex = "0.4.3"
 hubtools = { git = "https://github.com/oxidecomputer/hubtools.git", rev = "2b1ef9b38d75563ea800baa3b17327eec17b1b7a" }
+iddqd = "0.4.6"
 jiff = "0.2.32"
 memchr = "2.7.4"
 proptest = "1.5.0"
 rats-corim = { git = "https://github.com/oxidecomputer/rats-corim.git", rev = "f0d5d5168d3d31487a56df32c676b0c6240bcc6b" }
-rawzip = "0.4.4"
+rawzip = "0.5.1"
 regex = "1.11.1"
-schemars = "0.8.21"
+reqwest = "0.13.4"
+schemars = "0.8.22"
 semver = { version = "1.0.25", features = ["serde"] }
-serde = { version = "1.0.218", features = ["derive"] }
+serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.139"
 sha2 = "0.11.0"
 slog = "2.7.0"
@@ -50,13 +52,13 @@ slog-term = "2.9.2"
 tar = "0.4.46"
 test-strategy = "0.4.0"
 thiserror = "2.0.12"
-tokio = "1.47.0"
+tokio = "1.47.2"
 tokio-test = "0.4.5"
 tough = { git = "https://github.com/oxidecomputer/tough", branch = "oxide/develop", version = "0.24.0" }
 tufaceous.path = "lib"
 tufaceous-artifact.path = "artifact"
 tufaceous-brand-metadata.path = "brand-metadata"
-url = "2.5.4"
+url = "2.5.7"
 
 [workspace.lints.clippy]
 pedantic = { level = "warn", priority = -1 }

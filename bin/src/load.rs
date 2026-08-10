@@ -6,9 +6,11 @@ use camino::Utf8PathBuf;
 use clap::Args;
 use clap::builder::ArgPredicate;
 use tufaceous::ExpirationEnforcement;
+use tufaceous::Repository;
 use tufaceous::RepositoryLoader;
 use tufaceous::error::Error;
 use tufaceous::error::ErrorKind;
+use url::Url;
 
 #[derive(Debug, Args)]
 #[cfg_attr(test, derive(PartialEq))]
@@ -45,11 +47,20 @@ pub struct LoadOptions {
         required_unless_present_any(["blindly_trust", "force_load"])
     )]
     trust_roots: Vec<Utf8PathBuf>,
+
+    /// Input repository path or HTTP URL
+    pub repo: Utf8PathBuf,
 }
 
 impl LoadOptions {
-    pub async fn loader(self) -> Result<RepositoryLoader, Error> {
-        let mut loader = RepositoryLoader::new();
+    pub async fn load(self) -> Result<Repository, Error> {
+        self.with_loader(RepositoryLoader::new()).await
+    }
+
+    pub async fn with_loader(
+        self,
+        mut loader: RepositoryLoader,
+    ) -> Result<Repository, Error> {
         for trust_root in self.trust_roots {
             let root =
                 tokio::fs::read(&trust_root).await.map_err(|source| {
@@ -64,12 +75,20 @@ impl LoadOptions {
         if self.blindly_trust {
             loader = loader.unsafe_blindly_trust_repo();
         }
-        Ok(loader)
+
+        if let Ok(url) = self.repo.as_str().parse::<Url>()
+            && matches!(url.scheme(), "http" | "https")
+        {
+            loader.load_zip_file_from_http(url, &crate::LOG).await
+        } else {
+            loader.load_zip_path(self.repo, &crate::LOG).await
+        }
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use camino::Utf8PathBuf;
     use clap::Parser;
 
     use crate::load::LoadOptions;
@@ -83,39 +102,47 @@ mod tests {
     #[test]
     fn test_force_load() {
         assert_eq!(
-            Args::try_parse_from(["", "-f"]).unwrap().inner,
+            Args::try_parse_from(["", "-f", "repo.zip"]).unwrap().inner,
             LoadOptions {
                 allow_expired: true,
                 blindly_trust: true,
                 force_load: true,
                 trust_roots: vec![],
+                repo: Utf8PathBuf::from("repo.zip"),
             }
         );
         // ... but they default to false if --force-load is not used:
         assert_eq!(
-            Args::try_parse_from(["", "-r", "/dev/null"]).unwrap().inner,
+            Args::try_parse_from(["", "-r", "/dev/null", "repo.zip"])
+                .unwrap()
+                .inner,
             LoadOptions {
                 allow_expired: false,
                 blindly_trust: false,
                 force_load: false,
                 trust_roots: vec!["/dev/null".into()],
+                repo: Utf8PathBuf::from("repo.zip"),
             }
         );
         // --force-load doesn't conflict with --trust-roots
         assert_eq!(
-            Args::try_parse_from(["", "-f", "-r", "/dev/null"]).unwrap().inner,
+            Args::try_parse_from(["", "-f", "-r", "/dev/null", "repo.zip"])
+                .unwrap()
+                .inner,
             LoadOptions {
                 allow_expired: true,
                 blindly_trust: true,
                 force_load: true,
                 trust_roots: vec!["/dev/null".into()],
+                repo: Utf8PathBuf::from("repo.zip"),
             }
         );
     }
 
     #[test]
     fn test_trust_roots_required() {
-        let error = Args::try_parse_from([""]).unwrap_err().to_string();
+        let error =
+            Args::try_parse_from(["", "repo.zip"]).unwrap_err().to_string();
         assert!(
             error.contains(
                 "the following required arguments were not provided:"
@@ -124,8 +151,8 @@ mod tests {
         assert!(error.contains("--trust-roots <TRUST_ROOTS>"));
 
         // ... but not if --blindly-trust or --force-load is set!
-        Args::try_parse_from(["", "--blindly-trust"]).unwrap();
-        Args::try_parse_from(["", "--force-load"]).unwrap();
+        Args::try_parse_from(["", "--blindly-trust", "repo.zip"]).unwrap();
+        Args::try_parse_from(["", "--force-load", "repo.zip"]).unwrap();
     }
 
     #[test]
@@ -135,6 +162,7 @@ mod tests {
             "--trust-roots",
             "/dev/null",
             "--blindly-trust",
+            "repo.zip",
         ])
         .unwrap_err()
         .to_string();

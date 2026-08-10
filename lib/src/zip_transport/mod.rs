@@ -53,6 +53,15 @@
 //   access to the technician port).
 //   https://docs.rs/tough/0.21.0/tough/struct.Limits.html
 
+macro_rules! try_archive_path {
+    ($result:expr, $kind:ident, $path:expr) => {
+        $crate::error::try_path!($result, $kind, archive_path: $path)
+    };
+}
+
+#[cfg(feature = "zip-http")]
+mod http_range_reader;
+
 use std::collections::HashMap;
 use std::fmt::Debug;
 use std::fs::File;
@@ -85,12 +94,8 @@ use url::Url;
 
 use crate::error::Error;
 use crate::error::ErrorKind;
-
-macro_rules! try_archive_path {
-    ($result:expr, $kind:ident, $path:expr) => {
-        $crate::error::try_path!($result, $kind, archive_path: $path)
-    };
-}
+#[cfg(feature = "zip-http")]
+use crate::zip_transport::http_range_reader::HttpRangeReader;
 
 // The length of the end-of-central-directory record if the comment is zero
 // bytes. Archives with a "comment" (data after the EOCD) are rejected.
@@ -136,7 +141,7 @@ impl<T: AsRef<[u8]> + Debug + Send + Sync + 'static> ZipTransport<Cursor<T>> {
                 source,
                 archive_path: None,
             })?;
-        Self::from_impl_blocking(archive.into_zip_archive(), None, None, log)
+        Self::from_impl_blocking(archive.into_cursor_archive(), None, None, log)
     }
 }
 
@@ -160,7 +165,8 @@ impl ZipTransport<FileReader> {
 
 impl<T: ReaderAt + Debug + Send + Sync + 'static> ZipTransport<T> {
     fn from_impl_blocking(
-        archive: ZipArchive<T>,
+        #[cfg_attr(not(feature = "zip-http"), expect(unused_mut))]
+        mut archive: ZipArchive<T>,
         archive_path: Option<Utf8PathBuf>,
         buffer: Option<Vec<u8>>,
         log: &Logger,
@@ -209,7 +215,32 @@ impl<T: ReaderAt + Debug + Send + Sync + 'static> ZipTransport<T> {
         }
 
         let mut ranges = Vec::new();
-        for RawEntry { raw_path, wayfinder } in all_entries {
+        #[cfg_attr(not(feature = "zip-http"), expect(unused_variables))]
+        for RawEntry { local_header_offset, raw_path, wayfinder } in all_entries
+        {
+            // HTTP optimizations:
+            // 1. rawzip re-reads the 30-byte local file header (without the
+            //    file name) several times, once each for `get_entry` and
+            //    `local_header`, and once each time we start reading from a
+            //    file. HttpRangeReader maintains a cache of local file headers
+            //    since they're pretty small, but we want to explicitly tell it
+            //    that a particular offset is a local file header.
+            // 2. In addition to reading the 30-byte local file header, rawzip
+            //    will read the file name that comes directly after as a
+            //    separate read operation. Since we know how long the file name
+            //    is supposed to be (according to the central directory), we can
+            //    hint to HttpRangeReader the full range so that it only needs
+            //    to make a single HTTP request.
+            #[cfg(feature = "zip-http")]
+            if let Some(reader) = (archive.get_mut() as &mut dyn std::any::Any)
+                .downcast_mut::<HttpRangeReader>()
+            {
+                reader.hint_local_header(
+                    local_header_offset,
+                    usize64!(raw_path.len()),
+                );
+            }
+
             let entry = try_archive_path!(
                 archive.get_entry(wayfinder),
                 ReadZipLocal,
@@ -279,25 +310,43 @@ impl<T: ReaderAt + Debug + Send + Sync + 'static> ZipTransport<T> {
             "url" => url.to_string(),
         ));
         crate::mpsc_stream::mpsc_stream(Some(log), move |tx| {
-            let mut reader = match self
+            let entry = match self
                 .inner
                 .archive
                 .get_entry(entry_data.wayfinder)
                 .map_err(ZipTransportError::from)
-                .and_then(|entry| match entry_data.compression_method {
-                    CompressionMethod::Store => Ok(entry.verifying_reader(
-                        Box::new(entry.reader()) as Box<dyn Read>,
-                    )),
-                    CompressionMethod::Deflate => Ok(entry.verifying_reader(
-                        Box::new(DeflateDecoder::new(entry.reader())),
-                    )),
-                    other => Err(ZipTransportError::CompressionMethod(other)),
-                }) {
-                Ok(reader) => reader,
+            {
+                Ok(entry) => entry,
                 Err(error) => {
                     return tx.blocking_send(Err(error));
                 }
             };
+            let mut reader =
+                match entry_data.compression_method {
+                    CompressionMethod::STORE => entry.verifying_reader(
+                        Box::new(entry.reader()) as Box<dyn Read>,
+                    ),
+                    CompressionMethod::DEFLATE => entry.verifying_reader(
+                        Box::new(DeflateDecoder::new(entry.reader()))
+                            as Box<dyn Read>,
+                    ),
+                    other => {
+                        return tx.blocking_send(Err(
+                            ZipTransportError::CompressionMethod(other),
+                        ));
+                    }
+                };
+
+            // HTTP optimization: Hint to HttpRangeReader the full range of the
+            // file to avoid making a request for each 8 KiB range.
+            #[cfg(feature = "zip-http")]
+            if let Some(reader) = (self.inner.archive.get_ref()
+                as &dyn std::any::Any)
+                .downcast_ref::<HttpRangeReader>()
+            {
+                let (start, end) = entry.compressed_data_range();
+                reader.hint_range(start..end);
+            }
 
             let mut buf = BytesMut::with_capacity(8192);
             loop {
@@ -416,6 +465,7 @@ impl Entry {
 
 #[derive(Debug)]
 struct RawEntry {
+    local_header_offset: u64,
     raw_path: Vec<u8>,
     wayfinder: ZipArchiveEntryWayfinder,
 }
@@ -423,6 +473,7 @@ struct RawEntry {
 impl<'a> From<&'a ZipFileHeaderRecord<'a>> for RawEntry {
     fn from(record: &'a ZipFileHeaderRecord<'a>) -> Self {
         Self {
+            local_header_offset: record.local_header_offset(),
             raw_path: record.file_path().as_bytes().to_vec(),
             wayfinder: record.wayfinder(),
         }

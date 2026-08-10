@@ -284,6 +284,27 @@ impl RepositoryLoader {
         Ok(repo)
     }
 
+    /// Load a Tufaceous-generated ZIP archive from an HTTP or HTTPS URL.
+    ///
+    /// This reads from the ZIP archive using [range requests], which the HTTP
+    /// server must support.
+    ///
+    /// If you are intending to read the entire repository, it is better to
+    /// create the HTTP request yourself and use [`Self::load_zip_stream`].
+    ///
+    /// [range requests]: https://developer.mozilla.org/en-US/docs/Web/HTTP/Guides/Range_requests
+    #[cfg(feature = "zip-http")]
+    pub async fn load_zip_file_from_http(
+        self,
+        url: Url,
+        log: &Logger,
+    ) -> Result<Repository, Error> {
+        let transport = ZipTransport::from_http_file(url.clone(), log).await?;
+        let mut repo = self.zip_base_urls().load(transport, log).await?;
+        repo.archive_path = Some(url.to_string().into());
+        Ok(repo)
+    }
+
     /// Load a repository from the configured metadata and targets base URLs
     /// using the given transport.
     pub async fn load(
