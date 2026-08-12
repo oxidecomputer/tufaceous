@@ -7,6 +7,7 @@ use std::ops::ControlFlow;
 use hubtools::Caboose;
 use hubtools::CabooseBuilder;
 use hubtools::HubrisArchiveBuilder;
+use hubtools::RawHubrisArchive;
 use tufaceous_artifact::ArtifactVersion;
 use tufaceous_artifact::ReadCabooseError;
 use tufaceous_artifact::RotBootloaderTags;
@@ -156,11 +157,15 @@ impl Input<BytesSource> {
         version: ArtifactVersion,
         interior_version: Option<&ArtifactVersion>,
     ) -> Result<Self, Error> {
-        let data = CabooseData {
+        let data = ArchiveData {
             board: &tags.rot_board,
             rkth: &tags.rot_rkth,
             commit: "this-is-a-fake-rot",
             version: interior_version.unwrap_or(&version),
+            image_name: Some(match tags.rot_slot {
+                RotSlot::A => "a",
+                RotSlot::B => "b",
+            }),
         };
         let source = data.generate_fake_archive()?;
         Ok(Input::Rot { source, tags, version })
@@ -171,11 +176,12 @@ impl Input<BytesSource> {
         version: ArtifactVersion,
         interior_version: Option<&ArtifactVersion>,
     ) -> Result<Self, Error> {
-        let data = CabooseData {
+        let data = ArchiveData {
             board: &tags.rot_board,
             rkth: &tags.rot_rkth,
             commit: "this-is-a-fake-rot-bootloader",
             version: interior_version.unwrap_or(&version),
+            image_name: None,
         };
         let source = data.generate_fake_archive()?;
         Ok(Input::RotBootloader { source, tags, version })
@@ -186,25 +192,27 @@ impl Input<BytesSource> {
         version: ArtifactVersion,
         interior_version: Option<&ArtifactVersion>,
     ) -> Result<Self, Error> {
-        let data = CabooseData {
+        let data = ArchiveData {
             board: &tags.sp_board,
             rkth: &None,
             commit: "this-is-a-fake-sp",
             version: interior_version.unwrap_or(&version),
+            image_name: Some("default"),
         };
         let source = data.generate_fake_archive()?;
         Ok(Input::Sp { source, name: tags.sp_board.clone(), tags, version })
     }
 }
 
-struct CabooseData<'a> {
+struct ArchiveData<'a> {
     board: &'a str,
     rkth: &'a Option<RotKeyTableHash>,
     commit: &'static str,
     version: &'a ArtifactVersion,
+    image_name: Option<&'static str>,
 }
 
-impl CabooseData<'_> {
+impl ArchiveData<'_> {
     fn generate_fake_archive(self) -> Result<BytesSource, Error> {
         let mut builder = CabooseBuilder::default()
             .board(self.board)
@@ -223,7 +231,19 @@ impl CabooseData<'_> {
         let vec = builder
             .build_to_vec()
             .map_err(ErrorKind::GenerateFakeHubrisArchive)?;
-        Ok(BytesSource::new(vec))
+
+        // If `image_name` is set, re-open the Hubris archive and add the
+        // `image-name` file.
+        Ok(BytesSource::new(if let Some(image_name) = self.image_name {
+            let mut archive = RawHubrisArchive::from_vec(vec)
+                .map_err(ErrorKind::GenerateFakeHubrisArchive)?;
+            archive
+                .add_file("image-name", image_name.as_bytes())
+                .map_err(ErrorKind::GenerateFakeHubrisArchive)?;
+            archive.to_vec().map_err(ErrorKind::GenerateFakeHubrisArchive)?
+        } else {
+            vec
+        }))
     }
 }
 
