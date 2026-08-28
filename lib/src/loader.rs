@@ -34,7 +34,7 @@ pub struct RepositoryLoader {
     metadata_base_url: Option<Url>,
     targets_base_url: Option<Url>,
     trust_store: TrustStore,
-    v1_compatibility: bool,
+    v1_compatibility_mode: V1CompatibilityMode,
 }
 
 #[derive(Debug, Clone)]
@@ -46,6 +46,69 @@ enum TrustStore {
 impl Default for TrustStore {
     fn default() -> Self {
         Self::Store(Vec::new())
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+#[non_exhaustive]
+pub enum V1CompatibilityMode {
+    /// Loading a v1-format repository will return an error.
+    #[default]
+    V2Only,
+
+    /// v1-format repositories can be loaded, but composite artifacts are
+    /// skipped.
+    ///
+    /// Use this mode if you do not require any OS phase 1 images, OS phase 2
+    /// images, ROT images, or control plane zones.
+    IgnoreCompositeArtifacts,
+
+    /// v1-format repositories can be loaded, and composite artifacts will
+    /// be hashed but not extracted.
+    ///
+    /// Use this mode if you need metadata information about all artifacts in
+    /// the repository but do not need to read OS phase 1 images, OS phase 2
+    /// images, or control plane zones.
+    ///
+    /// ROT images are included in the artifact set and can be read; it is
+    /// necessary to extract the images in order to determine the correct tag
+    /// values.
+    HashCompositeArtifacts,
+
+    /// v1-format repositories can be loaded, and composite artifacts will
+    /// be hashed and extracted.
+    ///
+    /// Use this mode if you need to be able to read any artifact in the
+    /// repository.
+    ExtractCompositeArtifacts,
+}
+
+impl V1CompatibilityMode {
+    pub(crate) fn should_read_v1(self) -> bool {
+        match self {
+            V1CompatibilityMode::V2Only => false,
+            V1CompatibilityMode::IgnoreCompositeArtifacts
+            | V1CompatibilityMode::HashCompositeArtifacts
+            | V1CompatibilityMode::ExtractCompositeArtifacts => true,
+        }
+    }
+
+    pub(crate) fn should_read_composite(self) -> bool {
+        match self {
+            V1CompatibilityMode::V2Only
+            | V1CompatibilityMode::IgnoreCompositeArtifacts => false,
+            V1CompatibilityMode::HashCompositeArtifacts
+            | V1CompatibilityMode::ExtractCompositeArtifacts => true,
+        }
+    }
+
+    pub(crate) fn should_extract_composite(self) -> bool {
+        match self {
+            V1CompatibilityMode::V2Only
+            | V1CompatibilityMode::IgnoreCompositeArtifacts
+            | V1CompatibilityMode::HashCompositeArtifacts => false,
+            V1CompatibilityMode::ExtractCompositeArtifacts => true,
+        }
     }
 }
 
@@ -135,13 +198,25 @@ impl RepositoryLoader {
 
     /// Enable compatibility with v1-format repositories.
     ///
-    /// If a v1-format repository is encountered, composite artifacts are
-    /// extracted into temporary files in [`std::env::temp_dir()`]. Artifacts
-    /// are not extracted in parallel to avoid unexpectedly using too many
-    /// resources. Reading a v1-format repository takes on the order of about 10
-    /// seconds on a 2025-era CPU.
+    /// If enabled and a v1-format repository is encountered,
+    /// composite artifacts are extracted into temporary files in
+    /// [`std::env::temp_dir()`]. Composite artifacts are read in parallel.
+    /// Composite artifact behavior can be futher controlled using
+    /// [`v1_compatibility_mode`][Self::v1_compatibility_mode].
     pub fn v1_compatibility(self, v1_compatibility: bool) -> Self {
-        Self { v1_compatibility, ..self }
+        self.v1_compatibility_mode(if v1_compatibility {
+            V1CompatibilityMode::ExtractCompositeArtifacts
+        } else {
+            V1CompatibilityMode::V2Only
+        })
+    }
+
+    /// Sets the compatibility mode when a v1-format repository is encountered.
+    pub fn v1_compatibility_mode(
+        self,
+        v1_compatibility_mode: V1CompatibilityMode,
+    ) -> Self {
+        Self { v1_compatibility_mode, ..self }
     }
 
     fn zip_base_urls(self) -> Self {
@@ -348,7 +423,7 @@ impl RepositoryLoader {
                         repo,
                         log,
                         trust_root,
-                        self.v1_compatibility,
+                        self.v1_compatibility_mode,
                     )
                     .await;
                 }

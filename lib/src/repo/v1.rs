@@ -3,7 +3,6 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use std::collections::BTreeMap;
-use std::collections::HashMap;
 use std::io::BufRead;
 use std::io::BufReader;
 use std::io::Read;
@@ -23,7 +22,6 @@ use futures_util::pin_mut;
 use hubtools::Caboose;
 use hubtools::RawHubrisArchive;
 use rawzip::FileReader;
-use rawzip::RangeReader;
 use rawzip::ReaderAt;
 use semver::Version;
 use serde::Deserialize;
@@ -34,6 +32,7 @@ use slog::info;
 use slog::o;
 use slog::warn;
 use tokio::sync::mpsc;
+use tokio::task::JoinSet;
 use tufaceous_artifact::Artifact;
 use tufaceous_artifact::ArtifactHash;
 use tufaceous_artifact::ArtifactSet;
@@ -47,10 +46,12 @@ use tufaceous_artifact::OsVariant;
 use tufaceous_artifact::ReadCabooseError;
 use tufaceous_artifact::RotSlot;
 use tufaceous_artifact::ZoneTags;
+use tufaceous_brand_metadata::Metadata;
 
 use crate::COSMO_PHASE_1_PATH;
 use crate::GIMLET_PHASE_1_PATH;
 use crate::PHASE_2_PATH;
+use crate::V1CompatibilityMode;
 use crate::error::DebugByteString;
 use crate::error::Error;
 use crate::error::ErrorKind;
@@ -63,22 +64,49 @@ use crate::repo::read_target_vec;
 use crate::repo::target_meta;
 use crate::util::ArtifactExt;
 
+macro_rules! read_target {
+    ($tuf_repo:expr, $target:expr) => {
+        match read_target($tuf_repo, &$target).await? {
+            Some(stream) => stream,
+            None => {
+                return Err(
+                    ErrorKind::TargetNotFound { target_name: $target }.into()
+                )
+            }
+        }
+    };
+}
+
 pub(super) struct PartialRepository {
     pub(super) system_version: Version,
+    pub(super) installinator_v1_document: Option<ArtifactHash>,
+    pub(super) inner: PartialRepositoryInner,
+}
+
+#[derive(Default)]
+pub(super) struct PartialRepositoryInner {
     pub(super) artifacts: ArtifactSet,
     pub(super) artifact_data: BTreeMap<Artifact, ArtifactData>,
-    pub(super) installinator_v1_document: Option<ArtifactHash>,
     pub(super) installinator_v1_artifacts: Vec<InstallinatorV1Artifact>,
 }
 
-impl PartialRepository {
-    fn insert(&mut self, artifact: Artifact, data: ArtifactData) {
+impl PartialRepositoryInner {
+    fn insert(&mut self, artifact: Artifact, data: Option<ArtifactData>) {
         self.artifacts.insert(artifact.clone());
-        self.artifact_data.insert(artifact, data);
+        if let Some(data) = data {
+            self.artifact_data.insert(artifact, data);
+        }
     }
 
     fn original_target_name(&self, artifact: &Artifact) -> Option<&str> {
         self.artifact_data.get(artifact).map(ArtifactData::original_target_name)
+    }
+
+    fn append(&mut self, other: Self) {
+        self.artifacts.extend(other.artifacts);
+        self.artifact_data.extend(other.artifact_data);
+        self.installinator_v1_artifacts
+            .extend(other.installinator_v1_artifacts);
     }
 }
 
@@ -89,6 +117,7 @@ impl PartialRepository {
 #[expect(clippy::too_many_lines)]
 pub(crate) async fn from_loaded(
     tuf_repo: &tough::Repository,
+    compatibility_mode: V1CompatibilityMode,
     log: &Logger,
 ) -> Result<Option<PartialRepository>, Error> {
     let Some(V1ArtifactSetSchema { system_version, artifacts: v1_artifacts }) =
@@ -99,12 +128,11 @@ pub(crate) async fn from_loaded(
 
     let mut partial = PartialRepository {
         system_version,
-        artifacts: ArtifactSet::default(),
-        artifact_data: BTreeMap::new(),
         installinator_v1_document: None,
-        installinator_v1_artifacts: Vec::new(),
+        inner: PartialRepositoryInner::default(),
     };
     let mut installinator_document = None;
+    let mut parallel = JoinSet::<Result<PartialRepositoryInner, Error>>::new();
     for V1Artifact { version, kind, target } in v1_artifacts {
         let (hash, length) = target_meta(tuf_repo, &target)?;
         let kind = match kind {
@@ -162,9 +190,11 @@ pub(crate) async fn from_loaded(
                     &target,
                     KnownArtifactTags::from_rot_bootloader_caboose,
                 )?;
-                if partial.artifacts.get_all(&tags).iter().any(|artifact| {
+                let artifacts = &partial.inner.artifacts;
+                if artifacts.get_all(&tags).iter().any(|artifact| {
                     if hash == artifact.hash && length == artifact.length {
                         let existing = partial
+                            .inner
                             .original_target_name(artifact)
                             .unwrap_or("???");
                         info!(
@@ -194,43 +224,71 @@ pub(crate) async fn from_loaded(
             V1KnownArtifactKind::GimletRot
             | V1KnownArtifactKind::PscRot
             | V1KnownArtifactKind::SwitchRot => {
-                CompositeArtifact::unpack(tuf_repo, target)
-                    .await?
-                    .read_rot(log, &mut partial, version)
-                    .await?;
+                let stream = read_target!(tuf_repo, target);
+                partial.inner = read_composite_artifact(
+                    partial.inner,
+                    CompositeArtifactKind::Rot,
+                    stream,
+                    target,
+                    version,
+                    compatibility_mode,
+                )
+                .await?;
                 continue;
             }
 
             V1KnownArtifactKind::Host => {
-                CompositeArtifact::unpack(tuf_repo, target)
-                    .await?
-                    .read_os_image(&mut partial, OsVariant::Host, &version)?;
+                let stream = read_target!(tuf_repo, target);
+                parallel.spawn(async move {
+                    read_composite_artifact(
+                        PartialRepositoryInner::default(),
+                        CompositeArtifactKind::Os(OsVariant::Host),
+                        stream,
+                        target,
+                        version,
+                        compatibility_mode,
+                    )
+                    .await
+                });
                 continue;
             }
             V1KnownArtifactKind::Trampoline => {
-                CompositeArtifact::unpack(tuf_repo, target)
-                    .await?
-                    .read_os_image(
-                        &mut partial,
-                        OsVariant::Recovery,
-                        &version,
-                    )?;
+                let stream = read_target!(tuf_repo, target);
+                parallel.spawn(async move {
+                    read_composite_artifact(
+                        PartialRepositoryInner::default(),
+                        CompositeArtifactKind::Os(OsVariant::Recovery),
+                        stream,
+                        target,
+                        version,
+                        compatibility_mode,
+                    )
+                    .await
+                });
                 continue;
             }
 
             V1KnownArtifactKind::ControlPlane => {
-                partial.installinator_v1_artifacts.push(
+                partial.inner.installinator_v1_artifacts.push(
                     InstallinatorV1Artifact {
-                        version,
+                        version: version.clone(),
                         hash,
                         length,
                         target_name: target.clone(),
                     },
                 );
-                CompositeArtifact::unpack(tuf_repo, target)
-                    .await?
-                    .read_control_plane(&mut partial)
-                    .await?;
+                let stream = read_target!(tuf_repo, target);
+                parallel.spawn(async move {
+                    read_composite_artifact(
+                        PartialRepositoryInner::default(),
+                        CompositeArtifactKind::ControlPlane,
+                        stream,
+                        target,
+                        version,
+                        compatibility_mode,
+                    )
+                    .await
+                });
                 continue;
             }
 
@@ -240,7 +298,7 @@ pub(crate) async fn from_loaded(
             // extracted.
             V1KnownArtifactKind::InstallinatorDocument => {
                 partial.installinator_v1_document = Some(hash);
-                partial.installinator_v1_artifacts.push(
+                partial.inner.installinator_v1_artifacts.push(
                     InstallinatorV1Artifact {
                         version: version.clone(),
                         hash,
@@ -254,10 +312,14 @@ pub(crate) async fn from_loaded(
         };
 
         let tags = tags.to_tags().map_err(ErrorKind::ConvertKnownTagsToMap)?;
-        partial.insert(
+        partial.inner.insert(
             Artifact { version, tags, hash, length },
-            ArtifactData::Target { target_name: target },
+            Some(ArtifactData::Target { target_name: target }),
         );
+    }
+
+    for result in parallel.join_all().await {
+        partial.inner.append(result?);
     }
 
     // If we found an Installinator document, generate a new one with the v2
@@ -269,54 +331,25 @@ pub(crate) async fn from_loaded(
 }
 
 #[derive(Debug, Clone)]
-pub(super) struct UnpackedArtifact {
-    pub(super) file: Arc<FileReader>,
-    pub(super) hash: ArtifactHash,
-    pub(super) length: u64,
+pub(super) struct Unpacked {
+    file: Arc<FileReader>,
+    pub(super) original_target_name: String,
+    inner_path: Utf8PathBuf,
 }
 
-impl UnpackedArtifact {
-    fn new_blocking(
-        reader: &mut dyn BufRead,
-        map_read_err: impl FnOnce(std::io::Error) -> ErrorKind,
-    ) -> Result<Self, Error> {
-        let mut file =
-            camino_tempfile::tempfile().map_err(ErrorKind::CreateTempFile)?;
-        let mut hasher = Sha256::new();
-        let mut length = 0u64;
-        loop {
-            let buf = match reader.fill_buf() {
-                Ok(buf) => buf,
-                Err(error) => return Err(map_read_err(error).into()),
-            };
-            if buf.is_empty() {
-                break;
-            }
-            let len = buf.len();
-            file.write_all(buf).map_err(|source| ErrorKind::WriteFile {
-                source,
-                path: None,
-            })?;
-            hasher.update(buf);
-            reader.consume(len);
-            length += usize64!(len);
-        }
-        let file = Arc::new(file.into());
-        let hash = ArtifactHash(hasher.finalize().0);
-        Ok(Self { file, hash, length })
-    }
-
-    pub(crate) fn stream(
+impl Unpacked {
+    pub(super) fn stream(
         self,
         log: &Logger,
-        original_target_name: &str,
-        inner_path: &Utf8Path,
+        artifact: &Artifact,
     ) -> impl Stream<Item = Result<Bytes, Error>> + 'static {
         let log = log.new(o!(
             "stream" => format!("{}::stream", std::any::type_name::<Self>()),
-            "original_target_name" => original_target_name.to_owned(),
-            "inner_path" => inner_path.to_string(),
+            "original_target_name" => self.original_target_name,
+            "inner_path" => self.inner_path.into_string(),
         ));
+        let hash = artifact.hash;
+        let length = artifact.length;
         crate::mpsc_stream::mpsc_stream(Some(log), move |tx| {
             type SendError = mpsc::error::SendError<Result<Bytes, Error>>;
 
@@ -347,9 +380,9 @@ impl UnpackedArtifact {
                 tx.blocking_send(Ok(bytes))?;
             }
 
-            let msg = if self.hash != ArtifactHash(hasher.finalize().into()) {
+            let msg = if hash != ArtifactHash(hasher.finalize().into()) {
                 "invalid checksum"
-            } else if self.length != bytes_read {
+            } else if length != bytes_read {
                 "invalid length"
             } else {
                 // correct checksum and length
@@ -378,238 +411,272 @@ fn caboose_tags(
     Ok(try_path!(f(&caboose), ReadCaboose, target_name))
 }
 
-#[derive(Debug)]
-struct CompositeArtifact {
-    entries: HashMap<Utf8PathBuf, UnpackedArtifact>,
-    original_target_name: String,
+#[derive(Clone, Copy)]
+enum CompositeArtifactKind {
+    ControlPlane,
+    Os(OsVariant),
+    Rot,
 }
 
-impl CompositeArtifact {
-    async fn unpack(
-        tuf_repo: &tough::Repository,
-        target_name: String,
-    ) -> Result<Self, Error> {
-        let stream =
-            read_target(tuf_repo, &target_name).await?.ok_or_else(|| {
-                ErrorKind::TargetNotFound { target_name: target_name.clone() }
-            })?;
-        pin_mut!(stream);
-
-        let (tx, rx) = mpsc::channel(1);
-        let target_name_clone = target_name.clone();
-        let task = tokio::task::spawn_blocking(move || {
-            let mut archive =
-                tar::Archive::new(GzDecoder::new(MpscReader::new(rx)));
-            let mut entries = HashMap::new();
-            for entry in archive.entries().map_err(|source| {
-                ErrorKind::ReadCompositeArtifact {
-                    source,
-                    target: target_name.clone(),
-                }
-            })? {
-                let (entry, path) = entry
-                    .and_then(|entry| {
-                        let path = entry.header().path()?.into_owned();
-                        let path = Utf8PathBuf::try_from(path)
-                            .map_err(FromPathBufError::into_io_error)?;
-                        Ok((entry, path))
-                    })
-                    .map_err(|source| ErrorKind::ReadCompositeArtifact {
-                        source,
-                        target: target_name.clone(),
-                    })?;
-                let mut entry = BufReader::new(entry);
-                let unpacked_artifact =
-                    UnpackedArtifact::new_blocking(&mut entry, |source| {
-                        ErrorKind::ReadCompositeArtifact {
-                            source,
-                            target: target_name.clone(),
-                        }
-                    })?;
-                entries.insert(path, unpacked_artifact);
-            }
-            Ok(Self { entries, original_target_name: target_name })
-        });
-
-        let mut stream_interrupted = false;
-        while let Some(item) = stream.try_next().await? {
-            let Ok(()) = tx.send(item).await else {
-                // The receiver hung up early. We are not allowed to return `Ok`
-                // from this function, otherwise we have not actually verified
-                // any of the data we just read against its hash.
-                stream_interrupted = true;
-                break;
-            };
-        }
-        drop(tx);
-        let result = task.await?;
-        if stream_interrupted && result.is_ok() {
-            // No, it isn't ok.
-            Err(ErrorKind::ReadCompositeArtifact {
-                source: std::io::Error::new(
-                    std::io::ErrorKind::Interrupted,
-                    "stream unexpectedly interrupted",
-                ),
-                target: target_name_clone,
-            }
-            .into())
-        } else {
-            result
-        }
+async fn read_composite_artifact(
+    partial: PartialRepositoryInner,
+    kind: CompositeArtifactKind,
+    stream: impl Stream<Item = Result<Bytes, Error>>,
+    target_name: String,
+    version: ArtifactVersion,
+    compatibility_mode: V1CompatibilityMode,
+) -> Result<PartialRepositoryInner, Error> {
+    if !compatibility_mode.should_read_composite() {
+        return Ok(partial);
     }
+    pin_mut!(stream);
+    let (tx, rx) = mpsc::channel(1);
+    let target_name_clone = target_name.clone();
+    let map_read_err = move |source| {
+        Error::from(ErrorKind::ReadCompositeArtifact {
+            source,
+            target: target_name_clone.clone(),
+        })
+    };
+    let map_read_err_clone = map_read_err.clone();
+    let task = tokio::task::spawn_blocking(move || {
+        read_composite_artifact_inner(
+            partial,
+            kind,
+            &target_name,
+            &version,
+            compatibility_mode,
+            MpscReader::new(rx),
+            &map_read_err,
+        )
+    });
 
-    async fn read_rot(
-        mut self,
-        log: &Logger,
-        partial: &mut PartialRepository,
-        version: ArtifactVersion,
-    ) -> Result<(), Error> {
-        for slot in [RotSlot::A, RotSlot::B] {
-            let path = Utf8PathBuf::from(match slot {
-                RotSlot::A => "archive-a.zip",
-                RotSlot::B => "archive-b.zip",
-            });
-            let Some(UnpackedArtifact { file, hash, length }) =
-                self.entries.remove(&path)
-            else {
-                continue;
-            };
+    let mut stream_interrupted = false;
+    while let Some(item) = stream.try_next().await? {
+        let Ok(()) = tx.send(item).await else {
+            // The receiver hung up early. We are not allowed to return `Ok`
+            // from this function, otherwise we have not actually verified
+            // any of the data we just read against its hash.
+            stream_interrupted = true;
+            break;
+        };
+    }
+    drop(tx);
+    let result = task.await?;
+    if stream_interrupted && result.is_ok() {
+        // No, it isn't ok.
+        Err(map_read_err_clone(std::io::Error::new(
+            std::io::ErrorKind::Interrupted,
+            "stream unexpectedly interrupted",
+        )))
+    } else {
+        result
+    }
+}
 
-            let mut reader = RangeReader::new(file.clone(), 0..length);
-            let image = tokio::task::spawn_blocking(move || {
-                let capacity = usize::try_from(length).unwrap_or_default();
-                let mut vec = Vec::with_capacity(capacity);
-                reader.read_to_end(&mut vec).map(|_| vec).map_err(|source| {
-                    Error::from(ErrorKind::ReadFile { source, path: None })
-                })
+fn read_composite_artifact_inner(
+    mut partial: PartialRepositoryInner,
+    kind: CompositeArtifactKind,
+    target_name: &str,
+    version: &ArtifactVersion,
+    compatibility_mode: V1CompatibilityMode,
+    reader: MpscReader,
+    map_read_err: &dyn Fn(std::io::Error) -> Error,
+) -> Result<PartialRepositoryInner, Error> {
+    let mut archive = tar::Archive::new(GzDecoder::new(reader));
+    for entry in archive.entries().map_err(&map_read_err)? {
+        let (mut entry, path) = entry
+            .and_then(|entry| {
+                let path = entry.header().path()?.into_owned();
+                let path = Utf8PathBuf::try_from(path)
+                    .map_err(FromPathBufError::into_io_error)?;
+                Ok((entry, path))
             })
-            .await??;
-
-            let tags = caboose_tags(
-                image,
-                &format!("{}/{path}", self.original_target_name),
-                |caboose| KnownArtifactTags::from_rot_caboose(caboose, slot),
-            )?;
-            if partial.artifacts.get_all(&tags).iter().any(|artifact| {
-                if hash == artifact.hash && length == artifact.length {
-                    let existing =
-                        partial.original_target_name(artifact).unwrap_or("???");
-                    info!(
-                        log,
-                        "skipping duplicate RoT image";
-                        "existing_target" => &existing,
-                        "skipped_target" => &self.original_target_name,
-                        "skipped_inner_file" => &path.as_str(),
-                    );
-                    true
-                } else {
-                    false
+            .map_err(&map_read_err)?;
+        let virtual_path = Utf8Path::new(&target_name).join(&path);
+        let (tags, version, hash, length, file) = match kind {
+            CompositeArtifactKind::ControlPlane => {
+                if !path.starts_with("zones/") {
+                    continue;
                 }
-            }) {
-                continue;
+                let reader = BufReader::new(ReplayReader::new(entry));
+                let mut archive = tar::Archive::new(GzDecoder::new(reader));
+                let layer_info = try_path!(
+                    Metadata::read_from_tar(&mut archive)
+                        .and_then(Metadata::into_layer_info),
+                    ReadZoneOxideJson,
+                    path
+                );
+                let tags =
+                    ZoneTags { zone_name: layer_info.pkg.clone() }.into();
+                let mut file = MaybeTempFile::new(compatibility_mode)?;
+                let mut reader = archive
+                    .into_inner()
+                    .into_inner()
+                    .into_inner()
+                    .start_replay();
+                let (hash, length) =
+                    copy_and_hash(&mut reader, &mut file, &map_read_err)?;
+                (tags, layer_info.version.clone(), hash, length, file)
             }
-            partial.insert(
-                Artifact {
-                    version: version.clone(),
-                    tags: tags
-                        .to_tags()
-                        .map_err(ErrorKind::ConvertKnownTagsToMap)?,
-                    hash,
-                    length,
-                },
-                ArtifactData::V1Unpacked {
-                    file,
-                    original_target_name: self.original_target_name.clone(),
-                    inner_path: path,
-                },
-            );
+            CompositeArtifactKind::Os(os_variant) => {
+                let Ok(path) = path.strip_prefix("image") else {
+                    continue;
+                };
+                let tags: KnownArtifactTags = match path.as_str() {
+                    COSMO_PHASE_1_PATH => {
+                        OsPhase1Tags { os_board: OsBoard::COSMO, os_variant }
+                            .into()
+                    }
+                    GIMLET_PHASE_1_PATH => {
+                        OsPhase1Tags { os_board: OsBoard::GIMLET, os_variant }
+                            .into()
+                    }
+                    PHASE_2_PATH => OsPhase2Tags { os_variant }.into(),
+                    _ => continue,
+                };
+                let mut file = MaybeTempFile::new(compatibility_mode)?;
+                let (hash, length) =
+                    copy_and_hash(&mut entry, &mut file, &map_read_err)?;
+                (tags, version.clone(), hash, length, file)
+            }
+            CompositeArtifactKind::Rot => {
+                let slot = match path.as_str() {
+                    "archive-a.zip" => RotSlot::A,
+                    "archive-b.zip" => RotSlot::B,
+                    _ => continue,
+                };
+                // Regardless of `compatibility_mode` (which can either be
+                // `HashCompositeArtifacts` or `ExtractCompositeArtifacts`),
+                // we need to read the artifact into memory in order to read
+                // tags from the caboose.
+                let length_hint = entry.size().try_into().unwrap_or_default();
+                let mut image = Vec::with_capacity(length_hint);
+                let (hash, length) =
+                    copy_and_hash(&mut entry, &mut image, &map_read_err)?;
+                let mut file = MaybeTempFile::new(compatibility_mode)?;
+                try_path!(file.write_all(&image), WriteFile, None);
+                let tags =
+                    caboose_tags(image, virtual_path.as_str(), |caboose| {
+                        KnownArtifactTags::from_rot_caboose(caboose, slot)
+                    })?;
+                (tags, version.clone(), hash, length, file)
+            }
+        };
+        let artifact = Artifact {
+            version,
+            tags: tags.to_tags().map_err(ErrorKind::ConvertKnownTagsToMap)?,
+            hash,
+            length,
+        };
+        let data = file.0.map(|file| {
+            ArtifactData::V1Unpacked(Unpacked {
+                file: Arc::new(file.into()),
+                original_target_name: target_name.to_owned(),
+                inner_path: path,
+            })
+        });
+        partial.insert(artifact, data);
+    }
+    Ok(partial)
+}
+
+fn copy_and_hash(
+    reader: &mut dyn Read,
+    writer: &mut dyn Write,
+    map_read_err: &dyn Fn(std::io::Error) -> Error,
+) -> Result<(ArtifactHash, u64), Error> {
+    let mut hasher = Sha256::new();
+    let mut length = 0u64;
+    let mut buf = [0; 8192];
+    loop {
+        let n = reader.read(&mut buf).map_err(map_read_err)?;
+        let slice = &buf[..n];
+        if slice.is_empty() {
+            break;
         }
-        Ok(())
+        try_path!(writer.write_all(slice), WriteFile, None);
+        hasher.update(slice);
+        length += usize64!(n);
+    }
+    Ok((ArtifactHash(hasher.finalize().0), length))
+}
+
+struct MaybeTempFile(Option<std::fs::File>);
+
+impl MaybeTempFile {
+    fn new(compatibility_mode: V1CompatibilityMode) -> Result<Self, Error> {
+        if compatibility_mode.should_extract_composite() {
+            let file = camino_tempfile::tempfile()
+                .map_err(ErrorKind::CreateTempFile)?;
+            Ok(Self(Some(file)))
+        } else {
+            Ok(Self(None))
+        }
+    }
+}
+
+impl Write for MaybeTempFile {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        match &mut self.0 {
+            Some(file) => file.write(buf),
+            None => Ok(buf.len()),
+        }
     }
 
-    fn read_os_image(
-        mut self,
-        partial: &mut PartialRepository,
-        os_variant: OsVariant,
-        version: &ArtifactVersion,
-    ) -> Result<(), Error> {
-        for (file_name, tags) in [
-            (
-                COSMO_PHASE_1_PATH,
-                KnownArtifactTags::OsPhase1(OsPhase1Tags {
-                    os_variant,
-                    os_board: OsBoard::COSMO,
-                }),
-            ),
-            (
-                GIMLET_PHASE_1_PATH,
-                KnownArtifactTags::OsPhase1(OsPhase1Tags {
-                    os_variant,
-                    os_board: OsBoard::GIMLET,
-                }),
-            ),
-            (
-                PHASE_2_PATH,
-                KnownArtifactTags::OsPhase2(OsPhase2Tags { os_variant }),
-            ),
-        ] {
-            let path = Utf8PathBuf::from(format!("image/{file_name}"));
-            let Some(entry) = self.entries.remove(&path) else {
-                continue;
-            };
-            partial.insert(
-                Artifact {
-                    version: version.clone(),
-                    tags: tags
-                        .to_tags()
-                        .map_err(ErrorKind::ConvertKnownTagsToMap)?,
-                    hash: entry.hash,
-                    length: entry.length,
-                },
-                ArtifactData::V1Unpacked {
-                    file: entry.file,
-                    original_target_name: self.original_target_name.clone(),
-                    inner_path: path,
-                },
-            );
+    fn write_all(&mut self, buf: &[u8]) -> std::io::Result<()> {
+        match &mut self.0 {
+            Some(file) => file.write_all(buf),
+            None => Ok(()),
         }
-        Ok(())
     }
 
-    async fn read_control_plane(
-        self,
-        partial: &mut PartialRepository,
-    ) -> Result<(), Error> {
-        for (tar_path, UnpackedArtifact { file, hash, length }) in self.entries
-        {
-            if !tar_path.starts_with("zones/") {
-                continue;
-            }
-            let (file, layer_info) = crate::util::read_zone_layer_info(
-                RangeReader::new(file, 0..length),
-                Utf8Path::new(&self.original_target_name).join(&tar_path),
-            )
-            .await?;
-            let file = file.into_inner();
-            let tags =
-                KnownArtifactTags::Zone(ZoneTags { zone_name: layer_info.pkg });
-            partial.insert(
-                Artifact {
-                    version: layer_info.version,
-                    tags: tags
-                        .to_tags()
-                        .map_err(ErrorKind::ConvertKnownTagsToMap)?,
-                    hash,
-                    length,
-                },
-                ArtifactData::V1Unpacked {
-                    file,
-                    original_target_name: self.original_target_name.clone(),
-                    inner_path: tar_path,
-                },
-            );
+    fn flush(&mut self) -> std::io::Result<()> {
+        match &mut self.0 {
+            Some(file) => file.flush(),
+            None => Ok(()),
         }
-        Ok(())
+    }
+}
+
+enum ReplayReader<R: Read> {
+    Record { record: BytesMut, inner: R },
+    Replay { recorded: Bytes, inner: R },
+}
+
+impl<R: Read> ReplayReader<R> {
+    fn new(inner: R) -> Self {
+        Self::Record { record: BytesMut::new(), inner }
+    }
+
+    fn start_replay(self) -> Self {
+        match self {
+            Self::Record { record, inner } => {
+                Self::Replay { recorded: record.freeze(), inner }
+            }
+            Self::Replay { .. } => self,
+        }
+    }
+}
+
+impl<R: Read> Read for ReplayReader<R> {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        match self {
+            ReplayReader::Record { record, inner } => {
+                let n = inner.read(buf)?;
+                record.extend_from_slice(&buf[..n]);
+                Ok(n)
+            }
+            ReplayReader::Replay { recorded, inner } => {
+                if recorded.is_empty() {
+                    inner.read(buf)
+                } else {
+                    let n = recorded.len().min(buf.len());
+                    recorded.copy_to_slice(&mut buf[..n]);
+                    Ok(n)
+                }
+            }
+        }
     }
 }
 
@@ -654,10 +721,10 @@ async fn generate_installinator_document(
     original_target_name: String,
 ) -> Result<(), Error> {
     let mut document = InstallinatorDocument::empty(version.clone());
-    for (artifact, data) in &partial.artifact_data {
+    for (artifact, data) in &partial.inner.artifact_data {
         let target_name = match data {
             ArtifactData::Target { target_name } => target_name,
-            ArtifactData::V1Unpacked { inner_path, .. } => inner_path.as_str(),
+            ArtifactData::V1Unpacked(unpacked) => unpacked.inner_path.as_str(),
         };
         if let Some(installinator) = artifact.to_installinator(target_name) {
             document.artifacts.insert(installinator);
@@ -667,27 +734,31 @@ async fn generate_installinator_document(
     let mut json = serde_json::to_string_pretty(&document)
         .map_err(ErrorKind::SerializeInstallinator)?;
     json.push('\n');
-    let unpacked_artifact = tokio::task::spawn_blocking(move || {
-        UnpackedArtifact::new_blocking(&mut json.as_bytes(), |_error| {
-            unreachable!("Read::read for &[u8] does not return an error")
-        })
+    let mut file =
+        camino_tempfile::tempfile().map_err(ErrorKind::CreateTempFile)?;
+    let (file, hash, length) = tokio::task::spawn_blocking(move || {
+        let (hash, length) =
+            copy_and_hash(&mut json.as_bytes(), &mut file, &|_source| {
+                unreachable!("Read::read for &[u8] does not return an error")
+            })?;
+        Ok::<_, Error>((file, hash, length))
     })
     .await??;
 
-    partial.insert(
+    partial.inner.insert(
         Artifact {
             version,
             tags: KnownArtifactTags::InstallinatorDocument
                 .to_tags()
                 .map_err(ErrorKind::ConvertKnownTagsToMap)?,
-            hash: unpacked_artifact.hash,
-            length: unpacked_artifact.length,
+            hash,
+            length,
         },
-        ArtifactData::V1Unpacked {
-            file: unpacked_artifact.file,
+        Some(ArtifactData::V1Unpacked(Unpacked {
+            file: Arc::new(file.into()),
             original_target_name,
             inner_path: "v2.json".into(),
-        },
+        })),
     );
     Ok(())
 }

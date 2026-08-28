@@ -29,17 +29,25 @@ use crate::error::try_path;
 impl Input<TargetSource<'static>> {
     pub(crate) async fn zone_image(path: Utf8PathBuf) -> Result<Self, Error> {
         let file =
-            try_path!(tokio::fs::File::open(&path).await, OpenFile, path);
+            try_path!(tokio::fs::File::open(&path).await, OpenFile, path)
+                .into_std()
+                .await;
         let file_name = path
             .file_name()
             .expect("a path to an opened file must have a file name")
             .to_string();
-        let (file, layer_info) = crate::util::read_zone_layer_info(
-            file.into_std().await,
-            path.clone(),
-        )
-        .await?;
-        let source = FileSource::from_file(file, path);
+        let (source, layer_info) = tokio::task::spawn_blocking(move || {
+            let mut archive = tar::Archive::new(GzDecoder::new(file));
+            let layer_info = try_path!(
+                Metadata::read_from_tar(&mut archive)
+                    .and_then(Metadata::into_layer_info),
+                ReadZoneOxideJson,
+                path
+            );
+            let file = archive.into_inner().into_inner();
+            Ok::<_, Error>((FileSource::from_file(file, path), layer_info))
+        })
+        .await??;
         Ok(Self::Zone {
             source: source.into(),
             file_name,

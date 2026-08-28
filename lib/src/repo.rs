@@ -15,7 +15,6 @@ use camino::Utf8Path;
 use camino::Utf8PathBuf;
 use futures_util::Stream;
 use futures_util::TryStreamExt;
-use rawzip::FileReader;
 use semver::Version;
 use serde::de::DeserializeOwned;
 use slog::Logger;
@@ -33,6 +32,7 @@ use tufaceous_artifact::Metadata;
 use tufaceous_artifact::artifact_set::GetError;
 
 use crate::RepositoryLoader;
+use crate::V1CompatibilityMode;
 use crate::error::Error;
 use crate::error::ErrorKind;
 pub use crate::repo::check::CheckProblem;
@@ -120,25 +120,28 @@ impl Repository {
         tuf_repo: tough::Repository,
         log: &Logger,
         trust_root: Vec<u8>,
-        v1_compatibility: bool,
+        v1_compatibility_mode: V1CompatibilityMode,
     ) -> Result<Self, Error> {
         let Some(ArtifactSetSchema { system_version, artifacts, metadata }) =
             read_target_json(&tuf_repo, ArtifactSetSchema::TARGET_NAME).await?
         else {
-            if v1_compatibility
-                && let Some(partial) = v1::from_loaded(&tuf_repo, log).await?
+            if v1_compatibility_mode.should_read_v1()
+                && let Some(partial) =
+                    v1::from_loaded(&tuf_repo, v1_compatibility_mode, log)
+                        .await?
             {
                 return Ok(Repository {
                     log: log.clone(),
                     tuf_repo,
                     trust_root,
                     system_version: partial.system_version,
-                    artifacts: partial.artifacts,
-                    artifact_data: partial.artifact_data,
+                    artifacts: partial.inner.artifacts,
+                    artifact_data: partial.inner.artifact_data,
                     metadata: BTreeMap::new(),
                     installinator_v1_document: partial
                         .installinator_v1_document,
                     installinator_v1_artifacts: partial
+                        .inner
                         .installinator_v1_artifacts,
                     archive_path: None,
                     archive_sha256: None,
@@ -255,21 +258,8 @@ impl Repository {
             ArtifactData::Target { target_name } => {
                 self.read_target(target_name).await
             }
-            ArtifactData::V1Unpacked {
-                file,
-                original_target_name,
-                inner_path,
-            } => {
-                let unpacked = v1::UnpackedArtifact {
-                    file: file.clone(),
-                    hash: artifact.hash,
-                    length: artifact.length,
-                };
-                Ok(Box::pin(unpacked.stream(
-                    &self.log,
-                    original_target_name,
-                    inner_path,
-                )))
+            ArtifactData::V1Unpacked(unpacked) => {
+                Ok(Box::pin(unpacked.clone().stream(&self.log, artifact)))
             }
         }
     }
@@ -426,19 +416,15 @@ enum ArtifactData {
     Target { target_name: String },
     /// The artifact was unpacked from a composite artifact in a v1 repository,
     /// and is read from a temporary file on disk.
-    V1Unpacked {
-        file: Arc<FileReader>,
-        original_target_name: String,
-        inner_path: Utf8PathBuf,
-    },
+    V1Unpacked(v1::Unpacked),
 }
 
 impl ArtifactData {
     fn original_target_name(&self) -> &str {
         match self {
             ArtifactData::Target { target_name } => target_name,
-            ArtifactData::V1Unpacked { original_target_name, .. } => {
-                original_target_name
+            ArtifactData::V1Unpacked(unpacked) => {
+                &unpacked.original_target_name
             }
         }
     }
