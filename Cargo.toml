@@ -31,7 +31,7 @@ expectorate = "1.1.0"
 flate2 = "1.0.35"
 futures-util = "0.3.31"
 hex = "0.4.3"
-hubtools = { git = "https://github.com/oxidecomputer/hubtools.git", rev = "2b1ef9b38d75563ea800baa3b17327eec17b1b7a" }
+hubtools = { git = "https://github.com/oxidecomputer/hubtools.git", rev = "87881bd389025f7c5692c0be153452c11ae3312e" }
 jiff = "0.2.32"
 memchr = "2.7.4"
 proptest = "1.5.0"
