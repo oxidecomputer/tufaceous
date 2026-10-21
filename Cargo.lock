@@ -201,6 +201,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "72b3254f16251a8381aa12e40e3c4d2f0199f8c6508fbecb9d91f575e0fbb8c6"
 
 [[package]]
+name = "base64"
+version = "0.23.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ac07cdecf99051d9a5238b80f35af32cdeba5b336e55d957b318b50137e18da5"
+
+[[package]]
 name = "base64ct"
 version = "1.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -313,10 +319,11 @@ checksum = "79296716171880943b8470b5f8d03aa55eb2e645a4874bdbb28adb49162e012c"
 
 [[package]]
 name = "byte-wrapper"
-version = "0.1.0"
+version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "86b041d2328ab2041b4e9d8f21e3b0b5b8bb61e9a23bb9171387771c314ea340"
+checksum = "f0eb9a5ab28ca4c6542eb083379b3bc482cbb3c1a863ce46c6b2b108e118cb84"
 dependencies = [
+ "base64 0.23.1",
  "hex",
  "schemars 0.8.22",
  "serde_core",

@@ -18,7 +18,7 @@ anyhow = "1.0.96"
 assert_cmd = "2.0.16"
 atomicwrites = "0.4.4"
 aws-lc-rs = "1.16.2"
-byte-wrapper = { version = "0.1.0", default-features = false, features = ["alloc", "hex", "serde"] }
+byte-wrapper = { version = "0.2.1", default-features = false, features = ["alloc", "hex", "serde"] }
 bytes = "1.11.1"
 camino = "1.1.9"
 camino-tempfile = "1.1.1"
